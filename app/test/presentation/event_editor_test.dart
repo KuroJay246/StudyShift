@@ -10,6 +10,7 @@ import 'package:shift_study/data/schedule_repository.dart';
 import 'package:shift_study/data/preferences_repository.dart';
 import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/domain/academic_term.dart';
+import 'package:shift_study/domain/supervisor_profile.dart';
 import 'package:shift_study/domain/work_code_legend.dart';
 import 'package:shift_study/platform/device_time_zone.dart';
 import 'package:shift_study/platform/local_reminders.dart';
@@ -171,7 +172,7 @@ void main() {
       (
         ScheduleKind.work,
         [
-          'Shift details',
+          'Essential details',
           'Date and time',
           'Work details',
           'Additional details',
@@ -179,7 +180,7 @@ void main() {
       ),
       (
         ScheduleKind.classSession,
-        ['Class details', 'Date and time', 'Additional details'],
+        ['Essential details', 'Date and time', 'Additional details'],
       ),
     ]) {
       await tester.pumpWidget(
@@ -215,6 +216,84 @@ void main() {
         }
       }
     }
+  });
+
+  testWidgets('work form can select a saved supervisor profile', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(supervisorRepositoryProvider)
+        .save(
+          const SupervisorProfile(
+            id: 'synthetic-supervisor-profile',
+            name: 'Synthetic Acting Supervisor',
+            type: SupervisorType.acting,
+            phone: '+1 246 555 0100',
+          ),
+        );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.work),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Additional details'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Additional details'));
+    await tester.pumpAndSettle();
+
+    final selector = find.byKey(const ValueKey('saved-supervisor-selector'));
+    await tester.scrollUntilVisible(
+      selector,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(selector);
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Synthetic Acting Supervisor'));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<TextFormField>(
+            find.byKey(const ValueKey('supervisor-name-field')),
+          )
+          .controller
+          ?.text,
+      'Synthetic Acting Supervisor',
+    );
+    expect(
+      tester
+          .widget<TextFormField>(
+            find.byKey(const ValueKey('supervisor-phone-field')),
+          )
+          .controller
+          ?.text,
+      '+1 246 555 0100',
+    );
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(

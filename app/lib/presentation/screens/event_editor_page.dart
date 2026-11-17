@@ -663,11 +663,7 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
             ),
             children: [
               _sectionHeading(
-                widget.kind == ScheduleKind.work
-                    ? 'Shift details'
-                    : widget.kind == ScheduleKind.classSession
-                    ? 'Class details'
-                    : 'Event details',
+                'Essential details',
                 widget.kind == ScheduleKind.work
                     ? Icons.work_outline_rounded
                     : widget.kind == ScheduleKind.classSession

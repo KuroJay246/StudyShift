@@ -5,8 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shift_study/application/dependencies.dart';
 import 'package:shift_study/data/schedule_database.dart';
+import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/domain/supervisor_profile.dart';
 import 'package:shift_study/presentation/app_theme.dart';
+import 'package:shift_study/presentation/screens/event_editor_page.dart';
 import 'package:shift_study/presentation/screens/work_code_legend_page.dart';
 
 void main() {
@@ -60,6 +62,38 @@ void main() {
     expect(find.text('QA Permanent Supervisor'), findsOneWidget);
     expect(find.text('Acting supervisors'), findsOneWidget);
     expect(find.text('QA Acting Supervisor'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Android labels event fields as essential details', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(1.3)),
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: const EventEditorPage(kind: ScheduleKind.work),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Essential details'), findsOneWidget);
+    expect(find.text('Date and time'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }
