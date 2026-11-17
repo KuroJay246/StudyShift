@@ -353,6 +353,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   }
 
   Future<void> _selectOcrFile({bool examTimetable = false}) async {
+    if (!await _confirmOcrMetrics()) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -422,6 +423,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   }
 
   Future<void> _selectRosterTable() async {
+    if (!await _confirmOcrMetrics()) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -482,6 +484,33 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<bool> _confirmOcrMetrics() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Before using OCR'),
+        content: const Text(
+          'The selected file and recognized text stay on this device. '
+          'Google ML Kit may send technical diagnostics and usage or '
+          'performance metrics, such as device and app details or processing '
+          'sizes. This applies only to this OCR import. Continue only if you '
+          'are comfortable with that.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Continue once'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
   }
 
   Future<void> _chooseRosterFirstDate() async {

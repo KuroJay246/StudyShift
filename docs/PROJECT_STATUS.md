@@ -2,7 +2,7 @@
 
 **Updated:** 2026-11-17
 **Repository:** `main`
-**Current app version:** `0.1.0+16329` (development build; not a release)
+**Current app version:** `0.1.0+20346` (personal debug build; not a release)
 
 This report distinguishes implementation and emulator evidence from physical-device and release acceptance. Percentages below are planning estimates, not pass rates or a claim that the app is production-ready.
 
@@ -23,12 +23,13 @@ This report distinguishes implementation and emulator evidence from physical-dev
 - Android native unit suite: **55 passed**, with no failures or errors.
 - Navigation profile: **3/3 integration tests passed**, including 24 warmed page swipes across three rounds. UI-build p90 stayed under the 16.67 ms frame budget. Emulator raster timings were noisy, so this is not proof of physical-device smoothness.
 - Android permission-manifest guard passed the current release manifest and rejected a temporary manifest with an unauthorized contacts permission.
-- Current emulator package: Android 16 / API 36, development build `0.1.0+16329`. The empty-state review did not add or alter schedule entries.
+- Current emulator package: Android 16 / API 36, personal debug build `0.1.0+20346`. It launched to Today with the existing empty emulator schedule; no schedule entries were added or changed. Phone acceptance is paused while the Galaxy is disconnected.
+- OCR import notice: the current build requires an explicit one-time confirmation before opening either OCR picker. The focused import-screen suite passed **12/12**, including cancel-before-picker and confirmed OCR import paths; `flutter analyze --no-pub` reported no issues.
 - Public source snapshot is on `origin/main`. Private device notes, owner schedule data, signing material, generated APKs, and runtime screenshots are excluded.
 
 ## Open gates
 
-1. **Galaxy acceptance:** The physical Galaxy was not connected to ADB during the latest check. A Wi-Fi ADB advertisement was visible, but its endpoint refused the connection. Reconnect by USB or re-enable Wireless debugging on the same network before device acceptance. The owner's existing roster must remain unchanged.
+1. **Galaxy acceptance:** The physical Galaxy is disconnected. Reconnect it before device acceptance. The owner's existing roster must remain unchanged.
 2. **OCR privacy:** The current on-device ML Kit path reports performance/utilization metrics. That behavior has not been shown to meet the project's no-telemetry rule. An offline alternative also needs a current, security-reviewed Android build and model review.
 3. **Signing and update:** Release key custody remains owner-controlled. A signed APK and retained-data update test are not available until that gate is completed.
 

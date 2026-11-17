@@ -145,6 +145,7 @@ END:VCALENDAR''';
     await tester.pumpAndSettle();
     await tester.tap(find.text('Read an exam timetable'));
     await tester.pumpAndSettle();
+    await _acceptOcrNotice(tester);
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
 
@@ -162,6 +163,45 @@ END:VCALENDAR''';
     expect(imported.single.deadlineType, DeadlineType.examination);
     expect(imported.single.code, 'BIOL1100');
     expect(imported.single.importProvenance!.sourceName, 'synthetic-exams.pdf');
+  });
+
+  testWidgets('canceling OCR privacy notice never opens the file picker', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    var ocrCalls = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(fileChannel, (call) async {
+          if (call.method == 'openOcrImport') ocrCalls++;
+          return null;
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(fileChannel, null);
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [scheduleDatabaseProvider.overrideWithValue(database)],
+        child: const MaterialApp(
+          home: SettingsPage(mode: ScheduleMode.workAndSchool),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import calendar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Read a PDF or schedule image offline'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Before using OCR'), findsOneWidget);
+    expect(find.textContaining('technical diagnostics'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+
+    expect(ocrCalls, 0);
+    expect(find.text('Before using OCR'), findsNothing);
   });
 
   testWidgets('roster table keeps unknown codes out of saved shift drafts', (
@@ -253,6 +293,7 @@ END:VCALENDAR''';
     await tester.ensureVisible(find.text('Read a roster table'));
     await tester.tap(find.text('Read a roster table'));
     await tester.pumpAndSettle();
+    await _acceptOcrNotice(tester);
     await tester.drag(find.byType(ListView), const Offset(0, -700));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.textContaining('Choose first date'));
@@ -331,6 +372,7 @@ END:VCALENDAR''';
     await tester.pumpAndSettle();
     await tester.tap(find.text('Read an exam timetable'));
     await tester.pumpAndSettle();
+    await _acceptOcrNotice(tester);
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Add 1 selected'));
@@ -341,6 +383,7 @@ END:VCALENDAR''';
     await tester.pumpAndSettle();
     await tester.tap(find.text('Read an exam timetable'));
     await tester.pumpAndSettle();
+    await _acceptOcrNotice(tester);
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
 
@@ -404,6 +447,7 @@ END:VCALENDAR''';
     await tester.pumpAndSettle();
     await tester.tap(find.text('Read an exam timetable'));
     await tester.pumpAndSettle();
+    await _acceptOcrNotice(tester);
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
 
@@ -921,4 +965,10 @@ WORK-SPLIT-7,2026-11-10,Sample work shift,shift,14:00,18:00,America/Barbados
     expect(saved.contactPhone, '+12465550101');
     expect(saved.importProvenance!.sourceName, 'synthetic-roster.csv');
   });
+}
+
+Future<void> _acceptOcrNotice(WidgetTester tester) async {
+  expect(find.text('Before using OCR'), findsOneWidget);
+  await tester.tap(find.text('Continue once'));
+  await tester.pumpAndSettle();
 }
