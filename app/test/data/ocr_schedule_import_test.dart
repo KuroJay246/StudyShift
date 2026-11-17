@@ -159,4 +159,18 @@ Nov 11, 2026 unclear roster line
       );
     },
   );
+
+  test('reports when text after the OCR line limit is not reviewed', () async {
+    final preview = await parser.parse(
+      text:
+          '${List.filled(5000, '').join('\n')}\n'
+          '2026-11-17 09:00 10:00 Synthetic shift',
+      sourceName: 'synthetic-long-roster.pdf',
+      timeZoneId: 'America/Barbados',
+    );
+
+    expect(preview.proposals, isEmpty);
+    expect(preview.notices, hasLength(1));
+    expect(preview.notices.single.message, contains('5,000-line review limit'));
+  });
 }

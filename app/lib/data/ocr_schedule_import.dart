@@ -11,6 +11,7 @@ class OcrScheduleImportParser {
   const OcrScheduleImportParser();
 
   static const _maxProposals = 300;
+  static const _maxLines = 5000;
   static final _datePattern = RegExp(r'(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)');
   static final _timePattern = RegExp(
     r'(?<!\d)((?:[01]\d|2[0-3])):([0-5]\d)(?!\d)',
@@ -41,12 +42,13 @@ class OcrScheduleImportParser {
       );
     }
     final lines = text.split(RegExp(r'\r?\n'));
+    final truncatedLines = lines.length > _maxLines;
     final proposals = <ScheduleImportProposal>[];
     final identityOccurrences = <String, int>{};
     var uncertainLines = 0;
     var overflowLines = 0;
     final importedAt = (clock?.call() ?? DateTime.now()).toUtc();
-    for (var index = 0; index < lines.length && index < 5000; index++) {
+    for (var index = 0; index < lines.length && index < _maxLines; index++) {
       final line = lines[index].trim().replaceAll(RegExp(r'\s+'), ' ');
       if (line.isEmpty || line.startsWith('--- Page ')) continue;
       if (examTimetable) {
@@ -137,7 +139,7 @@ class OcrScheduleImportParser {
     }
     return ScheduleImportPreview(
       proposals: proposals,
-      notices: uncertainLines == 0 && overflowLines == 0
+      notices: uncertainLines == 0 && overflowLines == 0 && !truncatedLines
           ? const []
           : [
               ScheduleImportNotice(
@@ -146,6 +148,7 @@ class OcrScheduleImportParser {
                     '$uncertainLines line${uncertainLines == 1 ? '' : 's'} need manual review. Only lines with one ISO date and exactly two clear 24-hour times were drafted.',
                   if (overflowLines > 0)
                     '$overflowLines additional clear row${overflowLines == 1 ? '' : 's'} exceeded the 300-event review limit and were not drafted.',
+                  if (truncatedLines) 'OCR reached the 5,000-line review limit. Remaining text was not checked; review the rest manually.',
                 ].join(' '),
               ),
             ],
