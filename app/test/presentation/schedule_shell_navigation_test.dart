@@ -57,7 +57,7 @@ void main() {
         .clearAccessibilityFeaturesTestValue();
   });
 
-  testWidgets('a Week widget launch opens the Week destination', (
+  testWidgets('a Calendar widget launch opens the Week destination', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(412, 915);
@@ -92,8 +92,34 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Week'), findsWidgets);
+    expect(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Calendar'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('Week'), findsOneWidget);
+    expect(find.byTooltip('Set up reminders'), findsNothing);
     expect(find.text('This week is open'), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Today'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Set up reminders'), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.text('Work'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Set up reminders'), findsNothing);
   });
 
   testWidgets('selecting a date in Week updates the visible day agenda', (
@@ -180,18 +206,10 @@ void main() {
       ),
       findsOneWidget,
     );
-    await tester.tap(
-      find.byKey(Key('week-overlap-group-$selectedDay-2')),
-    );
+    await tester.tap(find.byKey(Key('week-overlap-group-$selectedDay-2')));
     await tester.pumpAndSettle();
-    expect(
-      find.text('Synthetic ramp shift'),
-      findsNWidgets(2),
-    );
-    expect(
-      find.text('Synthetic study class'),
-      findsNWidgets(2),
-    );
+    expect(find.text('Synthetic ramp shift'), findsNWidgets(2));
+    expect(find.text('Synthetic study class'), findsNWidgets(2));
   });
 
   testWidgets(
@@ -419,7 +437,7 @@ void main() {
       expect(tester.getTopLeft(workPage).dx, greaterThan(0));
       final weekTitle = find.descendant(
         of: find.byType(AppBar),
-        matching: find.text('Week'),
+        matching: find.text('Calendar'),
       );
       expect(weekTitle, findsOneWidget);
       expect(tester.getTopLeft(weekTitle).dx, lessThan(40));
@@ -976,7 +994,7 @@ void main() {
     await tester.tap(
       find.descendant(
         of: find.byType(NavigationBar),
-        matching: find.text('Week'),
+        matching: find.text('Calendar'),
       ),
     );
     await tester.pumpAndSettle();
@@ -1001,7 +1019,7 @@ void main() {
     await tester.tap(
       find.descendant(
         of: find.byType(NavigationBar),
-        matching: find.text('Week'),
+        matching: find.text('Calendar'),
       ),
     );
     await tester.pumpAndSettle();
@@ -1036,11 +1054,14 @@ void main() {
     await tester.tap(find.text('Class'));
     await tester.pumpAndSettle();
     expect(
-      find.text(
-        MaterialLocalizations.of(tester.element(find.byType(EventEditorPage)))
-            .formatMediumDate(today.addDays(8).toDateTime()),
+      find.descendant(
+        of: find.byType(EventEditorPage),
+        matching: find.text(
+          MaterialLocalizations.of(tester.element(find.byType(EventEditorPage)))
+              .formatMediumDate(today.addDays(8).toDateTime()),
+        ),
       ),
-      findsOneWidget,
+      findsWidgets,
     );
   });
 }

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../application/dependencies.dart';
 import '../../application/work_code_references.dart';
 import '../../domain/schedule.dart';
+import '../../domain/supervisor_profile.dart';
 import '../../domain/work_code_legend.dart';
 import '../design/studyshift_spacing.dart';
 
@@ -14,8 +15,11 @@ class WorkCodeLegendPage extends ConsumerStatefulWidget {
   ConsumerState<WorkCodeLegendPage> createState() => _WorkCodeLegendPageState();
 }
 
+enum _LegendSection { codes, supervisors }
+
 class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
   final _search = TextEditingController();
+  _LegendSection _section = _LegendSection.codes;
 
   @override
   void dispose() {
@@ -28,6 +32,38 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
       context: context,
       builder: (_) => _WorkCodeLegendDialog(current: current),
     );
+  }
+
+  Future<void> _editSupervisor([SupervisorProfile? current]) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _SupervisorProfileDialog(current: current),
+    );
+  }
+
+  Future<void> _deleteSupervisor(SupervisorProfile profile) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remove supervisor?'),
+        content: Text(
+          '${profile.name} will be removed from the supervisor list. Saved shifts keep their existing supervisor details.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await ref.read(supervisorRepositoryProvider).delete(profile.id);
+    }
   }
 
   Future<void> _delete(WorkCodeLegend item) async {
@@ -59,62 +95,216 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
   Widget build(BuildContext context) {
     final legend = ref.watch(workCodeLegendsProvider);
     final schedules = ref.watch(scheduleItemsProvider);
+    final supervisors = ref.watch(supervisorProfilesProvider);
     final query = _search.text.trim().toLowerCase();
     return Scaffold(
       appBar: AppBar(title: const Text('Shift legend')),
       floatingActionButton: FloatingActionButton(
-        tooltip: 'Add shift code',
-        onPressed: _edit,
+        tooltip: _section == _LegendSection.codes
+            ? 'Add shift code'
+            : 'Add supervisor',
+        onPressed: _section == _LegendSection.codes ? _edit : _editSupervisor,
         child: const Icon(Icons.add_rounded),
       ),
-      body: legend.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.error_outline_rounded, size: 40),
-                const SizedBox(height: 12),
-                const Text('Your shift codes could not be loaded.'),
-                TextButton(
-                  onPressed: () => ref.invalidate(workCodeLegendsProvider),
-                  child: const Text('Try again'),
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: SegmentedButton<_LegendSection>(
+              segments: const [
+                ButtonSegment(
+                  value: _LegendSection.codes,
+                  icon: Icon(Icons.schedule_rounded),
+                  label: Text('Codes'),
+                ),
+                ButtonSegment(
+                  value: _LegendSection.supervisors,
+                  icon: Icon(Icons.badge_outlined),
+                  label: Text('Supervisors'),
                 ),
               ],
+              selected: {_section},
+              onSelectionChanged: (selection) => setState(() {
+                _section = selection.first;
+                _search.clear();
+              }),
             ),
           ),
-        ),
-        data: (items) => schedules.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (error, _) => Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.error_outline_rounded, size: 40),
-                  const SizedBox(height: 12),
-                  const Text('Saved work shifts could not be loaded.'),
-                  TextButton(
-                    onPressed: () => ref.invalidate(scheduleItemsProvider),
-                    child: const Text('Try again'),
+          Expanded(
+            child: _section == _LegendSection.codes
+                ? legend.when(
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (error, _) => _loadFailure(
+                      'Your shift codes could not be loaded.',
+                      () => ref.invalidate(workCodeLegendsProvider),
+                    ),
+                    data: (items) => schedules.when(
+                      loading: () =>
+                          const Center(child: CircularProgressIndicator()),
+                      error: (error, _) => _loadFailure(
+                        'Saved work shifts could not be loaded.',
+                        () => ref.invalidate(scheduleItemsProvider),
+                      ),
+                      data: (scheduleItems) => _buildLegendContent(
+                        context,
+                        items,
+                        observedWorkCodeReferences(scheduleItems),
+                        query,
+                      ),
+                    ),
+                  )
+                : supervisors.when(
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (error, _) => _loadFailure(
+                      'Supervisor contacts could not be loaded.',
+                      () => ref.invalidate(supervisorProfilesProvider),
+                    ),
+                    data: (items) => _buildSupervisorContent(items, query),
                   ),
-                ],
-              ),
-            ),
           ),
-          data: (scheduleItems) => _buildLegendContent(
-            context,
-            items,
-            observedWorkCodeReferences(scheduleItems),
-            query,
-          ),
-        ),
+        ],
       ),
     );
   }
+
+  Widget _loadFailure(String message, VoidCallback retry) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.error_outline_rounded, size: 40),
+          const SizedBox(height: 12),
+          Text(message),
+          TextButton(onPressed: retry, child: const Text('Try again')),
+        ],
+      ),
+    ),
+  );
+
+  Widget _buildSupervisorContent(
+    List<SupervisorProfile> profiles,
+    String query,
+  ) {
+    final filtered = profiles
+        .where(
+          (profile) =>
+              query.isEmpty ||
+              '${profile.name} ${profile.phone} ${profile.notes} ${profile.type.name}'
+                  .toLowerCase()
+                  .contains(query),
+        )
+        .toList(growable: false);
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: TextField(
+            controller: _search,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search_rounded),
+              hintText: 'Search supervisors or contact details',
+              suffixIcon: query.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: () {
+                        _search.clear();
+                        setState(() {});
+                      },
+                      icon: const Icon(Icons.clear_rounded),
+                    ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 104),
+            children: [
+              Text(
+                '${filtered.length} ${filtered.length == 1 ? 'supervisor' : 'supervisors'}',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 8),
+              if (profiles.isEmpty)
+                _emptySupervisorsCard()
+              else if (filtered.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(
+                    child: Text('No matching supervisors. Try another search.'),
+                  ),
+                )
+              else
+                for (final profile in filtered) _supervisorCard(profile),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _emptySupervisorsCard() => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        children: [
+          const Icon(Icons.badge_outlined, size: 40),
+          const SizedBox(height: 12),
+          Text(
+            'No supervisors saved',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Save supervisor names and optional contact details to choose them on a shift.',
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: _editSupervisor,
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Add supervisor'),
+          ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _supervisorCard(SupervisorProfile profile) => Card(
+    child: ListTile(
+      leading: CircleAvatar(
+        child: Text(profile.name.characters.first.toUpperCase()),
+      ),
+      title: Text(profile.name),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            profile.type == SupervisorType.acting
+                ? 'Acting supervisor'
+                : 'Permanent supervisor',
+          ),
+          if (profile.phone.isNotEmpty) Text(profile.phone),
+          if (profile.notes.isNotEmpty)
+            Text(profile.notes, maxLines: 2, overflow: TextOverflow.ellipsis),
+        ],
+      ),
+      isThreeLine: profile.phone.isNotEmpty || profile.notes.isNotEmpty,
+      trailing: PopupMenuButton<String>(
+        tooltip: 'Actions for ${profile.name}',
+        onSelected: (action) => action == 'edit'
+            ? _editSupervisor(profile)
+            : _deleteSupervisor(profile),
+        itemBuilder: (_) => const [
+          PopupMenuItem(value: 'edit', child: Text('Edit')),
+          PopupMenuItem(value: 'delete', child: Text('Remove')),
+        ],
+      ),
+    ),
+  );
 
   static String _formatMinute(BuildContext context, int minute) =>
       MaterialLocalizations.of(context)
@@ -155,9 +345,11 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
             .map((id) => id.trim())
             .where((id) => id.isNotEmpty),
       );
-      final window = _definitionWindow(context, definition);
-      if (window.isNotEmpty) {
-        data.addWindow(window, definition.startMinute ?? 0);
+      for (final window in definition.timeWindows) {
+        final overnight = window.endDayOffset > 0;
+        final label =
+            '${_formatMinute(context, window.startMinute)} – ${_formatMinute(context, window.endMinute)}${overnight ? ' (+${window.endDayOffset} day)' : ''}';
+        data.addWindow(label, window.startMinute);
       }
     }
     for (final reference in observed) {
@@ -489,12 +681,6 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
       ),
     ),
   );
-
-  String _definitionWindow(BuildContext context, WorkCodeLegend item) {
-    if (item.startMinute == null || item.endMinute == null) return '';
-    final overnight = item.endMinute! <= item.startMinute!;
-    return '${_formatMinute(context, item.startMinute!)} – ${_formatMinute(context, item.endMinute!)}${overnight ? ' (+1 day)' : ''}';
-  }
 }
 
 class _CodeCardData {
@@ -550,8 +736,24 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
   late final _flightIds = TextEditingController(
     text: widget.current?.flightIds.join(', ') ?? '',
   );
-  late TimeOfDay? _start = _toTime(widget.current?.startMinute);
-  late TimeOfDay? _end = _toTime(widget.current?.endMinute);
+  late final List<TimeOfDay?> _starts =
+      widget.current?.timeWindows.isNotEmpty == true
+      ? widget.current!.timeWindows
+            .map((window) => _toTime(window.startMinute))
+            .toList()
+      : [null];
+  late final List<TimeOfDay?> _ends =
+      widget.current?.timeWindows.isNotEmpty == true
+      ? widget.current!.timeWindows
+            .map((window) => _toTime(window.endMinute))
+            .toList()
+      : [null];
+  late final List<int> _endDayOffsets =
+      widget.current?.timeWindows.isNotEmpty == true
+      ? widget.current!.timeWindows
+            .map((window) => window.endDayOffset)
+            .toList()
+      : [0];
   String? _error;
 
   @override
@@ -565,13 +767,30 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
-    if ((_start == null) != (_end == null)) {
+    if (List.generate(
+      _starts.length,
+      (index) => index,
+    ).any((index) => (_starts[index] == null) != (_ends[index] == null))) {
       setState(
-        () => _error = 'Choose both a start and end time, or leave both blank.',
+        () => _error =
+            'Choose both times for each interval, or clear the window.',
       );
       return;
     }
-    if (_start == null && _meaning.text.trim().isEmpty) {
+    final windows = [
+      for (var index = 0; index < _starts.length; index++)
+        if (_starts[index] != null && _ends[index] != null)
+          WorkCodeTimeWindow(
+            startMinute: _starts[index]!.hour * 60 + _starts[index]!.minute,
+            endMinute: _ends[index]!.hour * 60 + _ends[index]!.minute,
+            endDayOffset: _endDayOffsets[index],
+          ),
+    ];
+    if (windows.any((window) => !window.isValid)) {
+      setState(() => _error = 'Each interval must end after its start.');
+      return;
+    }
+    if (windows.isEmpty && _meaning.text.trim().isEmpty) {
       setState(
         () => _error = 'Add the flight or duty details, or enter a time range.',
       );
@@ -588,16 +807,13 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
               employer: _employer.text,
               code: _code.text,
               assignmentDetails: _meaning.text,
+              timeWindows: windows,
               flightIds: _flightIds.text
                   .split(',')
                   .map((flight) => flight.trim())
                   .where((flight) => flight.isNotEmpty)
                   .toSet()
                   .toList(),
-              startMinute: _start == null
-                  ? null
-                  : _start!.hour * 60 + _start!.minute,
-              endMinute: _end == null ? null : _end!.hour * 60 + _end!.minute,
             ),
           );
       if (mounted) Navigator.pop(context);
@@ -639,39 +855,90 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
             Align(
               alignment: Alignment.centerLeft,
               child: Text(
-                'Typical time window',
+                'Typical time windows',
                 style: Theme.of(context).textTheme.titleSmall,
               ),
             ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _pickTime(start: true),
-                    icon: const Icon(Icons.schedule_rounded),
-                    label: Text(_timeLabel(context, _start, 'Start')),
+            const SizedBox(height: 4),
+            for (var index = 0; index < _starts.length; index++) ...[
+              Card(
+                margin: const EdgeInsets.only(top: 6),
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(child: Text('Interval ${index + 1}')),
+                          if (_starts.length > 1)
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              tooltip: 'Remove interval ${index + 1}',
+                              onPressed: () => setState(() {
+                                _starts.removeAt(index);
+                                _ends.removeAt(index);
+                                _endDayOffsets.removeAt(index);
+                              }),
+                              icon: const Icon(Icons.remove_circle_outline),
+                            ),
+                          if (_starts.length == 1 &&
+                              (_starts[index] != null || _ends[index] != null))
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              tooltip: 'Clear code times',
+                              onPressed: () => setState(() {
+                                _starts[index] = null;
+                                _ends[index] = null;
+                                _endDayOffsets[index] = 0;
+                              }),
+                              icon: const Icon(Icons.close_rounded),
+                            ),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () =>
+                                  _pickTime(index: index, start: true),
+                              icon: const Icon(Icons.schedule_rounded),
+                              label: Text(
+                                _timeLabel(context, _starts[index], 'Starts'),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () =>
+                                  _pickTime(index: index, start: false),
+                              icon: const Icon(Icons.schedule_rounded),
+                              label: Text(
+                                _timeLabel(context, _ends[index], 'Ends'),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: () => _pickTime(start: false),
-                    icon: const Icon(Icons.schedule_rounded),
-                    label: Text(_timeLabel(context, _end, 'End')),
-                  ),
+              ),
+            ],
+            if (_starts.length < 2)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => setState(() {
+                    _starts.add(null);
+                    _ends.add(null);
+                    _endDayOffsets.add(0);
+                  }),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add split interval'),
                 ),
-                if (_start != null || _end != null)
-                  IconButton(
-                    tooltip: 'Clear code times',
-                    onPressed: () => setState(() {
-                      _start = null;
-                      _end = null;
-                    }),
-                    icon: const Icon(Icons.close_rounded),
-                  ),
-              ],
-            ),
+              ),
             const SizedBox(height: 12),
             TextFormField(
               controller: _meaning,
@@ -712,18 +979,26 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
     ],
   );
 
-  Future<void> _pickTime({required bool start}) async {
+  Future<void> _pickTime({required int index, required bool start}) async {
     final selected = await showTimePicker(
       context: context,
       initialTime:
-          (start ? _start : _end) ?? const TimeOfDay(hour: 6, minute: 0),
+          (start ? _starts[index] : _ends[index]) ??
+          TimeOfDay(hour: start ? 6 : 14, minute: 0),
     );
     if (selected == null || !mounted) return;
     setState(() {
       if (start) {
-        _start = selected;
+        _starts[index] = selected;
       } else {
-        _end = selected;
+        _ends[index] = selected;
+      }
+      if (_starts[index] != null && _ends[index] != null) {
+        _endDayOffsets[index] =
+            _ends[index]!.hour * 60 + _ends[index]!.minute <=
+                _starts[index]!.hour * 60 + _starts[index]!.minute
+            ? 1
+            : 0;
       }
       _error = null;
     });
@@ -740,4 +1015,127 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
   ) => time == null
       ? empty
       : MaterialLocalizations.of(context).formatTimeOfDay(time);
+}
+
+class _SupervisorProfileDialog extends ConsumerStatefulWidget {
+  const _SupervisorProfileDialog({this.current});
+
+  final SupervisorProfile? current;
+
+  @override
+  ConsumerState<_SupervisorProfileDialog> createState() =>
+      _SupervisorProfileDialogState();
+}
+
+class _SupervisorProfileDialogState
+    extends ConsumerState<_SupervisorProfileDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final _name = TextEditingController(text: widget.current?.name ?? '');
+  late final _phone = TextEditingController(text: widget.current?.phone ?? '');
+  late final _notes = TextEditingController(text: widget.current?.notes ?? '');
+  late SupervisorType _type = widget.current?.type ?? SupervisorType.permanent;
+  String? _error;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _phone.dispose();
+    _notes.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    try {
+      await ref
+          .read(supervisorRepositoryProvider)
+          .save(
+            SupervisorProfile(
+              id:
+                  widget.current?.id ??
+                  'supervisor-${DateTime.now().microsecondsSinceEpoch}',
+              name: _name.text,
+              type: _type,
+              phone: _phone.text,
+              notes: _notes.text,
+            ),
+          );
+      if (mounted) Navigator.pop(context);
+    } catch (exception) {
+      if (!mounted) return;
+      setState(
+        () =>
+            _error = exception.toString().replaceFirst('FormatException: ', ''),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.current == null ? 'Add supervisor' : 'Edit supervisor'),
+    content: Form(
+      key: _formKey,
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _name,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(labelText: 'Name'),
+              validator: (value) => value == null || value.trim().isEmpty
+                  ? 'Enter a name.'
+                  : null,
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<SupervisorType>(
+              initialValue: _type,
+              decoration: const InputDecoration(labelText: 'Type'),
+              items: const [
+                DropdownMenuItem(
+                  value: SupervisorType.permanent,
+                  child: Text('Permanent supervisor'),
+                ),
+                DropdownMenuItem(
+                  value: SupervisorType.acting,
+                  child: Text('Acting supervisor'),
+                ),
+              ],
+              onChanged: (value) {
+                if (value != null) setState(() => _type = value);
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _phone,
+              keyboardType: TextInputType.phone,
+              decoration: const InputDecoration(
+                labelText: 'Phone or contact number (optional)',
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _notes,
+              maxLines: 3,
+              decoration: const InputDecoration(labelText: 'Notes (optional)'),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                _error!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+          ],
+        ),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(onPressed: _save, child: const Text('Save supervisor')),
+    ],
+  );
 }

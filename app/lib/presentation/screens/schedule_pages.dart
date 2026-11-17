@@ -9,7 +9,6 @@ import 'dart:convert';
 
 import '../../application/dependencies.dart';
 import '../../application/day_availability.dart';
-import '../../application/study_block_suggestion.dart';
 import '../../application/schedule_queries.dart';
 import '../../domain/schedule.dart';
 import '../../domain/schedule_engine.dart';
@@ -551,23 +550,7 @@ class _TodayPageState extends ConsumerState<TodayPage>
                 ],
               const SizedBox(height: 22),
               if (availability != null && occurrences.isNotEmpty) ...[
-                _AvailablePeriodsPanel(
-                  periods: availability,
-                  use24Hour: use24,
-                  onPlanStudy: (suggestion) {
-                    Navigator.of(context).push<void>(
-                      MaterialPageRoute<void>(
-                        builder: (_) => EventEditorPage(
-                          kind: ScheduleKind.personal,
-                          initialDate: suggestion.date,
-                          initialTitle: 'Study block',
-                          initialStartMinute: suggestion.startMinute,
-                          initialEndMinute: suggestion.endMinute,
-                        ),
-                      ),
-                    );
-                  },
-                ),
+                _AvailablePeriodsPanel(periods: availability, use24Hour: use24),
                 const SizedBox(height: 22),
               ],
             ],
@@ -2886,19 +2869,16 @@ class _AvailablePeriodsPanel extends StatelessWidget {
   const _AvailablePeriodsPanel({
     required this.periods,
     required this.use24Hour,
-    required this.onPlanStudy,
   });
 
   final List<AvailablePeriod> periods;
   final bool use24Hour;
-  final ValueChanged<StudyBlockSuggestion> onPlanStudy;
 
   @override
   Widget build(BuildContext context) {
     if (periods.isEmpty) return const SizedBox.shrink();
     final theme = Theme.of(context);
     final shown = periods.take(4).toList(growable: false);
-    final suggestion = StudyBlockSuggestion.firstIn(periods);
     return Card(
       color: theme.colorScheme.surfaceContainerLow,
       child: Padding(
@@ -2937,19 +2917,6 @@ class _AvailablePeriodsPanel extends StatelessWidget {
                   Chip(label: Text('+${periods.length - shown.length} more')),
               ],
             ),
-            if (suggestion != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                'Suggested from your first open hour. You can edit it before saving.',
-                style: theme.textTheme.bodySmall,
-              ),
-              const SizedBox(height: 8),
-              FilledButton.tonalIcon(
-                onPressed: () => onPlanStudy(suggestion),
-                icon: const Icon(Icons.school_outlined),
-                label: const Text('Plan 60-minute study block'),
-              ),
-            ],
           ],
         ),
       ),

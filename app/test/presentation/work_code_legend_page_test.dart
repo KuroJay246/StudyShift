@@ -9,7 +9,7 @@ import 'package:shift_study/domain/work_code_legend.dart';
 import 'package:shift_study/presentation/screens/work_code_legend_page.dart';
 
 void main() {
-  testWidgets('legend is one searchable code list, without category tabs', (
+  testWidgets('legend separates searchable codes from supervisor contacts', (
     tester,
   ) async {
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
@@ -32,12 +32,53 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Shift legend'), findsOneWidget);
-    expect(find.text('Overview'), findsNothing);
-    expect(find.text('Flights'), findsNothing);
-    expect(find.text('Shifts'), findsNothing);
-    expect(find.text('Codes'), findsNothing);
+    expect(find.text('Codes'), findsOneWidget);
+    expect(find.text('Supervisors'), findsOneWidget);
     expect(find.text('Search code or description'), findsOneWidget);
     expect(find.text('No work references saved'), findsOneWidget);
+  });
+
+  testWidgets('supervisor section adds a local contact profile', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: WorkCodeLegendPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Supervisors'));
+    await tester.pumpAndSettle();
+    expect(find.text('No supervisors saved'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Add supervisor'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Name'),
+      'Synthetic Supervisor',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Phone or contact number (optional)'),
+      '555-0100',
+    );
+    await tester.tap(find.text('Save supervisor'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Synthetic Supervisor'), findsOneWidget);
+    expect(find.text('555-0100'), findsOneWidget);
+    expect(find.text('Permanent supervisor'), findsOneWidget);
   });
 
   testWidgets('code card shows meaning, split time windows, and flight count', (
@@ -340,6 +381,47 @@ void main() {
     expect(find.byType(TextField).hitTestable(), findsOneWidget);
     expect(find.text('Flights'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('split code card shows both saved time windows', (tester) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(workCodeLegendRepositoryProvider)
+        .save(
+          const WorkCodeLegend(
+            id: 'synthetic-split-code',
+            code: 'R2',
+            assignmentDetails: 'Synthetic morning and evening operations',
+            timeWindows: [
+              WorkCodeTimeWindow(startMinute: 360, endMinute: 540),
+              WorkCodeTimeWindow(startMinute: 720, endMinute: 960),
+            ],
+          ),
+        );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: WorkCodeLegendPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('6:00 AM'), findsOneWidget);
+    expect(find.textContaining('12:00 PM'), findsOneWidget);
+    expect(
+      find.text('Synthetic morning and evening operations'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('saved code form adds details and explicit flight references', (

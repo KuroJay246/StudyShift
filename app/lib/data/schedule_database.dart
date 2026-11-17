@@ -89,6 +89,18 @@ class WorkCodeLegendRows extends Table {
   IntColumn get startMinute => integer().nullable()();
   IntColumn get endMinute => integer().nullable()();
   TextColumn get flightIdsJson => text().withDefault(const Constant('[]'))();
+  TextColumn get timeWindowsJson => text().withDefault(const Constant('[]'))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {id};
+}
+
+class SupervisorProfileRows extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  TextColumn get type => text()();
+  TextColumn get phone => text().nullable()();
+  TextColumn get notes => text().nullable()();
 
   @override
   Set<Column<Object>> get primaryKey => {id};
@@ -109,6 +121,7 @@ class PreferenceRows extends Table {
     WorkCodeLegendRows,
     AcademicTermRows,
     ScheduleImportHistoryRows,
+    SupervisorProfileRows,
   ],
 )
 class ScheduleDatabase extends _$ScheduleDatabase {
@@ -116,7 +129,7 @@ class ScheduleDatabase extends _$ScheduleDatabase {
   ScheduleDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 19;
+  int get schemaVersion => 21;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -203,6 +216,15 @@ class ScheduleDatabase extends _$ScheduleDatabase {
       if (from < 19) {
         await m.createTable(scheduleImportHistoryRows);
       }
+      if (from < 20) {
+        await m.createTable(supervisorProfileRows);
+      }
+      if (from >= 13 && from < 21) {
+        await m.addColumn(
+          workCodeLegendRows,
+          workCodeLegendRows.timeWindowsJson,
+        );
+      }
     },
     beforeOpen: (details) async {
       await customStatement('PRAGMA foreign_keys = ON');
@@ -257,4 +279,14 @@ class ScheduleDatabase extends _$ScheduleDatabase {
 
   Future<void> deletePreference(String key) =>
       (delete(preferenceRows)..where((row) => row.key.equals(key))).go();
+
+  Future<void> resetLocalData() => transaction(() async {
+    await delete(intervalRows).go();
+    await delete(scheduleRows).go();
+    await delete(academicTermRows).go();
+    await delete(workCodeLegendRows).go();
+    await delete(supervisorProfileRows).go();
+    await delete(scheduleImportHistoryRows).go();
+    await delete(preferenceRows).go();
+  });
 }

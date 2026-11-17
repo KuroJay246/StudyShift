@@ -10,6 +10,47 @@ import 'package:shift_study/domain/work_code_legend.dart';
 
 void main() {
   test(
+    'version 20 preserves existing code fields during time-window migration',
+    () async {
+      final database = ScheduleDatabase.forTesting(
+        NativeDatabase.memory(
+          setup: (db) {
+            db.execute('''
+            CREATE TABLE work_code_legend_rows (
+              id TEXT NOT NULL PRIMARY KEY,
+              employer TEXT NOT NULL,
+              code TEXT NOT NULL,
+              meaning TEXT NOT NULL,
+              start_minute INTEGER,
+              end_minute INTEGER,
+              flight_ids_json TEXT NOT NULL DEFAULT '[]'
+            )
+          ''');
+            db.execute('''
+            INSERT INTO work_code_legend_rows
+            (id, employer, code, meaning, start_minute, end_minute, flight_ids_json)
+            VALUES ('legacy-a1', 'Synthetic employer', 'A1', 'Synthetic split duty', 360, 540, '["AA100"]')
+          ''');
+            db.execute('PRAGMA user_version = 20');
+          },
+        ),
+      );
+      addTearDown(database.close);
+
+      final saved = (await WorkCodeLegendRepository(
+        database,
+      ).getItems()).single;
+      expect(saved.code, 'A1');
+      expect(saved.startMinute, 360);
+      expect(saved.endMinute, 540);
+      expect(saved.flightIds, ['AA100']);
+      expect(saved.timeWindows, const [
+        WorkCodeTimeWindow(startMinute: 360, endMinute: 540),
+      ]);
+    },
+  );
+
+  test(
     'version 17 legend migration adds flight references without loss',
     () async {
       final database = ScheduleDatabase.forTesting(

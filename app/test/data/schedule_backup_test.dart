@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shift_study/data/schedule_backup.dart';
@@ -7,6 +8,7 @@ import 'package:shift_study/data/schedule_database.dart';
 import 'package:shift_study/data/schedule_repository.dart';
 import 'package:shift_study/domain/academic_term.dart';
 import 'package:shift_study/domain/schedule.dart';
+import 'package:shift_study/domain/supervisor_profile.dart';
 import 'package:shift_study/domain/work_code_legend.dart';
 
 void main() {
@@ -127,6 +129,10 @@ void main() {
             employer: 'Synthetic Air',
             code: 'QX',
             meaning: 'Synthetic ramp duty',
+            timeWindows: [
+              WorkCodeTimeWindow(startMinute: 360, endMinute: 540),
+              WorkCodeTimeWindow(startMinute: 720, endMinute: 960),
+            ],
             flightIds: ['AA100', 'LI200'],
           ),
         ],
@@ -137,6 +143,15 @@ void main() {
             name: 'Semester One',
             startDate: CivilDate(2026, 9, 1),
             endDate: CivilDate(2026, 12, 15),
+          ),
+        ],
+        supervisors: const [
+          SupervisorProfile(
+            id: 'synthetic-supervisor-1',
+            name: 'Sample Supervisor',
+            type: SupervisorType.acting,
+            phone: '555-0100',
+            notes: 'Synthetic backup contact',
           ),
         ],
       );
@@ -169,7 +184,20 @@ void main() {
       expect(decoded.items.first.jobRole, 'Ramp agent');
       expect(decoded.workCodeLegends.single.code, 'QX');
       expect(decoded.workCodeLegends.single.flightIds, ['AA100', 'LI200']);
+      expect(decoded.workCodeLegends.single.timeWindows, const [
+        WorkCodeTimeWindow(startMinute: 360, endMinute: 540),
+        WorkCodeTimeWindow(startMinute: 720, endMinute: 960),
+      ]);
       expect(decoded.academicTerms.single.name, 'Semester One');
+      expect(decoded.supervisors, const [
+        SupervisorProfile(
+          id: 'synthetic-supervisor-1',
+          name: 'Sample Supervisor',
+          type: SupervisorType.acting,
+          phone: '555-0100',
+          notes: 'Synthetic backup contact',
+        ),
+      ]);
       expect(decoded.items[1].academicTermId, 'synthetic-term-1');
       expect(
         decoded.items.first.reportingInstruction,
@@ -202,6 +230,20 @@ void main() {
       );
     },
   );
+
+  test('version 1 encrypted backup restores legacy single-window codes', () async {
+    final bytes = await _legacyVersionOneBackup(passphrase);
+    final decoded = await codec.decode(bytes, passphrase: passphrase);
+    expect(decoded.workCodeLegends.single.timeWindows, const [
+      WorkCodeTimeWindow(startMinute: 360, endMinute: 540),
+    ]);
+  });
+
+  test('new backup envelope uses version 2 for multi-window data', () async {
+    final bytes = await codec.encode(const [], passphrase: passphrase);
+    final envelope = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+    expect(envelope['version'], 2);
+  });
 
   test(
     'encrypted backup refuses a study event with an omitted term record',
@@ -302,5 +344,52 @@ void main() {
         'synthetic-replacement',
       });
     },
+  );
+}
+
+Future<List<int>> _legacyVersionOneBackup(String passphrase) async {
+  const iterations = 600000;
+  final salt = List<int>.generate(16, (index) => index + 1);
+  final payload = utf8.encode(
+    jsonEncode({
+      'format': 'shift-study-schedule',
+      'version': 1,
+      'createdAt': '2026-11-17T12:00:00.000Z',
+      'events': [],
+      'workCodeLegends': [
+        {
+          'id': 'legacy-code',
+          'employer': 'Synthetic Employer',
+          'code': 'A1',
+          'meaning': 'Synthetic split shift',
+          'startMinute': 360,
+          'endMinute': 540,
+          'flightIds': <String>[],
+        },
+      ],
+    }),
+  );
+  final key = await Pbkdf2.hmacSha256(
+    iterations: iterations,
+    bits: 256,
+  ).deriveKeyFromPassword(password: passphrase, nonce: salt);
+  final box = await AesGcm.with256bits().encrypt(
+    payload,
+    secretKey: key,
+    nonce: List<int>.generate(12, (index) => 30 + index),
+    aad: utf8.encode('ShiftStudy.ScheduleBackup.v1'),
+  );
+  return utf8.encode(
+    jsonEncode({
+      'format': 'shift-study-encrypted-backup',
+      'version': 1,
+      'cipher': 'AES-256-GCM',
+      'kdf': 'PBKDF2-HMAC-SHA256',
+      'iterations': iterations,
+      'salt': base64Encode(salt),
+      'nonce': base64Encode(box.nonce),
+      'mac': base64Encode(box.mac.bytes),
+      'ciphertext': base64Encode(box.cipherText),
+    }),
   );
 }

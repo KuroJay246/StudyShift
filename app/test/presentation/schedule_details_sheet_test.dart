@@ -762,7 +762,9 @@ void main() {
     final canceledLabel = MaterialLocalizations.of(
       tester.element(find.text('Synthetic lecture')),
     ).formatShortDate(DateTime(2026, 11, 11));
-    await tester.tap(find.text('Restore $canceledLabel'));
+    final restoreAction = find.text('Restore $canceledLabel');
+    await tester.ensureVisible(restoreAction);
+    await tester.tap(restoreAction);
     await tester.pumpAndSettle();
     expect(
       (await repository.getItems()).single.recurrence!.exceptionDates,

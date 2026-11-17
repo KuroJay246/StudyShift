@@ -104,6 +104,17 @@ void main() {
             db.execute(
               'CREATE TABLE schedule_rows (id TEXT PRIMARY KEY, title TEXT)',
             );
+            db.execute('''
+              CREATE TABLE work_code_legend_rows (
+                id TEXT PRIMARY KEY NOT NULL,
+                employer TEXT NOT NULL DEFAULT '',
+                code TEXT NOT NULL,
+                meaning TEXT NOT NULL,
+                start_minute INTEGER,
+                end_minute INTEGER,
+                flight_ids_json TEXT NOT NULL DEFAULT '[]'
+              )
+            ''');
             db.execute(
               "INSERT INTO schedule_rows (id, title) VALUES ('kept', 'Existing record')",
             );
@@ -126,7 +137,7 @@ void main() {
           .customSelect('SELECT * FROM schedule_import_history_rows')
           .get();
 
-      expect(version.read<int>('user_version'), 19);
+      expect(version.read<int>('user_version'), 21);
       expect(preserved.read<String>('title'), 'Existing record');
       expect(history, isEmpty);
     },

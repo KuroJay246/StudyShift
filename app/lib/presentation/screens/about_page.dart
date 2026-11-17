@@ -63,11 +63,12 @@ class _AboutPageState extends ConsumerState<AboutPage> {
           const SizedBox(height: 12),
           const Card(
             child: ListTile(
-              leading: Icon(Icons.lock_outline_rounded),
-              title: Text('Private by design'),
+              leading: Icon(Icons.person_outline_rounded),
+              title: Text('Created by Juna Miller'),
               subtitle: Text(
-                'Your schedule is stored on this device and works offline. '
-                'No account or cloud service is required.',
+                'StudyShift is a personal scheduling app for work, study and '
+                'everyday planning. Your schedule stays on this device and '
+                'works offline.',
               ),
             ),
           ),

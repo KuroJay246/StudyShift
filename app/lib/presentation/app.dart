@@ -264,7 +264,7 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
       ),
       const _NavItem(
         _Destination.week,
-        'Week',
+        'Calendar',
         Icons.calendar_month_outlined,
         Icons.calendar_month_rounded,
       ),
@@ -685,11 +685,12 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
           ),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Set up reminders',
-            onPressed: _requestNotificationPermission,
-            icon: const Icon(Icons.notifications_none_rounded),
-          ),
+          if (_selected == _Destination.today)
+            IconButton(
+              tooltip: 'Set up reminders',
+              onPressed: _requestNotificationPermission,
+              icon: const Icon(Icons.notifications_none_rounded),
+            ),
           if (_canAdd &&
               (_selected == _Destination.today ||
                   _selected == _Destination.week ||

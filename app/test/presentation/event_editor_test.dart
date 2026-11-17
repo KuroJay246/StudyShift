@@ -30,6 +30,51 @@ class _TestReminderService extends LocalReminderService {
 }
 
 void main() {
+  testWidgets('changing start date preserves a chosen end date', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: EventEditorPage(
+            kind: ScheduleKind.work,
+            initialDate: CivilDate(2026, 11, 17),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('End date'));
+    await tester.pumpAndSettle();
+    expect(find.byType(CalendarDatePicker), findsOneWidget);
+    await tester.tap(find.text('20').last);
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    final endDateBeforeStartChange = _dateButtonValue(tester, 'End date');
+
+    await tester.tap(find.text('Start date'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('18').last);
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+
+    expect(_dateButtonValue(tester, 'End date'), endDateBeforeStartChange);
+  });
+
   testWidgets('work time zone controls fit a narrow phone width', (
     tester,
   ) async {
@@ -209,14 +254,7 @@ void main() {
         'R1',
       );
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(
-        find.text('Save event'),
-        450,
-        scrollable: find.byType(Scrollable).first,
-      );
-      await tester.ensureVisible(find.text('Save event'));
-      await tester.tap(find.text('Save event'));
-      await tester.pumpAndSettle();
+      await _saveEvent(tester);
       expect(find.text('Enter a name.'), findsNothing);
       expect(find.text('Enter a time zone.'), findsNothing);
       expect(find.text('Choose at least one weekday.'), findsNothing);
@@ -231,6 +269,171 @@ void main() {
       ]);
     },
   );
+
+  testWidgets('work form offers saved roster codes for direct selection', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(workCodeLegendRepositoryProvider)
+        .save(
+          const WorkCodeLegend(
+            id: 'synthetic-direct-select',
+            employer: 'Synthetic Air',
+            code: 'R2',
+            assignmentDetails: 'Synthetic evening operations',
+            timeWindows: [
+              WorkCodeTimeWindow(startMinute: 360, endMinute: 540),
+              WorkCodeTimeWindow(startMinute: 720, endMinute: 960),
+            ],
+          ),
+        );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.work),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const ValueKey('event-title-field')),
+      'Synthetic selected roster code',
+    );
+    tester.testTextInput.hide();
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Work details'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Work details'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('work-code-legend-selector')),
+      findsOneWidget,
+    );
+    final selector = find.byKey(const ValueKey('work-code-legend-selector'));
+    await tester.scrollUntilVisible(
+      selector,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(selector);
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Synthetic Air · R2'));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<TextFormField>(find.byKey(const ValueKey('work-code-field')))
+          .controller
+          ?.text,
+      'R2',
+    );
+    expect(
+      tester
+          .widget<TextFormField>(
+            find.byKey(const ValueKey('work-code-assignment-field')),
+          )
+          .controller
+          ?.text,
+      'Synthetic evening operations',
+    );
+    await _saveEvent(tester);
+
+    final savedItems = await container
+        .read(scheduleRepositoryProvider)
+        .getItems();
+    expect(
+      savedItems,
+      isNotEmpty,
+      reason: tester
+          .widgetList<Text>(find.byType(Text))
+          .map((widget) => widget.data)
+          .where((text) => text != null)
+          .join(' | '),
+    );
+    final saved = savedItems.single;
+    expect(saved.code, 'R2');
+    expect(saved.codeMeaning, 'Synthetic evening operations');
+    expect(saved.intervals, [
+      EventInterval.sameDay(startMinute: 360, endMinute: 540),
+      EventInterval.sameDay(startMinute: 720, endMinute: 960),
+    ]);
+  });
+
+  testWidgets('editing split overnight work preserves end-day offsets', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final repository = ScheduleRepository(database);
+    final item = ScheduleItem(
+      id: 'synthetic-split-overnight',
+      kind: ScheduleKind.work,
+      title: 'Synthetic split overnight shift',
+      startDate: CivilDate(2026, 11, 5),
+      timeZoneId: 'America/Barbados',
+      intervals: const [
+        EventInterval(
+          startDayOffset: 0,
+          startMinute: 360,
+          endDayOffset: 0,
+          endMinute: 540,
+        ),
+        EventInterval(
+          startDayOffset: 0,
+          startMinute: 720,
+          endDayOffset: 1,
+          endMinute: 120,
+        ),
+      ],
+    );
+    await repository.save(item);
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.work, existing: item),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Save event'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await _saveEvent(tester);
+
+    final saved = (await repository.getItems()).single;
+    expect(saved.intervals, item.intervals);
+    expect(saved.intervals.last.endDayOffset, 1);
+  });
 
   testWidgets('study color can be changed from the class add form', (
     tester,
@@ -362,7 +565,8 @@ void main() {
       expect(
         tester.takeException(),
         isNull,
-        reason: '$kind editor should remain scrollable without layout overflow.',
+        reason:
+            '$kind editor should remain scrollable without layout overflow.',
       );
       await tester.scrollUntilVisible(
         find.text('Additional details'),
@@ -588,6 +792,7 @@ void main() {
       400,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.ensureVisible(find.text('Additional details'));
     await tester.tap(find.text('Additional details'));
     await tester.pumpAndSettle();
     final reportingField = find.widgetWithText(
@@ -790,11 +995,15 @@ void main() {
       find.byType(TextFormField).first,
       'Synthetic biology exam',
     );
+    tester.testTextInput.hide();
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('Additional details'),
       400,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.ensureVisible(find.text('Additional details'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Additional details'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
@@ -856,8 +1065,12 @@ void main() {
     await tester.tap(find.byType(SwitchListTile).first);
     await tester.pumpAndSettle();
     expect(find.byType(FilterChip), findsWidgets);
-    final tuesday = find.widgetWithText(FilterChip, 'T').first;
-    await tester.ensureVisible(tuesday);
+    final tuesday = find.byType(FilterChip).at(1);
+    await tester.scrollUntilVisible(
+      tuesday,
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(tuesday);
     tester.testTextInput.hide();
     await tester.pumpAndSettle();
@@ -914,8 +1127,15 @@ void main() {
     await tester.ensureVisible(find.text('Repeat weekly'));
     await tester.tap(find.byType(SwitchListTile).first);
     await tester.pumpAndSettle();
-    final tuesday = find.widgetWithText(FilterChip, 'T').first;
-    await tester.ensureVisible(tuesday);
+    await tester.scrollUntilVisible(
+      find.text('End date · optional'),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.drag(find.byType(ListView), const Offset(0, -180));
+    await tester.pumpAndSettle();
+    expect(find.byType(FilterChip), findsNWidgets(7));
+    final tuesday = find.byType(FilterChip).at(1);
     await tester.tap(tuesday);
     final endDate = find.text('End date · optional');
     await tester.ensureVisible(endDate);
@@ -986,8 +1206,10 @@ void main() {
     );
     await tester.tap(find.text('Repeat weekly'));
     await tester.pumpAndSettle();
-    final monday = find.widgetWithText(FilterChip, 'M').first;
-    await tester.ensureVisible(monday);
+    await tester.drag(find.byType(ListView), const Offset(0, -180));
+    await tester.pumpAndSettle();
+    expect(find.byType(FilterChip), findsNWidgets(7));
+    final monday = find.byType(FilterChip).first;
     await tester.tap(monday);
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
@@ -995,6 +1217,8 @@ void main() {
       400,
       scrollable: find.byType(Scrollable).first,
     );
+    await tester.ensureVisible(find.text('Additional details'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Additional details'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
@@ -1016,6 +1240,14 @@ void main() {
     expect(saved.startDate, term.startDate);
     expect(saved.recurrence?.until, term.endDate);
   });
+}
+
+String _dateButtonValue(WidgetTester tester, String label) {
+  final texts = tester
+      .widgetList<Text>(find.byType(Text))
+      .map((text) => text.data)
+      .toList();
+  return texts[texts.indexOf(label) + 1]!;
 }
 
 Future<void> _saveEvent(WidgetTester tester) async {

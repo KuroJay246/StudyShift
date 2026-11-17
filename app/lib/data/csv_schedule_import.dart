@@ -20,6 +20,7 @@ class CsvScheduleImportParser {
   Future<ScheduleImportPreview> parse(
     String source, {
     required String sourceName,
+    Map<String, String>? headerMapping,
     DateTime? importedAt,
   }) async {
     if (utf8.encode(source).length > maxBytes) {
@@ -33,14 +34,14 @@ class CsvScheduleImportParser {
     if (records.isEmpty) {
       throw const FormatException('This CSV file has no header row.');
     }
-    final headers = records.first.fields
+    final sourceHeaders = records.first.fields
         .map((field) => field.trim().toLowerCase())
         .toList();
-    if (headers.isNotEmpty && headers[0].startsWith('\uFEFF')) {
-      headers[0] = headers[0].replaceFirst('\uFEFF', '');
+    if (sourceHeaders.isNotEmpty && sourceHeaders[0].startsWith('\uFEFF')) {
+      sourceHeaders[0] = sourceHeaders[0].replaceFirst('\uFEFF', '');
     }
-    if (headers.toSet().length != headers.length ||
-        headers.any((header) => header.isEmpty)) {
+    if (sourceHeaders.toSet().length != sourceHeaders.length ||
+        sourceHeaders.any((header) => header.isEmpty)) {
       throw const FormatException(
         'The CSV header contains a blank or repeated column name.',
       );
@@ -67,7 +68,10 @@ class CsvScheduleImportParser {
       'contact_phone',
       'source_id',
     };
-    final unknown = headers.where((header) => !allowed.contains(header));
+    final headers = _mappedHeaders(sourceHeaders, allowed, headerMapping);
+    final unknown = sourceHeaders.where(
+      (header) => headerMapping == null && !allowed.contains(header),
+    );
     if (unknown.isNotEmpty) {
       throw FormatException(
         'Unsupported CSV columns: ${unknown.join(', ')}. Rename or remove them before importing.',
@@ -116,7 +120,7 @@ class CsvScheduleImportParser {
       }
       final values = <String, String>{
         for (var i = 0; i < headers.length; i++)
-          headers[i]: record.fields[i].trim(),
+          if (headers[i].isNotEmpty) headers[i]: record.fields[i].trim(),
       };
       if (sourceId.isNotEmpty && invalidSourceIds.contains(sourceId)) {
         notices.add(
@@ -230,6 +234,58 @@ class CsvScheduleImportParser {
       proposals: List.unmodifiable(proposals.values),
       notices: List.unmodifiable(notices),
     );
+  }
+
+  /// Reads the first row using the same bounded CSV tokenizer as [parse].
+  List<String> inspectHeaders(String source) {
+    if (utf8.encode(source).length > maxBytes) {
+      throw const FormatException('This CSV file is too large.');
+    }
+    if (source.trim().isEmpty) {
+      throw const FormatException('The selected CSV file is empty.');
+    }
+    final records = _parseRecords(source);
+    if (records.isEmpty) {
+      throw const FormatException('This CSV file has no header row.');
+    }
+    final headers = records.first.fields.map((field) => field.trim()).toList();
+    if (headers.isNotEmpty && headers[0].startsWith('\uFEFF')) {
+      headers[0] = headers[0].replaceFirst('\uFEFF', '');
+    }
+    if (headers.isEmpty ||
+        headers.any((header) => header.isEmpty) ||
+        headers.map((header) => header.toLowerCase()).toSet().length !=
+            headers.length) {
+      throw const FormatException(
+        'The CSV header contains a blank or repeated column name.',
+      );
+    }
+    return List.unmodifiable(headers);
+  }
+
+  List<String> _mappedHeaders(
+    List<String> sourceHeaders,
+    Set<String> allowed,
+    Map<String, String>? headerMapping,
+  ) {
+    if (headerMapping == null) return sourceHeaders;
+    final normalizedMapping = <String, String>{};
+    for (final entry in headerMapping.entries) {
+      final source = entry.key.trim().toLowerCase();
+      final target = entry.value.trim().toLowerCase();
+      if (!sourceHeaders.contains(source) || !allowed.contains(target)) {
+        throw const FormatException('The selected column mapping is invalid.');
+      }
+      if (normalizedMapping.containsValue(target)) {
+        throw const FormatException(
+          'A destination field can only be mapped once.',
+        );
+      }
+      normalizedMapping[source] = target;
+    }
+    return sourceHeaders
+        .map((header) => normalizedMapping[header] ?? '')
+        .toList();
   }
 
   static bool _isSplitWorkEvent(ScheduleItem item) =>

@@ -68,20 +68,24 @@ class _WeatherSettingsPageState extends ConsumerState<WeatherSettingsPage> {
             style: Theme.of(context).textTheme.bodyMedium,
           ),
           const SizedBox(height: 12),
-          SwitchListTile.adaptive(
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Show weather on Today'),
-            subtitle: const Text('Turn on only the forecast summary you want.'),
-            value: enabled,
-            onChanged: _saving
-                ? null
-                : (value) async {
-                    await ref
-                        .read(preferencesRepositoryProvider)
-                        .setWeatherEnabled(value);
-                    ref.invalidate(appPreferencesProvider);
-                    ref.invalidate(weatherReadingProvider);
-                  },
+          Card(
+            margin: EdgeInsets.zero,
+            child: SwitchListTile.adaptive(
+              title: const Text('Show weather on Today'),
+              subtitle: const Text(
+                'Turn on only the forecast summary you want.',
+              ),
+              value: enabled,
+              onChanged: _saving
+                  ? null
+                  : (value) async {
+                      await ref
+                          .read(preferencesRepositoryProvider)
+                          .setWeatherEnabled(value);
+                      ref.invalidate(appPreferencesProvider);
+                      ref.invalidate(weatherReadingProvider);
+                    },
+            ),
           ),
           if (enabled && reading != null) ...[
             const SizedBox(height: 8),
@@ -99,6 +103,7 @@ class _WeatherSettingsPageState extends ConsumerState<WeatherSettingsPage> {
           const SizedBox(height: 20),
           _sectionHeading(context, 'Location'),
           Card(
+            margin: EdgeInsets.zero,
             child: Column(
               children: [
                 ListTile(
@@ -153,21 +158,27 @@ class _WeatherSettingsPageState extends ConsumerState<WeatherSettingsPage> {
               },
               child: Column(
                 children: [
-                  for (final place in savedPlaces)
+                  for (var index = 0; index < savedPlaces.length; index++) ...[
+                    if (index > 0) const SizedBox(height: 8),
                     Card(
+                      key: ValueKey(
+                        'weather-saved-place-${_placeKey(savedPlaces[index])}',
+                      ),
+                      margin: EdgeInsets.zero,
                       child: RadioListTile<String>(
-                        value: _placeKey(place),
-                        title: Text(place.name),
-                        subtitle: Text(place.label),
+                        value: _placeKey(savedPlaces[index]),
+                        title: Text(savedPlaces[index].name),
+                        subtitle: Text(savedPlaces[index].label),
                         secondary: IconButton(
-                          tooltip: 'Remove ${place.name}',
+                          tooltip: 'Remove ${savedPlaces[index].name}',
                           onPressed: _saving
                               ? null
-                              : () => _removeSavedPlace(place),
+                              : () => _removeSavedPlace(savedPlaces[index]),
                           icon: const Icon(Icons.remove_circle_outline_rounded),
                         ),
                       ),
                     ),
+                  ],
                 ],
               ),
             ),
@@ -192,9 +203,11 @@ class _WeatherSettingsPageState extends ConsumerState<WeatherSettingsPage> {
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
-            for (var index = 0; index < _places.length; index++)
+            for (var index = 0; index < _places.length; index++) ...[
+              if (index > 0) const SizedBox(height: 8),
               Card(
                 key: index == 0 ? _firstPlaceResultKey : null,
+                margin: EdgeInsets.zero,
                 child: ListTile(
                   title: Text(_places[index].name),
                   subtitle: Text(_places[index].label),
@@ -202,6 +215,7 @@ class _WeatherSettingsPageState extends ConsumerState<WeatherSettingsPage> {
                   onTap: _saving ? null : () => _selectPlace(_places[index]),
                 ),
               ),
+            ],
           ],
           if (location != null && enabled) ...[
             const SizedBox(height: 12),
@@ -240,6 +254,7 @@ class _WeatherSettingsPageState extends ConsumerState<WeatherSettingsPage> {
           ),
           const SizedBox(height: 8),
           Card(
+            margin: EdgeInsets.zero,
             child: Column(
               children: [
                 _metricSwitch(
@@ -247,26 +262,31 @@ class _WeatherSettingsPageState extends ConsumerState<WeatherSettingsPage> {
                   WeatherMetric.locationAndCondition,
                   preferences?.showWeatherLocationAndCondition ?? true,
                 ),
+                const Divider(height: 1, indent: 56),
                 _metricSwitch(
                   'Feels-like temperature',
                   WeatherMetric.feelsLike,
                   preferences?.showWeatherFeelsLike ?? false,
                 ),
+                const Divider(height: 1, indent: 56),
                 _metricSwitch(
                   'Rain chance',
                   WeatherMetric.rainChance,
                   preferences?.showWeatherRainChance ?? true,
                 ),
+                const Divider(height: 1, indent: 56),
                 _metricSwitch(
                   'Wind speed',
                   WeatherMetric.windSpeed,
                   preferences?.showWeatherWindSpeed ?? false,
                 ),
+                const Divider(height: 1, indent: 56),
                 _metricSwitch(
                   'Sunrise & sunset',
                   WeatherMetric.sunriseSunset,
                   preferences?.showWeatherSunriseSunset ?? false,
                 ),
+                const Divider(height: 1, indent: 56),
                 _metricSwitch(
                   'Last updated time',
                   WeatherMetric.lastUpdated,
@@ -465,8 +485,9 @@ class _WeatherSettingsPageState extends ConsumerState<WeatherSettingsPage> {
           'location_unavailable' || 'location_timeout' =>
             'The device could not get a location fix. Check Location is on, '
                 'or choose a place manually.',
-          _ => 'Could not use the device location. Choose a place manually '
-              'or try again.',
+          _ =>
+            'Could not use the device location. Choose a place manually '
+                'or try again.',
         };
         setState(() => _message = message);
       }
@@ -684,7 +705,10 @@ class _WeatherTodayPreview extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Today preview', style: Theme.of(context).textTheme.labelLarge),
+            Text(
+              'Today preview',
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
             const SizedBox(height: 8),
             Row(
               children: [
@@ -697,13 +721,15 @@ class _WeatherTodayPreview extends StatelessWidget {
                           localHour: DateTime.now().hour,
                           isDay: reading.snapshot.isDay,
                         ),
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                       if (preferences.effectiveWeatherLayout ==
                           WeatherLayout.moreDetails)
-                        Text(secondary, style: Theme.of(context).textTheme.bodySmall),
+                        Text(
+                          secondary,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                     ],
                   ),
                 ),
@@ -716,21 +742,27 @@ class _WeatherTodayPreview extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(
                   '${weather.temperatureC.round()}°',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: Theme.of(context).textTheme.titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w700),
                 ),
               ],
             ),
             if (preferences.effectiveWeatherLayout == WeatherLayout.compact)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
-                child: Text(secondary, style: Theme.of(context).textTheme.bodySmall),
+                child: Text(
+                  secondary,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ),
-            if (preferences.effectiveWeatherLayout == WeatherLayout.moreDetails &&
+            if (preferences.effectiveWeatherLayout ==
+                    WeatherLayout.moreDetails &&
                 details.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Text(details.join('  ·  '), style: Theme.of(context).textTheme.bodySmall),
+              Text(
+                details.join('  ·  '),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
             ],
             if (reading.isCached)
               Padding(
@@ -772,7 +804,9 @@ class _WeatherPreviewUnavailable extends StatelessWidget {
       leading: const Icon(Icons.cloud_off_outlined),
       title: const Text('Today preview'),
       subtitle: const Text('Weather is unavailable. Try refreshing later.'),
-      subtitleTextStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+      subtitleTextStyle: TextStyle(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
     ),
   );
 }

@@ -3057,6 +3057,18 @@ class $WorkCodeLegendRowsTable extends WorkCodeLegendRows
     requiredDuringInsert: false,
     defaultValue: const Constant('[]'),
   );
+  static const VerificationMeta _timeWindowsJsonMeta = const VerificationMeta(
+    'timeWindowsJson',
+  );
+  @override
+  late final GeneratedColumn<String> timeWindowsJson = GeneratedColumn<String>(
+    'time_windows_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('[]'),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -3066,6 +3078,7 @@ class $WorkCodeLegendRowsTable extends WorkCodeLegendRows
     startMinute,
     endMinute,
     flightIdsJson,
+    timeWindowsJson,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3132,6 +3145,15 @@ class $WorkCodeLegendRowsTable extends WorkCodeLegendRows
         ),
       );
     }
+    if (data.containsKey('time_windows_json')) {
+      context.handle(
+        _timeWindowsJsonMeta,
+        timeWindowsJson.isAcceptableOrUnknown(
+          data['time_windows_json']!,
+          _timeWindowsJsonMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -3169,6 +3191,10 @@ class $WorkCodeLegendRowsTable extends WorkCodeLegendRows
         DriftSqlType.string,
         data['${effectivePrefix}flight_ids_json'],
       )!,
+      timeWindowsJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}time_windows_json'],
+      )!,
     );
   }
 
@@ -3187,6 +3213,7 @@ class WorkCodeLegendRow extends DataClass
   final int? startMinute;
   final int? endMinute;
   final String flightIdsJson;
+  final String timeWindowsJson;
   const WorkCodeLegendRow({
     required this.id,
     required this.employer,
@@ -3195,6 +3222,7 @@ class WorkCodeLegendRow extends DataClass
     this.startMinute,
     this.endMinute,
     required this.flightIdsJson,
+    required this.timeWindowsJson,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3210,6 +3238,7 @@ class WorkCodeLegendRow extends DataClass
       map['end_minute'] = Variable<int>(endMinute);
     }
     map['flight_ids_json'] = Variable<String>(flightIdsJson);
+    map['time_windows_json'] = Variable<String>(timeWindowsJson);
     return map;
   }
 
@@ -3226,6 +3255,7 @@ class WorkCodeLegendRow extends DataClass
           ? const Value.absent()
           : Value(endMinute),
       flightIdsJson: Value(flightIdsJson),
+      timeWindowsJson: Value(timeWindowsJson),
     );
   }
 
@@ -3242,6 +3272,7 @@ class WorkCodeLegendRow extends DataClass
       startMinute: serializer.fromJson<int?>(json['startMinute']),
       endMinute: serializer.fromJson<int?>(json['endMinute']),
       flightIdsJson: serializer.fromJson<String>(json['flightIdsJson']),
+      timeWindowsJson: serializer.fromJson<String>(json['timeWindowsJson']),
     );
   }
   @override
@@ -3255,6 +3286,7 @@ class WorkCodeLegendRow extends DataClass
       'startMinute': serializer.toJson<int?>(startMinute),
       'endMinute': serializer.toJson<int?>(endMinute),
       'flightIdsJson': serializer.toJson<String>(flightIdsJson),
+      'timeWindowsJson': serializer.toJson<String>(timeWindowsJson),
     };
   }
 
@@ -3266,6 +3298,7 @@ class WorkCodeLegendRow extends DataClass
     Value<int?> startMinute = const Value.absent(),
     Value<int?> endMinute = const Value.absent(),
     String? flightIdsJson,
+    String? timeWindowsJson,
   }) => WorkCodeLegendRow(
     id: id ?? this.id,
     employer: employer ?? this.employer,
@@ -3274,6 +3307,7 @@ class WorkCodeLegendRow extends DataClass
     startMinute: startMinute.present ? startMinute.value : this.startMinute,
     endMinute: endMinute.present ? endMinute.value : this.endMinute,
     flightIdsJson: flightIdsJson ?? this.flightIdsJson,
+    timeWindowsJson: timeWindowsJson ?? this.timeWindowsJson,
   );
   WorkCodeLegendRow copyWithCompanion(WorkCodeLegendRowsCompanion data) {
     return WorkCodeLegendRow(
@@ -3288,6 +3322,9 @@ class WorkCodeLegendRow extends DataClass
       flightIdsJson: data.flightIdsJson.present
           ? data.flightIdsJson.value
           : this.flightIdsJson,
+      timeWindowsJson: data.timeWindowsJson.present
+          ? data.timeWindowsJson.value
+          : this.timeWindowsJson,
     );
   }
 
@@ -3300,7 +3337,8 @@ class WorkCodeLegendRow extends DataClass
           ..write('meaning: $meaning, ')
           ..write('startMinute: $startMinute, ')
           ..write('endMinute: $endMinute, ')
-          ..write('flightIdsJson: $flightIdsJson')
+          ..write('flightIdsJson: $flightIdsJson, ')
+          ..write('timeWindowsJson: $timeWindowsJson')
           ..write(')'))
         .toString();
   }
@@ -3314,6 +3352,7 @@ class WorkCodeLegendRow extends DataClass
     startMinute,
     endMinute,
     flightIdsJson,
+    timeWindowsJson,
   );
   @override
   bool operator ==(Object other) =>
@@ -3325,7 +3364,8 @@ class WorkCodeLegendRow extends DataClass
           other.meaning == this.meaning &&
           other.startMinute == this.startMinute &&
           other.endMinute == this.endMinute &&
-          other.flightIdsJson == this.flightIdsJson);
+          other.flightIdsJson == this.flightIdsJson &&
+          other.timeWindowsJson == this.timeWindowsJson);
 }
 
 class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
@@ -3336,6 +3376,7 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
   final Value<int?> startMinute;
   final Value<int?> endMinute;
   final Value<String> flightIdsJson;
+  final Value<String> timeWindowsJson;
   final Value<int> rowid;
   const WorkCodeLegendRowsCompanion({
     this.id = const Value.absent(),
@@ -3345,6 +3386,7 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
     this.startMinute = const Value.absent(),
     this.endMinute = const Value.absent(),
     this.flightIdsJson = const Value.absent(),
+    this.timeWindowsJson = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   WorkCodeLegendRowsCompanion.insert({
@@ -3355,6 +3397,7 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
     this.startMinute = const Value.absent(),
     this.endMinute = const Value.absent(),
     this.flightIdsJson = const Value.absent(),
+    this.timeWindowsJson = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        employer = Value(employer),
@@ -3368,6 +3411,7 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
     Expression<int>? startMinute,
     Expression<int>? endMinute,
     Expression<String>? flightIdsJson,
+    Expression<String>? timeWindowsJson,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -3378,6 +3422,7 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
       if (startMinute != null) 'start_minute': startMinute,
       if (endMinute != null) 'end_minute': endMinute,
       if (flightIdsJson != null) 'flight_ids_json': flightIdsJson,
+      if (timeWindowsJson != null) 'time_windows_json': timeWindowsJson,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -3390,6 +3435,7 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
     Value<int?>? startMinute,
     Value<int?>? endMinute,
     Value<String>? flightIdsJson,
+    Value<String>? timeWindowsJson,
     Value<int>? rowid,
   }) {
     return WorkCodeLegendRowsCompanion(
@@ -3400,6 +3446,7 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
       startMinute: startMinute ?? this.startMinute,
       endMinute: endMinute ?? this.endMinute,
       flightIdsJson: flightIdsJson ?? this.flightIdsJson,
+      timeWindowsJson: timeWindowsJson ?? this.timeWindowsJson,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -3428,6 +3475,9 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
     if (flightIdsJson.present) {
       map['flight_ids_json'] = Variable<String>(flightIdsJson.value);
     }
+    if (timeWindowsJson.present) {
+      map['time_windows_json'] = Variable<String>(timeWindowsJson.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -3444,6 +3494,7 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
           ..write('startMinute: $startMinute, ')
           ..write('endMinute: $endMinute, ')
           ..write('flightIdsJson: $flightIdsJson, ')
+          ..write('timeWindowsJson: $timeWindowsJson, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -4041,6 +4092,358 @@ class ScheduleImportHistoryRowsCompanion
   }
 }
 
+class $SupervisorProfileRowsTable extends SupervisorProfileRows
+    with TableInfo<$SupervisorProfileRowsTable, SupervisorProfileRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SupervisorProfileRowsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _typeMeta = const VerificationMeta('type');
+  @override
+  late final GeneratedColumn<String> type = GeneratedColumn<String>(
+    'type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _phoneMeta = const VerificationMeta('phone');
+  @override
+  late final GeneratedColumn<String> phone = GeneratedColumn<String>(
+    'phone',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _notesMeta = const VerificationMeta('notes');
+  @override
+  late final GeneratedColumn<String> notes = GeneratedColumn<String>(
+    'notes',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, name, type, phone, notes];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'supervisor_profile_rows';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SupervisorProfileRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('type')) {
+      context.handle(
+        _typeMeta,
+        type.isAcceptableOrUnknown(data['type']!, _typeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_typeMeta);
+    }
+    if (data.containsKey('phone')) {
+      context.handle(
+        _phoneMeta,
+        phone.isAcceptableOrUnknown(data['phone']!, _phoneMeta),
+      );
+    }
+    if (data.containsKey('notes')) {
+      context.handle(
+        _notesMeta,
+        notes.isAcceptableOrUnknown(data['notes']!, _notesMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  SupervisorProfileRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SupervisorProfileRow(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      type: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}type'],
+      )!,
+      phone: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}phone'],
+      ),
+      notes: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}notes'],
+      ),
+    );
+  }
+
+  @override
+  $SupervisorProfileRowsTable createAlias(String alias) {
+    return $SupervisorProfileRowsTable(attachedDatabase, alias);
+  }
+}
+
+class SupervisorProfileRow extends DataClass
+    implements Insertable<SupervisorProfileRow> {
+  final String id;
+  final String name;
+  final String type;
+  final String? phone;
+  final String? notes;
+  const SupervisorProfileRow({
+    required this.id,
+    required this.name,
+    required this.type,
+    this.phone,
+    this.notes,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    map['type'] = Variable<String>(type);
+    if (!nullToAbsent || phone != null) {
+      map['phone'] = Variable<String>(phone);
+    }
+    if (!nullToAbsent || notes != null) {
+      map['notes'] = Variable<String>(notes);
+    }
+    return map;
+  }
+
+  SupervisorProfileRowsCompanion toCompanion(bool nullToAbsent) {
+    return SupervisorProfileRowsCompanion(
+      id: Value(id),
+      name: Value(name),
+      type: Value(type),
+      phone: phone == null && nullToAbsent
+          ? const Value.absent()
+          : Value(phone),
+      notes: notes == null && nullToAbsent
+          ? const Value.absent()
+          : Value(notes),
+    );
+  }
+
+  factory SupervisorProfileRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SupervisorProfileRow(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      type: serializer.fromJson<String>(json['type']),
+      phone: serializer.fromJson<String?>(json['phone']),
+      notes: serializer.fromJson<String?>(json['notes']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'type': serializer.toJson<String>(type),
+      'phone': serializer.toJson<String?>(phone),
+      'notes': serializer.toJson<String?>(notes),
+    };
+  }
+
+  SupervisorProfileRow copyWith({
+    String? id,
+    String? name,
+    String? type,
+    Value<String?> phone = const Value.absent(),
+    Value<String?> notes = const Value.absent(),
+  }) => SupervisorProfileRow(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    type: type ?? this.type,
+    phone: phone.present ? phone.value : this.phone,
+    notes: notes.present ? notes.value : this.notes,
+  );
+  SupervisorProfileRow copyWithCompanion(SupervisorProfileRowsCompanion data) {
+    return SupervisorProfileRow(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      type: data.type.present ? data.type.value : this.type,
+      phone: data.phone.present ? data.phone.value : this.phone,
+      notes: data.notes.present ? data.notes.value : this.notes,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SupervisorProfileRow(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('type: $type, ')
+          ..write('phone: $phone, ')
+          ..write('notes: $notes')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, name, type, phone, notes);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SupervisorProfileRow &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.type == this.type &&
+          other.phone == this.phone &&
+          other.notes == this.notes);
+}
+
+class SupervisorProfileRowsCompanion
+    extends UpdateCompanion<SupervisorProfileRow> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<String> type;
+  final Value<String?> phone;
+  final Value<String?> notes;
+  final Value<int> rowid;
+  const SupervisorProfileRowsCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.type = const Value.absent(),
+    this.phone = const Value.absent(),
+    this.notes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  SupervisorProfileRowsCompanion.insert({
+    required String id,
+    required String name,
+    required String type,
+    this.phone = const Value.absent(),
+    this.notes = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       name = Value(name),
+       type = Value(type);
+  static Insertable<SupervisorProfileRow> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<String>? type,
+    Expression<String>? phone,
+    Expression<String>? notes,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (type != null) 'type': type,
+      if (phone != null) 'phone': phone,
+      if (notes != null) 'notes': notes,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  SupervisorProfileRowsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? name,
+    Value<String>? type,
+    Value<String?>? phone,
+    Value<String?>? notes,
+    Value<int>? rowid,
+  }) {
+    return SupervisorProfileRowsCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      type: type ?? this.type,
+      phone: phone ?? this.phone,
+      notes: notes ?? this.notes,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (type.present) {
+      map['type'] = Variable<String>(type.value);
+    }
+    if (phone.present) {
+      map['phone'] = Variable<String>(phone.value);
+    }
+    if (notes.present) {
+      map['notes'] = Variable<String>(notes.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SupervisorProfileRowsCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('type: $type, ')
+          ..write('phone: $phone, ')
+          ..write('notes: $notes, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$ScheduleDatabase extends GeneratedDatabase {
   _$ScheduleDatabase(QueryExecutor e) : super(e);
   $ScheduleDatabaseManager get managers => $ScheduleDatabaseManager(this);
@@ -4054,6 +4457,8 @@ abstract class _$ScheduleDatabase extends GeneratedDatabase {
       $WorkCodeLegendRowsTable(this);
   late final $ScheduleImportHistoryRowsTable scheduleImportHistoryRows =
       $ScheduleImportHistoryRowsTable(this);
+  late final $SupervisorProfileRowsTable supervisorProfileRows =
+      $SupervisorProfileRowsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -4065,6 +4470,7 @@ abstract class _$ScheduleDatabase extends GeneratedDatabase {
     preferenceRows,
     workCodeLegendRows,
     scheduleImportHistoryRows,
+    supervisorProfileRows,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -5925,6 +6331,7 @@ typedef $$WorkCodeLegendRowsTableCreateCompanionBuilder =
       Value<int?> startMinute,
       Value<int?> endMinute,
       Value<String> flightIdsJson,
+      Value<String> timeWindowsJson,
       Value<int> rowid,
     });
 typedef $$WorkCodeLegendRowsTableUpdateCompanionBuilder =
@@ -5936,6 +6343,7 @@ typedef $$WorkCodeLegendRowsTableUpdateCompanionBuilder =
       Value<int?> startMinute,
       Value<int?> endMinute,
       Value<String> flightIdsJson,
+      Value<String> timeWindowsJson,
       Value<int> rowid,
     });
 
@@ -5980,6 +6388,11 @@ class $$WorkCodeLegendRowsTableFilterComposer
 
   ColumnFilters<String> get flightIdsJson => $composableBuilder(
     column: $table.flightIdsJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get timeWindowsJson => $composableBuilder(
+    column: $table.timeWindowsJson,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -6027,6 +6440,11 @@ class $$WorkCodeLegendRowsTableOrderingComposer
     column: $table.flightIdsJson,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get timeWindowsJson => $composableBuilder(
+    column: $table.timeWindowsJson,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$WorkCodeLegendRowsTableAnnotationComposer
@@ -6060,6 +6478,11 @@ class $$WorkCodeLegendRowsTableAnnotationComposer
 
   GeneratedColumn<String> get flightIdsJson => $composableBuilder(
     column: $table.flightIdsJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get timeWindowsJson => $composableBuilder(
+    column: $table.timeWindowsJson,
     builder: (column) => column,
   );
 }
@@ -6111,6 +6534,7 @@ class $$WorkCodeLegendRowsTableTableManager
                 Value<int?> startMinute = const Value.absent(),
                 Value<int?> endMinute = const Value.absent(),
                 Value<String> flightIdsJson = const Value.absent(),
+                Value<String> timeWindowsJson = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => WorkCodeLegendRowsCompanion(
                 id: id,
@@ -6120,6 +6544,7 @@ class $$WorkCodeLegendRowsTableTableManager
                 startMinute: startMinute,
                 endMinute: endMinute,
                 flightIdsJson: flightIdsJson,
+                timeWindowsJson: timeWindowsJson,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -6131,6 +6556,7 @@ class $$WorkCodeLegendRowsTableTableManager
                 Value<int?> startMinute = const Value.absent(),
                 Value<int?> endMinute = const Value.absent(),
                 Value<String> flightIdsJson = const Value.absent(),
+                Value<String> timeWindowsJson = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => WorkCodeLegendRowsCompanion.insert(
                 id: id,
@@ -6140,6 +6566,7 @@ class $$WorkCodeLegendRowsTableTableManager
                 startMinute: startMinute,
                 endMinute: endMinute,
                 flightIdsJson: flightIdsJson,
+                timeWindowsJson: timeWindowsJson,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -6499,6 +6926,237 @@ typedef $$ScheduleImportHistoryRowsTableProcessedTableManager =
       ScheduleImportHistoryRow,
       PrefetchHooks Function()
     >;
+typedef $$SupervisorProfileRowsTableCreateCompanionBuilder =
+    SupervisorProfileRowsCompanion Function({
+      required String id,
+      required String name,
+      required String type,
+      Value<String?> phone,
+      Value<String?> notes,
+      Value<int> rowid,
+    });
+typedef $$SupervisorProfileRowsTableUpdateCompanionBuilder =
+    SupervisorProfileRowsCompanion Function({
+      Value<String> id,
+      Value<String> name,
+      Value<String> type,
+      Value<String?> phone,
+      Value<String?> notes,
+      Value<int> rowid,
+    });
+
+class $$SupervisorProfileRowsTableFilterComposer
+    extends Composer<_$ScheduleDatabase, $SupervisorProfileRowsTable> {
+  $$SupervisorProfileRowsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get phone => $composableBuilder(
+    column: $table.phone,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SupervisorProfileRowsTableOrderingComposer
+    extends Composer<_$ScheduleDatabase, $SupervisorProfileRowsTable> {
+  $$SupervisorProfileRowsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get phone => $composableBuilder(
+    column: $table.phone,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get notes => $composableBuilder(
+    column: $table.notes,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SupervisorProfileRowsTableAnnotationComposer
+    extends Composer<_$ScheduleDatabase, $SupervisorProfileRowsTable> {
+  $$SupervisorProfileRowsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get type =>
+      $composableBuilder(column: $table.type, builder: (column) => column);
+
+  GeneratedColumn<String> get phone =>
+      $composableBuilder(column: $table.phone, builder: (column) => column);
+
+  GeneratedColumn<String> get notes =>
+      $composableBuilder(column: $table.notes, builder: (column) => column);
+}
+
+class $$SupervisorProfileRowsTableTableManager
+    extends
+        RootTableManager<
+          _$ScheduleDatabase,
+          $SupervisorProfileRowsTable,
+          SupervisorProfileRow,
+          $$SupervisorProfileRowsTableFilterComposer,
+          $$SupervisorProfileRowsTableOrderingComposer,
+          $$SupervisorProfileRowsTableAnnotationComposer,
+          $$SupervisorProfileRowsTableCreateCompanionBuilder,
+          $$SupervisorProfileRowsTableUpdateCompanionBuilder,
+          (
+            SupervisorProfileRow,
+            BaseReferences<
+              _$ScheduleDatabase,
+              $SupervisorProfileRowsTable,
+              SupervisorProfileRow
+            >,
+          ),
+          SupervisorProfileRow,
+          PrefetchHooks Function()
+        > {
+  $$SupervisorProfileRowsTableTableManager(
+    _$ScheduleDatabase db,
+    $SupervisorProfileRowsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SupervisorProfileRowsTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$SupervisorProfileRowsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$SupervisorProfileRowsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> type = const Value.absent(),
+                Value<String?> phone = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SupervisorProfileRowsCompanion(
+                id: id,
+                name: name,
+                type: type,
+                phone: phone,
+                notes: notes,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String name,
+                required String type,
+                Value<String?> phone = const Value.absent(),
+                Value<String?> notes = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => SupervisorProfileRowsCompanion.insert(
+                id: id,
+                name: name,
+                type: type,
+                phone: phone,
+                notes: notes,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<
+                    $SupervisorProfileRowsTable,
+                    SupervisorProfileRow
+                  >(table),
+                  BaseReferences<
+                    _$ScheduleDatabase,
+                    $SupervisorProfileRowsTable,
+                    SupervisorProfileRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SupervisorProfileRowsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ScheduleDatabase,
+      $SupervisorProfileRowsTable,
+      SupervisorProfileRow,
+      $$SupervisorProfileRowsTableFilterComposer,
+      $$SupervisorProfileRowsTableOrderingComposer,
+      $$SupervisorProfileRowsTableAnnotationComposer,
+      $$SupervisorProfileRowsTableCreateCompanionBuilder,
+      $$SupervisorProfileRowsTableUpdateCompanionBuilder,
+      (
+        SupervisorProfileRow,
+        BaseReferences<
+          _$ScheduleDatabase,
+          $SupervisorProfileRowsTable,
+          SupervisorProfileRow
+        >,
+      ),
+      SupervisorProfileRow,
+      PrefetchHooks Function()
+    >;
 
 class $ScheduleDatabaseManager {
   final _$ScheduleDatabase _db;
@@ -6518,4 +7176,6 @@ class $ScheduleDatabaseManager {
         _db,
         _db.scheduleImportHistoryRows,
       );
+  $$SupervisorProfileRowsTableTableManager get supervisorProfileRows =>
+      $$SupervisorProfileRowsTableTableManager(_db, _db.supervisorProfileRows);
 }

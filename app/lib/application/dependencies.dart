@@ -8,10 +8,12 @@ import '../data/academic_term_repository.dart';
 import '../data/schedule_database.dart';
 import '../data/schedule_repository.dart';
 import '../data/schedule_import_history_repository.dart';
+import '../data/supervisor_repository.dart';
 import '../data/work_code_legend_repository.dart';
 import '../data/weather_repository.dart';
 import '../data/open_meteo_weather_service.dart';
 import '../domain/schedule.dart';
+import '../domain/supervisor_profile.dart';
 import '../domain/academic_term.dart';
 import '../domain/schedule_engine.dart';
 import '../platform/widget_snapshot_publisher.dart';
@@ -51,6 +53,14 @@ final workCodeLegendRepositoryProvider = Provider<WorkCodeLegendRepository>(
 
 final workCodeLegendsProvider = StreamProvider(
   (ref) => ref.watch(workCodeLegendRepositoryProvider).watchItems(),
+);
+
+final supervisorRepositoryProvider = Provider<SupervisorRepository>(
+  (ref) => SupervisorRepository(ref.watch(scheduleDatabaseProvider)),
+);
+
+final supervisorProfilesProvider = StreamProvider<List<SupervisorProfile>>(
+  (ref) => ref.watch(supervisorRepositoryProvider).watchItems(),
 );
 
 final academicTermRepositoryProvider = Provider<AcademicTermRepository>(

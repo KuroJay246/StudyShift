@@ -6,6 +6,7 @@ import 'package:cryptography/cryptography.dart';
 
 import '../domain/academic_term.dart';
 import '../domain/schedule.dart';
+import '../domain/supervisor_profile.dart';
 import '../domain/work_code_legend.dart';
 
 class ScheduleBackup {
@@ -14,12 +15,14 @@ class ScheduleBackup {
     required this.items,
     this.workCodeLegends = const [],
     this.academicTerms = const [],
+    this.supervisors = const [],
   });
 
   final DateTime createdAt;
   final List<ScheduleItem> items;
   final List<WorkCodeLegend> workCodeLegends;
   final List<AcademicTerm> academicTerms;
+  final List<SupervisorProfile> supervisors;
 }
 
 /// A portable, authenticated, passphrase-encrypted schedule backup.
@@ -30,10 +33,12 @@ class ScheduleBackupCodec {
   static const maxItems = 10000;
   static const _iterations = 600000;
   static const _saltBytes = 16;
-  static const _aad = 'ShiftStudy.ScheduleBackup.v1';
   static const _format = 'shift-study-encrypted-backup';
   static const _payloadFormat = 'shift-study-schedule';
-  static const _version = 1;
+  static const _currentVersion = 2;
+  static const _supportedVersions = {1, _currentVersion};
+
+  static String _aadFor(int version) => 'ShiftStudy.ScheduleBackup.v$version';
 
   Future<Uint8List> encode(
     List<ScheduleItem> items, {
@@ -41,6 +46,7 @@ class ScheduleBackupCodec {
     DateTime? createdAt,
     List<WorkCodeLegend> workCodeLegends = const [],
     List<AcademicTerm> academicTerms = const [],
+    List<SupervisorProfile> supervisors = const [],
   }) async {
     _validatePassphrase(passphrase);
     if (items.length > maxItems) {
@@ -48,10 +54,43 @@ class ScheduleBackupCodec {
     }
     _checkUniqueIds(items);
     _checkTermReferences(items, academicTerms);
+    if (supervisors.length > 1000) {
+      throw const FormatException(
+        'This schedule contains too many supervisors.',
+      );
+    }
+    final supervisorIds = <String>{};
+    for (final profile in supervisors) {
+      if (profile.id.trim().isEmpty ||
+          profile.id.length > 256 ||
+          profile.name.trim().isEmpty ||
+          profile.name.trim().length > 256 ||
+          profile.phone.trim().length > 128 ||
+          profile.notes.trim().length > 2000 ||
+          !supervisorIds.add(profile.id)) {
+        throw const FormatException('Supervisor contacts are invalid.');
+      }
+    }
+    for (final entry in workCodeLegends) {
+      final windows = entry.timeWindows;
+      if (entry.id.trim().isEmpty ||
+          entry.id.length > 256 ||
+          entry.employer.trim().isEmpty ||
+          entry.employer.trim().length > 512 ||
+          entry.code.trim().isEmpty ||
+          entry.code.trim().length > 128 ||
+          entry.assignmentDetails.trim().length > 4000 ||
+          windows.length > 2 ||
+          windows.any((window) => !window.isValid) ||
+          (windows.isEmpty && entry.assignmentDetails.trim().isEmpty) ||
+          ((entry.startMinute == null) != (entry.endMinute == null))) {
+        throw const FormatException('Roster-code definitions are invalid.');
+      }
+    }
     final plain = utf8.encode(
       jsonEncode({
         'format': _payloadFormat,
-        'version': _version,
+        'version': _currentVersion,
         'createdAt': (createdAt ?? DateTime.now()).toUtc().toIso8601String(),
         'events': [for (final item in items) _encodeItem(item)],
         'academicTerms': [for (final term in academicTerms) _encodeTerm(term)],
@@ -65,7 +104,25 @@ class ScheduleBackupCodec {
               'assignmentDetails': entry.assignmentDetails,
               'startMinute': entry.startMinute,
               'endMinute': entry.endMinute,
+              'timeWindows': [
+                for (final window in entry.timeWindows)
+                  {
+                    'startMinute': window.startMinute,
+                    'endMinute': window.endMinute,
+                    'endDayOffset': window.endDayOffset,
+                  },
+              ],
               'flightIds': entry.flightIds,
+            },
+        ],
+        'supervisors': [
+          for (final profile in supervisors)
+            {
+              'id': profile.id,
+              'name': profile.name,
+              'type': profile.type.name,
+              'phone': profile.phone,
+              'notes': profile.notes,
             },
         ],
       }),
@@ -83,12 +140,12 @@ class ScheduleBackupCodec {
     final box = await _cipher.encrypt(
       plain,
       secretKey: key,
-      aad: utf8.encode(_aad),
+      aad: utf8.encode(_aadFor(_currentVersion)),
     );
     final bytes = utf8.encode(
       jsonEncode({
         'format': _format,
-        'version': _version,
+        'version': _currentVersion,
         'cipher': 'AES-256-GCM',
         'kdf': 'PBKDF2-HMAC-SHA256',
         'iterations': _iterations,
@@ -116,7 +173,10 @@ class ScheduleBackupCodec {
       _decodeJson(bytes, 'Backup file is not valid.'),
       'Backup file is not valid.',
     );
-    if (envelope['format'] != _format || envelope['version'] != _version) {
+    final version = envelope['version'];
+    if (envelope['format'] != _format ||
+        version is! int ||
+        !_supportedVersions.contains(version)) {
       throw const FormatException('This backup format is not supported.');
     }
     if (envelope['cipher'] != 'AES-256-GCM' ||
@@ -162,7 +222,7 @@ class ScheduleBackupCodec {
       clear = await _cipher.decrypt(
         SecretBox(ciphertext, nonce: nonce, mac: Mac(mac)),
         secretKey: key,
-        aad: utf8.encode(_aad),
+        aad: utf8.encode(_aadFor(version)),
       );
     } on Object {
       throw const FormatException(
@@ -174,13 +234,14 @@ class ScheduleBackupCodec {
       'Backup contents are not valid.',
     );
     if (payload['format'] != _payloadFormat ||
-        payload['version'] != _version ||
+        payload['version'] != version ||
         payload['createdAt'] is! String ||
         payload['events'] is! List ||
         (payload['workCodeLegends'] != null &&
             payload['workCodeLegends'] is! List) ||
         (payload['academicTerms'] != null &&
-            payload['academicTerms'] is! List)) {
+            payload['academicTerms'] is! List) ||
+        (payload['supervisors'] != null && payload['supervisors'] is! List)) {
       throw const FormatException('Backup contents are not supported.');
     }
     final createdAt = DateTime.tryParse(payload['createdAt']! as String);
@@ -245,19 +306,17 @@ class ScheduleBackupCodec {
                 .trim(),
         startMinute: value['startMinute'] as int?,
         endMinute: value['endMinute'] as int?,
+        timeWindows: _readTimeWindows(value['timeWindows']),
         flightIds: _readFlightIds(value['flightIds']),
       );
+      final windows = entry.timeWindows;
       final key =
           '${entry.employer.toLowerCase()}\u0000${entry.code.toLowerCase()}';
       if (entry.employer.isEmpty ||
           entry.code.isEmpty ||
-          (entry.assignmentDetails.isEmpty && entry.startMinute == null) ||
-          ((entry.startMinute == null) != (entry.endMinute == null)) ||
-          (entry.startMinute != null &&
-              (entry.startMinute! < 0 ||
-                  entry.startMinute! >= 1440 ||
-                  entry.endMinute! < 0 ||
-                  entry.endMinute! >= 1440)) ||
+          (entry.assignmentDetails.isEmpty && windows.isEmpty) ||
+          windows.length > 2 ||
+          windows.any((window) => !window.isValid) ||
           !legendIds.add(entry.id) ||
           !legendKeys.add(key)) {
         throw const FormatException(
@@ -266,11 +325,44 @@ class ScheduleBackupCodec {
       }
       legends.add(entry);
     }
+    final supervisors = <SupervisorProfile>[];
+    final rawSupervisors = payload['supervisors'] as List? ?? const [];
+    if (rawSupervisors.length > 1000) {
+      throw const FormatException('This backup contains too many supervisors.');
+    }
+    final supervisorIds = <String>{};
+    for (final raw in rawSupervisors) {
+      final value = _readObject(raw, 'Backup supervisor is invalid.');
+      final typeName = value['type'] as String? ?? 'permanent';
+      final type = SupervisorType.values.where(
+        (entry) => entry.name == typeName,
+      );
+      if (type.isEmpty) {
+        throw const FormatException('Backup supervisor type is invalid.');
+      }
+      final profile = SupervisorProfile(
+        id: _requiredString(value, 'id', 256),
+        name: _requiredString(value, 'name', 256).trim(),
+        type: type.first,
+        phone: (value['phone'] as String? ?? '').trim(),
+        notes: (value['notes'] as String? ?? '').trim(),
+      );
+      if (profile.name.isEmpty ||
+          profile.phone.length > 128 ||
+          profile.notes.length > 2000 ||
+          !supervisorIds.add(profile.id)) {
+        throw const FormatException(
+          'Backup supervisor contacts contain invalid or duplicate entries.',
+        );
+      }
+      supervisors.add(profile);
+    }
     return ScheduleBackup(
       createdAt: createdAt,
       items: items,
       workCodeLegends: legends,
       academicTerms: terms,
+      supervisors: supervisors,
     );
   }
 
@@ -600,6 +692,33 @@ class ScheduleBackupCodec {
       result.add(id);
     }
     return result;
+  }
+
+  static List<WorkCodeTimeWindow> _readTimeWindows(Object? raw) {
+    if (raw == null) return const [];
+    if (raw is! List || raw.length > 2) {
+      throw const FormatException('Backup shift-code times are invalid.');
+    }
+    return [for (final value in raw) _readTimeWindow(value)];
+  }
+
+  static WorkCodeTimeWindow _readTimeWindow(Object? raw) {
+    final value = _readObject(raw, 'Backup shift-code time is invalid.');
+    final startMinute = value['startMinute'];
+    final endMinute = value['endMinute'];
+    final endDayOffset = value['endDayOffset'] ?? 0;
+    if (startMinute is! int || endMinute is! int || endDayOffset is! int) {
+      throw const FormatException('Backup shift-code time is invalid.');
+    }
+    final window = WorkCodeTimeWindow(
+      startMinute: startMinute,
+      endMinute: endMinute,
+      endDayOffset: endDayOffset,
+    );
+    if (!window.isValid) {
+      throw const FormatException('Backup shift-code time is invalid.');
+    }
+    return window;
   }
 
   static String? _optionalString(

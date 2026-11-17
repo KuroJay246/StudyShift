@@ -37,11 +37,15 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
           .read(workCodeLegendRepositoryProvider)
           .getItems();
       final terms = await ref.read(academicTermRepositoryProvider).getItems();
+      final supervisors = await ref
+          .read(supervisorRepositoryProvider)
+          .getItems();
       final bytes = await _codec.encode(
         items,
         passphrase: passphrase,
         workCodeLegends: legends,
         academicTerms: terms,
+        supervisors: supervisors,
       );
       final now = DateTime.now();
       final saved = await _files.save(
@@ -88,6 +92,7 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
         backup.items.length,
         backup.workCodeLegends.length,
         backup.academicTerms.length,
+        backup.supervisors.length,
         backup.createdAt,
       );
       if (choice == null || !mounted) return;
@@ -119,15 +124,86 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
               backup.workCodeLegends,
               replaceExisting: choice == _RestoreChoice.replace,
             );
+        await ref
+            .read(supervisorRepositoryProvider)
+            .restoreItems(
+              backup.supervisors,
+              replaceExisting: choice == _RestoreChoice.replace,
+            );
       });
       ref.invalidate(scheduleItemsProvider);
       ref.invalidate(workCodeLegendsProvider);
       ref.invalidate(academicTermsProvider);
+      ref.invalidate(supervisorProfilesProvider);
       if (mounted) {
         _showMessage(_restoreSummary(result, choice));
       }
     } on Object catch (error) {
       if (mounted) _showMessage(_safeError(error), isError: true);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _resetAppData() async {
+    final firstConfirmation = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: Icon(
+          Icons.warning_amber_rounded,
+          color: Theme.of(context).colorScheme.error,
+        ),
+        title: const Text('Reset StudyShift?'),
+        content: const Text(
+          'This permanently clears all StudyShift events, shift codes, supervisors, academic terms, import history and preferences stored on this device. External calendar entries are not changed. Create a backup first if you may need this data.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (firstConfirmation != true || !mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const _FactoryResetConfirmDialog(),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() {
+      _working = true;
+      _message = null;
+    });
+    try {
+      await ref.read(scheduleDatabaseProvider).resetLocalData();
+      ref.invalidate(appPreferencesProvider);
+      ref.invalidate(scheduleItemsProvider);
+      ref.invalidate(workCodeLegendsProvider);
+      ref.invalidate(supervisorProfilesProvider);
+      ref.invalidate(academicTermsProvider);
+      ref.invalidate(scheduleImportHistoryProvider);
+      if (mounted) {
+        _showMessage(
+          'StudyShift was reset on this device. External calendar entries were not changed.',
+        );
+      }
+    } on Object catch (_) {
+      if (mounted) {
+        _showMessage(
+          'The reset could not be completed. Your local data was not cleared.',
+          isError: true,
+        );
+      }
     } finally {
       if (mounted) setState(() => _working = false);
     }
@@ -144,6 +220,7 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
     int count,
     int legendCount,
     int termCount,
+    int supervisorCount,
     DateTime createdAt,
   ) => showDialog<_RestoreChoice>(
     context: context,
@@ -153,7 +230,7 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
       return AlertDialog(
         title: const Text('Review this backup'),
         content: Text(
-          'Created $date · $count ${count == 1 ? 'event' : 'events'} · $termCount ${termCount == 1 ? 'academic term' : 'academic terms'} · $legendCount ${legendCount == 1 ? 'roster code' : 'roster codes'}. Nothing changes until you choose.\n\nMerge adds new IDs and keeps anything already saved. Replace deletes every event, academic term and roster code on this device, then installs the backup. This cannot be undone in the app.',
+          'Created $date · $count ${count == 1 ? 'event' : 'events'} · $termCount ${termCount == 1 ? 'academic term' : 'academic terms'} · $legendCount ${legendCount == 1 ? 'roster code' : 'roster codes'} · $supervisorCount ${supervisorCount == 1 ? 'supervisor' : 'supervisors'}. Nothing changes until you choose.\n\nMerge adds new IDs and keeps anything already saved. Replace deletes every event, academic term, roster code and supervisor contact on this device, then installs the backup. This cannot be undone in the app.',
         ),
         actions: [
           TextButton(
@@ -272,6 +349,38 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
               ),
             ),
           ),
+          const SizedBox(height: 12),
+          Card(
+            color: palette.errorContainer.withValues(alpha: .35),
+            child: Padding(
+              padding: const EdgeInsets.all(StudyShiftSpacing.cardPadding),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.restart_alt_rounded, color: palette.error),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Start over',
+                    style: Theme.of(context).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Reset StudyShift on this device. This removes your saved schedule, codes, supervisor contacts, terms, import history and preferences.',
+                  ),
+                  const SizedBox(height: 14),
+                  OutlinedButton.icon(
+                    onPressed: _working ? null : _resetAppData,
+                    icon: const Icon(Icons.delete_outline_rounded),
+                    label: const Text('Reset app data'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: palette.error,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
           if (_working) ...[
             const SizedBox(height: 20),
             const LinearProgressIndicator(),
@@ -306,6 +415,64 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
       ),
     );
   }
+}
+
+class _FactoryResetConfirmDialog extends StatefulWidget {
+  const _FactoryResetConfirmDialog();
+
+  @override
+  State<_FactoryResetConfirmDialog> createState() =>
+      _FactoryResetConfirmDialogState();
+}
+
+class _FactoryResetConfirmDialogState
+    extends State<_FactoryResetConfirmDialog> {
+  final _confirmation = TextEditingController();
+
+  @override
+  void dispose() {
+    _confirmation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Confirm factory reset'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Type StudyShift to confirm.'),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _confirmation,
+          autofocus: true,
+          autocorrect: false,
+          enableSuggestions: false,
+          decoration: const InputDecoration(
+            labelText: 'Type StudyShift to confirm',
+          ),
+          onChanged: (_) => setState(() {}),
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context, false),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        style: FilledButton.styleFrom(
+          backgroundColor: Theme.of(context).colorScheme.error,
+          foregroundColor: Theme.of(context).colorScheme.onError,
+        ),
+        onPressed: _confirmation.text == 'StudyShift'
+            ? () => Navigator.pop(context, true)
+            : null,
+        child: const Text('Reset permanently'),
+      ),
+    ],
+  );
 }
 
 class _PassphraseDialog extends StatefulWidget {

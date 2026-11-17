@@ -70,6 +70,13 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(
+      find.ancestor(
+        of: find.text('Show weather on Today'),
+        matching: find.byType(Card),
+      ),
+      findsOneWidget,
+    );
+    expect(
       find.text(
         'Approximate coordinates are sent only when you choose a place or '
         'refresh weather. '
@@ -147,6 +154,54 @@ void main() {
     final saved = await PreferencesRepository(database).load();
     expect(saved.effectiveWeatherLayout, WeatherLayout.moreDetails);
     expect(saved.showWeatherWindSpeed, isTrue);
+  });
+
+  testWidgets('saved weather places stay evenly spaced on a narrow screen', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    await PreferencesRepository(database).setWeatherLocations(
+      '[{"name":"Bristol","label":"Bristol, South West, United Kingdom",'
+      '"latitude":51.4545,"longitude":-2.5879},'
+      '{"name":"Cardiff","label":"Cardiff, Wales, United Kingdom",'
+      '"latitude":51.4816,"longitude":-3.1791}]',
+    );
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(home: const WeatherSettingsPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (final key in const [
+      ValueKey('weather-saved-place-51.4545,-2.5879'),
+      ValueKey('weather-saved-place-51.4816,-3.1791'),
+    ]) {
+      await tester.scrollUntilVisible(
+        find.byKey(key),
+        240,
+        scrollable: find.byType(Scrollable).first,
+      );
+      final card = tester.widget<Card>(find.byKey(key));
+      expect(card.margin, EdgeInsets.zero);
+      expect(tester.takeException(), isNull);
+    }
   });
 
   testWidgets('location is requested only after consent and then saved', (

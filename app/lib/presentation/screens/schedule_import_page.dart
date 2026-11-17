@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -72,6 +73,34 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   bool _replaceMatches = false;
   ScheduleImportSourceType? _sourceType;
   String? _error;
+  Uint8List? _pendingTableBytes;
+  String? _pendingTableName;
+  ScheduleImportSourceType? _pendingTableType;
+  List<String> _tableHeaders = const [];
+  Map<String, String> _columnSelections = const {};
+
+  static const _tableFields = <String, String>{
+    'date': 'Event date *',
+    'title': 'Event or shift name *',
+    'category': 'Category *',
+    'start': 'Start time',
+    'end': 'End time',
+    'end_date': 'End date',
+    'time_zone': 'Time zone',
+    'source_id': 'Source ID',
+    'employer': 'Employer',
+    'department': 'Department or team',
+    'job_role': 'Job role',
+    'code': 'Roster code',
+    'code_meaning': 'Code meaning',
+    'reporting_instruction': 'Reporting instruction',
+    'location': 'Location',
+    'notes': 'Notes',
+    'supervisor_name': 'Supervisor name',
+    'supervisor_phone': 'Supervisor phone',
+    'contact_name': 'Contact name',
+    'contact_phone': 'Contact phone',
+  };
 
   Future<void> _selectFile() async {
     setState(() {
@@ -101,9 +130,33 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       } else if (fileName.endsWith('.csv')) {
         sourceType = ScheduleImportSourceType.csv;
         final text = utf8.decode(selected.bytes!, allowMalformed: false);
+        final headers = _csvParser.inspectHeaders(text);
+        if (_needsColumnMapping(headers)) {
+          if (!mounted) return;
+          setState(() {
+            _pendingTableBytes = selected.bytes;
+            _pendingTableName = selected.name;
+            _pendingTableType = sourceType;
+            _tableHeaders = headers;
+            _columnSelections = _suggestColumns(headers);
+          });
+          return;
+        }
         preview = await _csvParser.parse(text, sourceName: selected.name);
       } else if (fileName.endsWith('.xlsx')) {
         sourceType = ScheduleImportSourceType.xlsx;
+        final headers = _xlsxParser.inspectHeaders(selected.bytes!);
+        if (_needsColumnMapping(headers)) {
+          if (!mounted) return;
+          setState(() {
+            _pendingTableBytes = selected.bytes;
+            _pendingTableName = selected.name;
+            _pendingTableType = sourceType;
+            _tableHeaders = headers;
+            _columnSelections = _suggestColumns(headers);
+          });
+          return;
+        }
         preview = await _xlsxParser.parse(
           selected.bytes!,
           sourceName: selected.name,
@@ -146,6 +199,121 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  bool _needsColumnMapping(List<String> headers) {
+    const canonical = {
+      'date',
+      'end_date',
+      'title',
+      'category',
+      'start',
+      'end',
+      'time_zone',
+      'source_id',
+      'employer',
+      'department',
+      'job_role',
+      'code',
+      'code_meaning',
+      'reporting_instruction',
+      'location',
+      'notes',
+      'supervisor_name',
+      'supervisor_phone',
+      'contact_name',
+      'contact_phone',
+    };
+    final normalized = headers
+        .map((header) => header.trim().toLowerCase())
+        .toSet();
+    return !{'date', 'title', 'category'}.every(normalized.contains) ||
+        normalized.any((header) => !canonical.contains(header));
+  }
+
+  Map<String, String> _suggestColumns(List<String> headers) {
+    final byNormalized = {
+      for (final header in headers) header.trim().toLowerCase(): header,
+    };
+    return {
+      for (final field in _tableFields.keys)
+        if (byNormalized.containsKey(field)) field: byNormalized[field]!,
+    };
+  }
+
+  Future<void> _continueMappedImport() async {
+    final sourceName = _pendingTableName;
+    final sourceType = _pendingTableType;
+    final bytes = _pendingTableBytes;
+    if (sourceName == null || sourceType == null || bytes == null) return;
+    final mapping = <String, String>{};
+    for (final entry in _columnSelections.entries) {
+      if (entry.value.isNotEmpty) mapping[entry.value] = entry.key;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final preview = sourceType == ScheduleImportSourceType.csv
+          ? await _csvParser.parse(
+              utf8.decode(bytes, allowMalformed: false),
+              sourceName: sourceName,
+              headerMapping: mapping,
+            )
+          : await _xlsxParser.parse(
+              bytes,
+              sourceName: sourceName,
+              headerMapping: mapping,
+            );
+      await _showPreview(preview, sourceName, sourceType);
+      if (mounted) {
+        setState(() {
+          _pendingTableBytes = null;
+          _pendingTableName = null;
+          _pendingTableType = null;
+          _tableHeaders = const [];
+          _columnSelections = const {};
+        });
+      }
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = _friendlyError(error));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _showPreview(
+    ScheduleImportPreview preview,
+    String sourceName,
+    ScheduleImportSourceType sourceType,
+  ) async {
+    final existingItems = await ref.read(scheduleRepositoryProvider).getItems();
+    final localLegends = await ref
+        .read(workCodeLegendRepositoryProvider)
+        .getItems();
+    final byId = {for (final item in existingItems) item.id: item};
+    final reviewedProposals = [
+      for (final proposal in preview.proposals)
+        _withLocalLegendMeaning(proposal, localLegends),
+    ];
+    if (!mounted) return;
+    setState(() {
+      _sourceName = sourceName;
+      _sourceType = sourceType;
+      _rows = [
+        for (final proposal in reviewedProposals)
+          _ImportRow(
+            proposal: proposal,
+            existing: byId[proposal.item.id],
+            included: !byId.containsKey(proposal.item.id),
+          ),
+      ];
+      _notices = preview.notices;
+      _error = preview.proposals.isEmpty && preview.notices.isEmpty
+          ? 'This calendar has no events to review.'
+          : null;
+    });
   }
 
   ScheduleImportProposal _withLocalLegendMeaning(
@@ -481,7 +649,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             ),
             const SizedBox(height: 8),
             Text(
-              'CSV and Excel files use the documented StudyShift columns. Each row is shown for review before anything is saved.',
+              'If your roster uses different headings, match its columns to StudyShift fields. Import stays on this device, and nothing is saved until you review and confirm.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             Card(
@@ -493,7 +661,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Required columns: date, title and category. Timed events also need start, end and time_zone. Optional columns: end_date, source_id, employer, department, job_role, code, code_meaning, reporting_instruction, location, notes, supervisor_name, supervisor_phone, contact_name and contact_phone. Excel imports read visible worksheets whose first row uses these exact column names; formulas, hidden rows and hidden worksheets are refused. Use YYYY-MM-DD dates and 24-hour HH:mm times. Categories: shift, overtime, training, class, examination, assignment, rest_day, leave, day_off or personal. Work events with an earlier end time continue the next day; other overnight events need end_date. Every proposed event must be reviewed before saving.',
+                      'Required fields: event date, event or shift name, and category. Timed events also need start and end times; use YYYY-MM-DD dates and 24-hour HH:mm times. Optional fields include end_date, source_id, employer, department,job_role, code, code_meaning, reporting_instruction, location, notes, supervisor_name, supervisor_phone, contact_name and contact_phone. These are the StudyShift field names available in the mapping step. Excel imports read visible worksheets; formulas, hidden rows and hidden worksheets are refused. Categories: shift, overtime, training, class, examination, assignment, rest_day, leave, day_off or personal. Work events with an earlier end time continue the next day; other overnight events need an end date. Every proposed event must be reviewed before saving.',
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -541,6 +709,10 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
+            if (_pendingTableName != null) ...[
+              const SizedBox(height: 12),
+              _buildColumnMapper(),
+            ],
             if (_sourceName != null) ...[
               const SizedBox(height: 8),
               _NoticeCard(
@@ -647,6 +819,106 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _buildColumnMapper() {
+    final requiredFields = ['date', 'title', 'category'];
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(StudyShiftSpacing.x3),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Match your roster columns',
+              style: Theme.of(context).textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Choose which heading in ${_pendingTableName ?? 'this file'} contains each StudyShift field. Unmapped columns are ignored.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            for (final field in requiredFields)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _columnDropdown(field, requiredField: true),
+              ),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('Optional fields'),
+              subtitle: const Text(
+                'Roster code, supervisor, contact and other details',
+              ),
+              children: [
+                for (final field in _tableFields.keys.where(
+                  (field) => !requiredFields.contains(field),
+                ))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _columnDropdown(field),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed:
+                    _loading ||
+                        _saving ||
+                        requiredFields.any(
+                          (field) => (_columnSelections[field] ?? '').isEmpty,
+                        )
+                    ? null
+                    : _continueMappedImport,
+                icon: _loading
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.fact_check_outlined),
+                label: Text(
+                  _loading ? 'Reading columns…' : 'Match columns and preview',
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _columnDropdown(String field, {bool requiredField = false}) {
+    final current = _columnSelections[field] ?? '';
+    final usedByOthers = {
+      for (final entry in _columnSelections.entries)
+        if (entry.key != field && entry.value.isNotEmpty) entry.value,
+    };
+    return DropdownButtonFormField<String>(
+      key: ValueKey('column-map-$field'),
+      initialValue: current.isEmpty && requiredField ? null : current,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: _tableFields[field],
+        border: const OutlineInputBorder(),
+        helperText: requiredField ? 'Required' : null,
+      ),
+      items: [
+        if (!requiredField)
+          const DropdownMenuItem(value: '', child: Text('Do not import')),
+        for (final header in _tableHeaders)
+          if (!usedByOthers.contains(header) || header == current)
+            DropdownMenuItem(
+              value: header,
+              child: Text(header, overflow: TextOverflow.ellipsis),
+            ),
+      ],
+      onChanged: (value) => setState(() {
+        _columnSelections = {..._columnSelections, field: value ?? ''};
+      }),
     );
   }
 }

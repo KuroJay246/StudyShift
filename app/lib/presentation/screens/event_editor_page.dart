@@ -5,6 +5,7 @@ import '../../application/dependencies.dart';
 import '../../domain/academic_term.dart';
 import '../../domain/civil_time_resolver.dart';
 import '../../domain/schedule.dart';
+import '../../domain/supervisor_profile.dart';
 import '../../domain/work_code_legend.dart';
 import '../../data/preferences_repository.dart';
 import '../../platform/local_reminders.dart';
@@ -117,6 +118,9 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
   bool _timeManuallyEdited = false;
   CivilTimeFoldChoice? _fold;
   String? _error;
+  String? _selectedLegendId;
+  int _endDayOffset = 0;
+  bool _endDateManuallyEdited = false;
 
   bool get _hasNoTime =>
       (widget.kind == ScheduleKind.work && _workCategory.isAllDay) ||
@@ -133,6 +137,11 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
     _until = widget.existing?.recurrence?.until;
     _allDay = widget.existing?.allDay ?? false;
     _reminderMinutesBefore = widget.existing?.reminderMinutesBefore;
+    _endDayOffset = widget.existing?.intervals.isNotEmpty == true
+        ? widget.existing!.intervals.last.endDayOffset
+        : (!_hasNoTime && _minute(_ends.last) <= _minute(_starts.last))
+        ? 1
+        : 0;
   }
 
   @override
@@ -178,27 +187,81 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
           });
       if (eligible.isNotEmpty) suggestion = eligible.first;
     }
-    final selectedLegend = suggestion;
-    if (selectedLegend == null) return;
-    if (!_meaningManuallyEdited &&
-        selectedLegend.assignmentDetails.isNotEmpty) {
-      _codeMeaning.text = selectedLegend.assignmentDetails;
+    if (suggestion == null) return;
+    setState(() => _applyLegendEntry(suggestion!));
+  }
+
+  void _applyLegendEntry(WorkCodeLegend legend) {
+    if (!_meaningManuallyEdited && legend.assignmentDetails.isNotEmpty) {
+      _codeMeaning.text = legend.assignmentDetails;
     }
-    if (!_timeManuallyEdited &&
-        _starts.length == 1 &&
-        selectedLegend.startMinute != null &&
-        selectedLegend.endMinute != null) {
-      setState(() {
-        _starts[0] = TimeOfDay(
-          hour: selectedLegend.startMinute! ~/ 60,
-          minute: selectedLegend.startMinute! % 60,
+    final windows = legend.timeWindows;
+    if (!_timeManuallyEdited && windows.isNotEmpty && windows.length <= 2) {
+      _starts
+        ..clear()
+        ..addAll(
+          windows.map(
+            (window) => TimeOfDay(
+              hour: window.startMinute ~/ 60,
+              minute: window.startMinute % 60,
+            ),
+          ),
         );
-        _ends[0] = TimeOfDay(
-          hour: selectedLegend.endMinute! ~/ 60,
-          minute: selectedLegend.endMinute! % 60,
+      _ends
+        ..clear()
+        ..addAll(
+          windows.map(
+            (window) => TimeOfDay(
+              hour: window.endMinute ~/ 60,
+              minute: window.endMinute % 60,
+            ),
+          ),
         );
-      });
+      _endDayOffset = windows.last.endDayOffset;
+      _endDateManuallyEdited = false;
     }
+  }
+
+  WorkCodeLegend? _legendForCode(List<WorkCodeLegend> legends) {
+    if (_selectedLegendId != null) {
+      for (final legend in legends) {
+        if (legend.id == _selectedLegendId) return legend;
+      }
+    }
+    final code = _code.text.trim().toLowerCase();
+    if (code.isEmpty) return null;
+    final employer = _employer.text.trim().toLowerCase();
+    final matches = legends.where((legend) {
+      if (legend.code.trim().toLowerCase() != code) return false;
+      final entryEmployer = legend.employer.trim().toLowerCase();
+      return employer.isEmpty
+          ? legends
+                    .where((item) => item.code.trim().toLowerCase() == code)
+                    .length ==
+                1
+          : entryEmployer == employer || entryEmployer.isEmpty;
+    }).toList();
+    if (matches.length != 1) return null;
+    return matches.single;
+  }
+
+  List<WorkCodeLegend> _legendOptions(List<WorkCodeLegend> legends) {
+    final employer = _employer.text.trim().toLowerCase();
+    return legends.where((legend) {
+      final entryEmployer = legend.employer.trim().toLowerCase();
+      return employer.isEmpty ||
+          entryEmployer.isEmpty ||
+          entryEmployer == employer;
+    }).toList();
+  }
+
+  String _legendLabel(WorkCodeLegend legend, bool use24Hour) {
+    final employer = legend.employer.trim();
+    final timeWindows = legend.timeWindows;
+    final time = timeWindows.isEmpty
+        ? ''
+        : ' · ${timeWindows.map((window) => '${formatMinute(window.startMinute, use24Hour: use24Hour)}–${formatMinute(window.endMinute, use24Hour: use24Hour)}${window.endDayOffset > 0 ? ' (+${window.endDayOffset} day)' : ''}').join(' / ')}';
+    return '${employer.isEmpty ? '' : '$employer · '}${legend.code}$time';
   }
 
   Future<void> _pickDate() async {
@@ -212,8 +275,9 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
             term.startDate.month,
             term.startDate.day,
           );
-    final last = term == null
-        ? DateTime(2100)
+    final endDate = _date.addDays(_endDayOffset);
+    final last = term == null || endDate.compareTo(term.endDate) > 0
+        ? DateTime(endDate.year, endDate.month, endDate.day)
         : DateTime(term.endDate.year, term.endDate.month, term.endDate.day);
     final initial = DateTime(_date.year, _date.month, _date.day);
     final picked = await showDatePicker(
@@ -226,7 +290,48 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
       firstDate: first,
       lastDate: last,
     );
-    if (picked != null) setState(() => _date = CivilDate.fromDateTime(picked));
+    if (picked != null) {
+      setState(() {
+        final nextDate = CivilDate.fromDateTime(picked);
+        if (_endDateManuallyEdited) {
+          final selectedEnd = _date.addDays(_endDayOffset);
+          _endDayOffset =
+              DateTime.utc(selectedEnd.year, selectedEnd.month, selectedEnd.day)
+                  .difference(
+                    DateTime.utc(nextDate.year, nextDate.month, nextDate.day),
+                  )
+                  .inDays;
+        }
+        _date = nextDate;
+      });
+    }
+  }
+
+  Future<void> _pickEndDate() async {
+    final endDate = _date.addDays(_endDayOffset);
+    final term = _selectedAcademicTerm(
+      ref.read(academicTermsProvider).asData?.value ?? const [],
+    );
+    final termEnd = term?.endDate;
+    final last = termEnd != null && termEnd.compareTo(_date) >= 0
+        ? DateTime(termEnd.year, termEnd.month, termEnd.day)
+        : DateTime(2100, 12, 31);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime(endDate.year, endDate.month, endDate.day),
+      firstDate: DateTime(_date.year, _date.month, _date.day),
+      lastDate: last,
+    );
+    if (picked == null) return;
+    final selected = CivilDate.fromDateTime(picked);
+    setState(() {
+      _endDayOffset = DateTime.utc(
+        selected.year,
+        selected.month,
+        selected.day,
+      ).difference(DateTime.utc(_date.year, _date.month, _date.day)).inDays;
+      _endDateManuallyEdited = true;
+    });
   }
 
   Future<void> _pickUntil() async {
@@ -267,6 +372,11 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
       setState(() {
         _timeManuallyEdited = true;
         (start ? _starts : _ends)[index] = selected;
+        if (!_endDateManuallyEdited && index == _starts.length - 1) {
+          _endDayOffset = _minute(_ends[index]) <= _minute(_starts[index])
+              ? 1
+              : 0;
+        }
       });
     }
   }
@@ -370,7 +480,11 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
       if (!_hasNoTime) {
         for (var i = 0; i < _starts.length; i++) {
           final start = _minute(_starts[i]), end = _minute(_ends[i]);
-          final offset = end <= start ? 1 : 0;
+          final offset = i == _ends.length - 1
+              ? _endDayOffset
+              : end <= start
+              ? 1
+              : 0;
           final interval = EventInterval(
             startDayOffset: 0,
             startMinute: start,
@@ -508,6 +622,16 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
         : null;
     final terms = termsAsync?.asData?.value ?? const <AcademicTerm>[];
     final selectedTerm = _selectedAcademicTerm(terms);
+    final supervisors = widget.kind == ScheduleKind.work
+        ? ref.watch(supervisorProfilesProvider).asData?.value ?? const []
+        : const <SupervisorProfile>[];
+    final selectedSupervisor = supervisors
+        .where(
+          (profile) =>
+              profile.name.trim().toLowerCase() ==
+              _supervisorName.text.trim().toLowerCase(),
+        )
+        .firstOrNull;
     final deviceZone = ref.watch(deviceTimeZoneIdProvider).asData?.value;
     if (!_didSuggestDeviceZone &&
         widget.existing == null &&
@@ -552,6 +676,7 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
               ),
               const SizedBox(height: 10),
               TextFormField(
+                key: const ValueKey('event-title-field'),
                 controller: _title,
                 autofocus: widget.existing == null,
                 decoration: InputDecoration(
@@ -665,17 +790,28 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Text('Assignment · due this day'),
                 ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.calendar_today_outlined),
-                title: const Text('Start date'),
-                subtitle: Text(
-                  loc.formatMediumDate(
-                    DateTime(_date.year, _date.month, _date.day),
+              Row(
+                children: [
+                  Expanded(
+                    child: _datePickerButton(
+                      label: 'Start date',
+                      date: _date,
+                      onPressed: _pickDate,
+                      loc: loc,
+                    ),
                   ),
-                ),
-                trailing: const Icon(Icons.edit_calendar_outlined),
-                onTap: _pickDate,
+                  if (!_hasNoTime) ...[
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _datePickerButton(
+                        label: 'End date',
+                        date: _date.addDays(_endDayOffset),
+                        onPressed: _pickEndDate,
+                        loc: loc,
+                      ),
+                    ),
+                  ],
+                ],
               ),
               if (!_hasNoTime) ...[
                 const SizedBox(height: 10),
@@ -701,34 +837,53 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
               if (!_hasNoTime) ...[
                 for (var i = 0; i < _starts.length; i++)
                   Card(
+                    margin: const EdgeInsets.only(bottom: 8),
                     child: Padding(
-                      padding: const EdgeInsets.all(14),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            _starts.length > 1 ? 'Interval ${i + 1}' : 'Time',
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
+                          if (_starts.length == 1) ...[
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: Text(
+                                'Time',
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                            ),
+                          ] else ...[
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: Text(
+                                'Interval ${i + 1}',
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                            ),
+                          ],
                           Row(
                             children: [
                               Expanded(
-                                child: ListTile(
-                                  contentPadding: EdgeInsets.zero,
-                                  title: const Text('Starts'),
-                                  subtitle: Text(_starts[i].format(context)),
-                                  onTap: () => _pickTime(i, true),
+                                child: _timePickerButton(
+                                  label: 'Starts',
+                                  value: _starts[i].format(context),
+                                  onPressed: () => _pickTime(i, true),
                                 ),
                               ),
-                              const Icon(Icons.arrow_forward_rounded),
+                              const Padding(
+                                padding: EdgeInsets.symmetric(horizontal: 6),
+                                child: Icon(
+                                  Icons.arrow_forward_rounded,
+                                  size: 18,
+                                ),
+                              ),
                               Expanded(
-                                child: ListTile(
-                                  contentPadding: EdgeInsets.zero,
-                                  title: const Text('Ends'),
-                                  subtitle: Text(
-                                    '${_ends[i].format(context)}${_minute(_ends[i]) <= _minute(_starts[i]) ? ' · next day' : ''}',
-                                  ),
-                                  onTap: () => _pickTime(i, false),
+                                child: _timePickerButton(
+                                  label: 'Ends',
+                                  value: _ends[i].format(context),
+                                  onPressed: () => _pickTime(i, false),
                                 ),
                               ),
                             ],
@@ -737,12 +892,27 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                             Align(
                               alignment: Alignment.centerRight,
                               child: TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                  ),
+                                ),
                                 onPressed: () => setState(() {
                                   _starts.removeAt(i);
                                   _ends.removeAt(i);
+                                  _endDayOffset =
+                                      _minute(_ends.last) <=
+                                          _minute(_starts.last)
+                                      ? 1
+                                      : 0;
+                                  _endDateManuallyEdited = false;
                                 }),
-                                icon: const Icon(Icons.remove_circle_outline),
-                                label: const Text('Remove'),
+                                icon: const Icon(
+                                  Icons.remove_circle_outline,
+                                  size: 18,
+                                ),
+                                label: const Text('Remove interval'),
                               ),
                             ),
                         ],
@@ -756,6 +926,8 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                       onPressed: () => setState(() {
                         _starts.add(const TimeOfDay(hour: 14, minute: 0));
                         _ends.add(const TimeOfDay(hour: 18, minute: 0));
+                        _endDayOffset = 0;
+                        _endDateManuallyEdited = false;
                       }),
                       icon: const Icon(Icons.add),
                       label: const Text('Add split interval'),
@@ -855,29 +1027,89 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                         hintText: 'e.g. Airport operations',
                       ),
                       textCapitalization: TextCapitalization.words,
-                      onChanged: (_) => _applyLegendSuggestion(legends),
+                      onChanged: (_) {
+                        _selectedLegendId = null;
+                        _applyLegendSuggestion(legends);
+                      },
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     TextFormField(
                       key: const ValueKey('work-department-field'),
                       controller: _department,
                       decoration: const InputDecoration(
                         labelText: 'Department or team · optional',
+                        counterText: '',
                       ),
                       textCapitalization: TextCapitalization.words,
                       maxLength: 512,
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     TextFormField(
                       key: const ValueKey('work-role-field'),
                       controller: _jobRole,
                       decoration: const InputDecoration(
                         labelText: 'Job role · optional',
+                        counterText: '',
                       ),
                       textCapitalization: TextCapitalization.words,
                       maxLength: 512,
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
+                    if (legends.isNotEmpty)
+                      DropdownButtonFormField<String?>(
+                        key: const ValueKey('work-code-legend-selector'),
+                        initialValue: _legendForCode(legends)?.id,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Choose a saved shift code',
+                          helperText: 'Selecting a code fills its usual time and duties. You can still edit them.',
+                          helperMaxLines: 2,
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('Choose a code'),
+                          ),
+                          for (final legend in _legendOptions(legends))
+                            DropdownMenuItem<String?>(
+                              value: legend.id,
+                              child: Text(
+                                _legendLabel(
+                                  legend,
+                                  preferences?.use24HourTime ?? false,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: (id) {
+                          if (id == null) {
+                            setState(() => _selectedLegendId = null);
+                            return;
+                          }
+                          WorkCodeLegend? selected;
+                          for (final legend in legends) {
+                            if (legend.id == id) {
+                              selected = legend;
+                              break;
+                            }
+                          }
+                          if (selected == null) return;
+                          setState(() {
+                            _selectedLegendId = id;
+                            if (_employer.text.trim().isEmpty &&
+                                selected!.employer.isNotEmpty) {
+                              _employer.text = selected.employer;
+                            }
+                            _code.text = selected!.code;
+                            _meaningManuallyEdited = false;
+                            _timeManuallyEdited = false;
+                            _applyLegendEntry(selected);
+                          });
+                        },
+                      ),
+                    if (legends.isNotEmpty) const SizedBox(height: 8),
                     TextFormField(
                       key: const ValueKey('work-code-field'),
                       controller: _code,
@@ -885,9 +1117,12 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                         labelText: 'Roster code · optional',
                       ),
                       textCapitalization: TextCapitalization.characters,
-                      onChanged: (_) => _applyLegendSuggestion(legends),
+                      onChanged: (_) {
+                        _selectedLegendId = null;
+                        _applyLegendSuggestion(legends);
+                      },
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     TextFormField(
                       key: const ValueKey('work-location-field'),
                       controller: _location,
@@ -896,7 +1131,7 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                       ),
                       textCapitalization: TextCapitalization.words,
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
                     TextFormField(
                       key: const ValueKey('work-code-assignment-field'),
                       controller: _codeMeaning,
@@ -905,6 +1140,7 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                         hintText:
                             'Flights or duties covered by this roster code',
                         alignLabelWithHint: true,
+                        counterText: '',
                       ),
                       textCapitalization: TextCapitalization.sentences,
                       maxLength: 2000,
@@ -1031,8 +1267,47 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                       maxLines: 4,
                       maxLength: 2000,
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 8),
+                    if (supervisors.isNotEmpty)
+                      DropdownButtonFormField<String?>(
+                        key: const ValueKey('saved-supervisor-selector'),
+                        initialValue: selectedSupervisor?.id,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Choose a saved supervisor',
+                          helperText: 'Selecting a supervisor fills their saved contact number.',
+                          helperMaxLines: 2,
+                        ),
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('Choose a supervisor'),
+                          ),
+                          for (final profile in supervisors)
+                            DropdownMenuItem<String?>(
+                              value: profile.id,
+                              child: Text(
+                                '${profile.name} · ${profile.type == SupervisorType.acting ? 'Acting' : 'Permanent'}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
+                        onChanged: (id) {
+                          if (id == null) return;
+                          final profile = supervisors
+                              .where((entry) => entry.id == id)
+                              .firstOrNull;
+                          if (profile == null) return;
+                          setState(() {
+                            _supervisorName.text = profile.name;
+                            _supervisorPhone.text = profile.phone;
+                          });
+                        },
+                      ),
+                    const SizedBox(height: 8),
                     TextFormField(
+                      key: const ValueKey('supervisor-name-field'),
                       controller: _supervisorName,
                       decoration: const InputDecoration(
                         labelText: 'Supervisor · optional',
@@ -1042,6 +1317,7 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                     ),
                     const SizedBox(height: 12),
                     TextFormField(
+                      key: const ValueKey('supervisor-phone-field'),
                       controller: _supervisorPhone,
                       decoration: const InputDecoration(
                         labelText: 'Supervisor phone · optional',
@@ -1176,6 +1452,59 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
         const SizedBox(width: 10),
         Expanded(
           child: Text(label, style: Theme.of(context).textTheme.titleMedium),
+        ),
+      ],
+    ),
+  );
+
+  Widget _datePickerButton({
+    required String label,
+    required CivilDate date,
+    required VoidCallback onPressed,
+    required MaterialLocalizations loc,
+  }) => OutlinedButton(
+    onPressed: onPressed,
+    style: OutlinedButton.styleFrom(
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      visualDensity: VisualDensity.compact,
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.labelSmall),
+        const SizedBox(height: 2),
+        Text(
+          loc.formatMediumDate(DateTime(date.year, date.month, date.day)),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.labelLarge,
+        ),
+      ],
+    ),
+  );
+
+  Widget _timePickerButton({
+    required String label,
+    required String value,
+    required VoidCallback onPressed,
+  }) => OutlinedButton(
+    onPressed: onPressed,
+    style: OutlinedButton.styleFrom(
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      visualDensity: VisualDensity.compact,
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: Theme.of(context).textTheme.labelSmall),
+        const SizedBox(height: 1),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.titleSmall,
         ),
       ],
     ),

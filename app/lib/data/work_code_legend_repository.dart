@@ -20,17 +20,14 @@ class WorkCodeLegendRepository {
     final employer = entry.employer.trim();
     final code = entry.code.trim();
     final assignmentDetails = entry.assignmentDetails.trim();
-    final hasStart = entry.startMinute != null;
-    final hasEnd = entry.endMinute != null;
+    final windows = entry.timeWindows;
     if (entry.id.trim().isEmpty ||
         code.isEmpty ||
-        (hasStart != hasEnd) ||
-        (!hasStart && assignmentDetails.isEmpty) ||
-        (hasStart &&
-            (entry.startMinute! < 0 ||
-                entry.startMinute! >= 1440 ||
-                entry.endMinute! < 0 ||
-                entry.endMinute! >= 1440))) {
+        windows.length > 2 ||
+        windows.any((window) => !window.isValid) ||
+        (windows.isEmpty &&
+            ((entry.startMinute == null) != (entry.endMinute == null))) ||
+        (windows.isEmpty && assignmentDetails.isEmpty)) {
       throw const FormatException(
         'Enter a code and its time range or assignment details. Check the time range.',
       );
@@ -66,6 +63,7 @@ class WorkCodeLegendRepository {
             startMinute: Value(entry.startMinute),
             endMinute: Value(entry.endMinute),
             flightIdsJson: Value(jsonEncode(flightIds)),
+            timeWindowsJson: Value(_encodeTimeWindows(windows)),
           ),
         );
   }
@@ -84,19 +82,17 @@ class WorkCodeLegendRepository {
     for (final entry in entries) {
       final employer = entry.employer.trim().toLowerCase();
       final code = entry.code.trim().toUpperCase();
+      final windows = entry.timeWindows;
       if (entry.id.trim().isEmpty ||
           code.isEmpty ||
           entry.assignmentDetails.length > 4000 ||
           _normalizeFlightIds(entry.flightIds).length !=
               entry.flightIds.length ||
-          ((entry.startMinute == null) != (entry.endMinute == null)) ||
-          (entry.startMinute != null &&
-              (entry.startMinute! < 0 ||
-                  entry.startMinute! >= 1440 ||
-                  entry.endMinute! < 0 ||
-                  entry.endMinute! >= 1440)) ||
-          (entry.assignmentDetails.trim().isEmpty &&
-              entry.startMinute == null) ||
+          windows.length > 2 ||
+          windows.any((window) => !window.isValid) ||
+          (windows.isEmpty &&
+              ((entry.startMinute == null) != (entry.endMinute == null))) ||
+          (entry.assignmentDetails.trim().isEmpty && windows.isEmpty) ||
           !seenIds.add(entry.id) ||
           !seenCodes.add('$employer\u0000$code')) {
         throw const FormatException('Backup roster codes are invalid.');
@@ -107,6 +103,7 @@ class WorkCodeLegendRepository {
         await database.delete(database.workCodeLegendRows).go();
       }
       for (final entry in entries) {
+        final windows = entry.timeWindows;
         final existing = await database
             .select(database.workCodeLegendRows)
             .get();
@@ -131,6 +128,7 @@ class WorkCodeLegendRepository {
                 flightIdsJson: Value(
                   jsonEncode(_normalizeFlightIds(entry.flightIds)),
                 ),
+                timeWindowsJson: Value(_encodeTimeWindows(windows)),
               ),
             );
       }
@@ -148,6 +146,7 @@ class WorkCodeLegendRepository {
               startMinute: row.startMinute,
               endMinute: row.endMinute,
               flightIds: _decodeFlightIds(row.flightIdsJson),
+              timeWindows: _decodeTimeWindows(row.timeWindowsJson),
             ),
           )
           .toList()
@@ -184,5 +183,37 @@ class WorkCodeLegendRepository {
       return const [];
     }
     return _normalizeFlightIds(decoded.cast<String>());
+  }
+
+  static String _encodeTimeWindows(List<WorkCodeTimeWindow> windows) =>
+      jsonEncode([
+        for (final window in windows)
+          {
+            'startMinute': window.startMinute,
+            'endMinute': window.endMinute,
+            'endDayOffset': window.endDayOffset,
+          },
+      ]);
+
+  static List<WorkCodeTimeWindow> _decodeTimeWindows(String source) {
+    final decoded = jsonDecode(source);
+    if (decoded is! List || decoded.length > 2) return const [];
+    final windows = <WorkCodeTimeWindow>[];
+    for (final value in decoded) {
+      if (value is! Map ||
+          value['startMinute'] is! int ||
+          value['endMinute'] is! int ||
+          value['endDayOffset'] is! int) {
+        return const [];
+      }
+      final window = WorkCodeTimeWindow(
+        startMinute: value['startMinute'] as int,
+        endMinute: value['endMinute'] as int,
+        endDayOffset: value['endDayOffset'] as int,
+      );
+      if (!window.isValid) return const [];
+      windows.add(window);
+    }
+    return windows;
   }
 }

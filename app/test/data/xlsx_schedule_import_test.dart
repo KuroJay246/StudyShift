@@ -29,6 +29,45 @@ void main() {
     );
   });
 
+  test('inspects and maps alternate Excel headings locally', () async {
+    final bytes = Uint8List.fromList(
+      _workbook(
+        headers: [
+          'Work day',
+          'Duty name',
+          'Duty type',
+          'Clock in',
+          'Clock out',
+          'Zone',
+        ],
+      ),
+    );
+    expect(parser.inspectHeaders(bytes), [
+      'Work day',
+      'Duty name',
+      'Duty type',
+      'Clock in',
+      'Clock out',
+      'Zone',
+    ]);
+    final preview = await parser.parse(
+      bytes,
+      sourceName: 'synthetic-alternate.xlsx',
+      headerMapping: {
+        'Work day': 'date',
+        'Duty name': 'title',
+        'Duty type': 'category',
+        'Clock in': 'start',
+        'Clock out': 'end',
+        'Zone': 'time_zone',
+      },
+      importedAt: DateTime.utc(2026, 11, 6),
+    );
+    expect(preview.proposals, hasLength(1));
+    expect(preview.proposals.single.item.title, 'Synthetic ramp shift');
+    expect(preview.proposals.single.item.intervals.single.endDayOffset, 1);
+  });
+
   test(
     'rejects formulas instead of accepting cached spreadsheet values',
     () async {
@@ -101,7 +140,11 @@ void main() {
   );
 }
 
-List<int> _workbook({bool formula = false, bool hiddenRow = false}) {
+List<int> _workbook({
+  bool formula = false,
+  bool hiddenRow = false,
+  List<String>? headers,
+}) {
   final archive = Archive();
   void add(String name, String contents) {
     final bytes = utf8.encode(contents);
@@ -118,7 +161,8 @@ List<int> _workbook({bool formula = false, bool hiddenRow = false}) {
     '''<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>''',
   );
-  final headers = ['date', 'title', 'category', 'start', 'end', 'time_zone'];
+  final columns =
+      headers ?? ['date', 'title', 'category', 'start', 'end', 'time_zone'];
   final values = [
     '2026-11-07',
     'Synthetic ramp shift',
@@ -130,10 +174,10 @@ List<int> _workbook({bool formula = false, bool hiddenRow = false}) {
   final rows = <String>[];
   for (var rowIndex = 0; rowIndex < 2; rowIndex++) {
     final cells = <String>[];
-    for (var columnIndex = 0; columnIndex < headers.length; columnIndex++) {
+    for (var columnIndex = 0; columnIndex < columns.length; columnIndex++) {
       final reference =
           '${String.fromCharCode(65 + columnIndex)}${rowIndex + 1}';
-      final value = rowIndex == 0 ? headers[columnIndex] : values[columnIndex];
+      final value = rowIndex == 0 ? columns[columnIndex] : values[columnIndex];
       final formulaNode = formula && rowIndex == 1 && columnIndex == 1
           ? '<f>"Synthetic ramp shift"</f><v>Synthetic ramp shift</v>'
           : '<is><t>$value</t></is>';

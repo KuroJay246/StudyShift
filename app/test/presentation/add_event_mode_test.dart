@@ -86,7 +86,7 @@ void main() {
       await tester.tap(
         find.descendant(
           of: find.byType(NavigationBar),
-          matching: find.text('Week'),
+          matching: find.text('Calendar'),
         ),
       );
       await tester.pumpAndSettle();
@@ -144,7 +144,7 @@ void main() {
     await tester.tap(
       find.descendant(
         of: find.byType(NavigationBar),
-        matching: find.text('Week'),
+        matching: find.text('Calendar'),
       ),
     );
     await tester.pumpAndSettle();

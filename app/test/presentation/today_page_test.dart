@@ -15,7 +15,6 @@ import 'package:shift_study/data/schedule_repository.dart';
 import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/platform/device_time_zone.dart';
 import 'package:shift_study/presentation/app_theme.dart';
-import 'package:shift_study/presentation/screens/event_editor_page.dart';
 import 'package:shift_study/presentation/screens/schedule_pages.dart';
 import 'package:shift_study/presentation/widgets/schedule_event_tile.dart';
 import 'package:shift_study/presentation/widgets/today_hero.dart';
@@ -675,7 +674,7 @@ void main() {
     expect(find.text('Your schedule is saved on this device.'), findsNothing);
   });
 
-  testWidgets('available time opens an editable study block draft', (
+  testWidgets('available periods do not create a fixed study block draft', (
     tester,
   ) async {
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
@@ -718,27 +717,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final planButton = find.text('Plan 60-minute study block');
-    expect(planButton, findsOneWidget);
-    await tester.scrollUntilVisible(
-      planButton,
-      300,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.tap(planButton);
-    await tester.pumpAndSettle();
-
-    expect(find.byType(EventEditorPage), findsOneWidget);
-    expect(
-      tester
-          .widgetList<TextFormField>(find.byType(TextFormField))
-          .first
-          .controller
-          ?.text,
-      'Study block',
-    );
-    expect(find.text('9:00 AM'), findsOneWidget);
-    expect(find.text('10:00 AM'), findsOneWidget);
+    expect(find.text('Available periods'), findsOneWidget);
+    expect(find.text('Plan 60-minute study block'), findsNothing);
     expect(
       await container.read(scheduleRepositoryProvider).getItems(),
       hasLength(1),

@@ -71,7 +71,7 @@ END:VCALENDAR''';
       find.textContaining('code_meaning, reporting_instruction'),
       findsOneWidget,
     );
-    expect(find.textContaining('department,job_role'), findsOneWidget);
+    expect(find.textContaining('department,job_role'), findsWidgets);
     expect(find.textContaining('SYNTH-001'), findsOneWidget);
     await tester.tap(find.text('CSV and Excel file format'));
     await tester.pumpAndSettle();
@@ -707,5 +707,90 @@ WORK-SPLIT-7,2026-11-10,Sample work shift,shift,14:00,18:00,America/Barbados
     expect(imported.single.intervals[0].endMinute, 12 * 60);
     expect(imported.single.intervals[1].startMinute, 14 * 60);
     expect(imported.single.intervals[1].endMinute, 18 * 60);
+  });
+
+  testWidgets('alternate roster headings can be mapped before review', (
+    tester,
+  ) async {
+    const csv = '''Work day,Duty name,Duty type,Clock in,Clock out,Zone,Roster,Supervisor,Supervisor phone,Contact,Contact phone
+2026-11-18,Synthetic ramp shift,shift,10:00,17:00,America/Barbados,AC,Synthetic supervisor,+12465550100,Synthetic desk,+12465550101
+''';
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          fileChannel,
+          (call) async => {
+            'name': 'synthetic-roster.csv',
+            'bytes': Uint8List.fromList(utf8.encode(csv)),
+          },
+        );
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(fileChannel, null),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          scheduleDatabaseProvider.overrideWithValue(database),
+          deviceTimeZoneIdProvider.overrideWith(
+            (ref) async => 'America/Barbados',
+          ),
+        ],
+        child: const MaterialApp(
+          home: SettingsPage(mode: ScheduleMode.workAndSchool),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import calendar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
+    await tester.pumpAndSettle();
+    expect(find.text('Match your roster columns'), findsOneWidget);
+    expect(await ScheduleRepository(database).getItems(), isEmpty);
+
+    Future<void> choose(String field, String header) async {
+      await tester.drag(find.byType(ListView).first, const Offset(0, -650));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(ValueKey('column-map-$field')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(ValueKey('column-map-$field')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(header).last);
+      await tester.pumpAndSettle();
+    }
+
+    await choose('date', 'Work day');
+    await choose('title', 'Duty name');
+    await choose('category', 'Duty type');
+    await tester.ensureVisible(find.text('Optional fields'));
+    await tester.tap(find.text('Optional fields'));
+    await tester.pumpAndSettle();
+    await choose('start', 'Clock in');
+    await choose('end', 'Clock out');
+    await choose('time_zone', 'Zone');
+    await choose('code', 'Roster');
+    await choose('supervisor_name', 'Supervisor');
+    await choose('supervisor_phone', 'Supervisor phone');
+    await choose('contact_name', 'Contact');
+    await choose('contact_phone', 'Contact phone');
+    await tester.ensureVisible(find.text('Match columns and preview'));
+    await tester.tap(find.text('Match columns and preview'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Synthetic ramp shift'), findsOneWidget);
+    expect(await ScheduleRepository(database).getItems(), isEmpty);
+    await tester.ensureVisible(find.text('Add 1 selected'));
+    await tester.tap(find.text('Add 1 selected'));
+    await tester.pumpAndSettle();
+    final saved = (await ScheduleRepository(database).getItems()).single;
+    expect(saved.code, 'AC');
+    expect(saved.supervisorName, 'Synthetic supervisor');
+    expect(saved.supervisorPhone, '+12465550100');
+    expect(saved.contactName, 'Synthetic desk');
+    expect(saved.contactPhone, '+12465550101');
+    expect(saved.importProvenance!.sourceName, 'synthetic-roster.csv');
   });
 }

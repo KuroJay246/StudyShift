@@ -27,6 +27,7 @@ class XlsxScheduleImportParser {
   Future<ScheduleImportPreview> parse(
     Uint8List bytes, {
     required String sourceName,
+    Map<String, String>? headerMapping,
     DateTime? importedAt,
   }) async {
     if (bytes.isEmpty || bytes.length > maxBytes) {
@@ -130,9 +131,10 @@ class XlsxScheduleImportParser {
       final rows = table.rows
           .map((row) => row.map(_cellText).toList())
           .toList();
-      final header = rows.first
+      final sourceHeader = rows.first
           .map((value) => value.trim().toLowerCase())
           .toList();
+      final header = _mappedHeaders(sourceHeader, headerMapping);
       if (header.isEmpty ||
           !header.contains('date') ||
           !header.contains('title') ||
@@ -164,7 +166,20 @@ class XlsxScheduleImportParser {
               '$name:${rows[rowIndex][sourceIdIndex].trim()}';
         }
       }
-      final normalizedCsv = rows.map(_csvLine).join('\n');
+      final mappedRows = headerMapping == null
+          ? rows
+          : [
+              [
+                for (var i = 0; i < header.length; i++)
+                  if (header[i].isNotEmpty) header[i],
+              ],
+              for (final row in rows.skip(1))
+                [
+                  for (var i = 0; i < header.length; i++)
+                    if (header[i].isNotEmpty) row[i],
+                ],
+            ];
+      final normalizedCsv = mappedRows.map(_csvLine).join('\n');
       final preview = await _csvParser.parse(
         normalizedCsv,
         sourceName: '$sourceName · $name',
@@ -179,6 +194,93 @@ class XlsxScheduleImportParser {
       );
     }
     return ScheduleImportPreview(proposals: proposals, notices: notices);
+  }
+
+  /// Returns the first visible worksheet's header row for a local mapping step.
+  /// Parsing still performs the complete workbook safety checks before use.
+  List<String> inspectHeaders(Uint8List bytes) {
+    if (bytes.isEmpty || bytes.length > maxBytes) {
+      throw const FormatException('This Excel file is empty or too large.');
+    }
+    final archive = _inspectZip(bytes);
+    final workbookFile = archive.findFile('xl/workbook.xml');
+    if (workbookFile == null) {
+      throw const FormatException('Choose a valid .xlsx workbook.');
+    }
+    final workbookXml = _parseXml(
+      Uint8List.fromList(workbookFile.content as List<int>),
+    );
+    final sheets = workbookXml.findAllElements('sheet').toList();
+    if (sheets.isEmpty ||
+        sheets.length > maxSheets ||
+        sheets.any(
+          (sheet) =>
+              sheet.getAttribute('state') != null &&
+              sheet.getAttribute('state') != 'visible',
+        )) {
+      throw const FormatException('This workbook needs visible worksheets.');
+    }
+    final decoder = XlsxDecoder(archive);
+    for (final sheet in sheets) {
+      final name = sheet.getAttribute('name') ?? '';
+      final table = decoder.tables[name];
+      if (table == null || table.rows.isEmpty) continue;
+      final headers = table.rows.first
+          .map(_cellText)
+          .map((value) => value.trim())
+          .toList();
+      if (headers.isEmpty ||
+          headers.any((header) => header.isEmpty) ||
+          headers.map((header) => header.toLowerCase()).toSet().length !=
+              headers.length) {
+        throw const FormatException(
+          'The worksheet header contains a blank or repeated column name.',
+        );
+      }
+      return List.unmodifiable(headers);
+    }
+    throw const FormatException('This workbook has no worksheet rows to map.');
+  }
+
+  List<String> _mappedHeaders(
+    List<String> sourceHeaders,
+    Map<String, String>? headerMapping,
+  ) {
+    if (headerMapping == null) return sourceHeaders;
+    const allowed = {
+      'date',
+      'end_date',
+      'title',
+      'category',
+      'start',
+      'end',
+      'time_zone',
+      'code',
+      'code_meaning',
+      'employer',
+      'department',
+      'job_role',
+      'location',
+      'notes',
+      'reporting_instruction',
+      'supervisor_name',
+      'supervisor_phone',
+      'contact_name',
+      'contact_phone',
+      'source_id',
+    };
+    final normalized = <String, String>{};
+    for (final entry in headerMapping.entries) {
+      final source = entry.key.trim().toLowerCase();
+      final target = entry.value.trim().toLowerCase();
+      if (!sourceHeaders.contains(source) ||
+          !allowed.contains(target) ||
+          normalized.containsValue(target)) {
+        throw const FormatException('The selected column mapping is invalid.');
+      }
+      normalized[source] = target;
+    }
+    return sourceHeaders.map((header) => normalized[header] ?? '').toList();
   }
 
   static Archive _inspectZip(Uint8List bytes) {
