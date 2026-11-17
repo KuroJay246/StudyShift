@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shift_study/application/dependencies.dart';
 import 'package:shift_study/data/schedule_database.dart';
 import 'package:shift_study/domain/schedule.dart';
+import 'package:shift_study/domain/supervisor_profile.dart';
 import 'package:shift_study/domain/work_code_legend.dart';
 import 'package:shift_study/presentation/screens/work_code_legend_page.dart';
 
@@ -78,7 +79,77 @@ void main() {
 
     expect(find.text('Synthetic Supervisor'), findsOneWidget);
     expect(find.text('555-0100'), findsOneWidget);
-    expect(find.text('Permanent supervisor'), findsOneWidget);
+    expect(find.text('Permanent supervisors'), findsOneWidget);
+  });
+
+  testWidgets('supervisors are grouped by permanent and acting type', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+    final repository = container.read(supervisorRepositoryProvider);
+    await repository.save(
+      const SupervisorProfile(
+        id: 'synthetic-permanent-supervisor',
+        name: 'Synthetic Permanent Supervisor',
+      ),
+    );
+    await repository.save(
+      const SupervisorProfile(
+        id: 'synthetic-acting-supervisor',
+        name: 'Synthetic Acting Supervisor',
+        type: SupervisorType.acting,
+      ),
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(1.3)),
+          child: const MaterialApp(home: WorkCodeLegendPage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Supervisors'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Permanent supervisors'), findsOneWidget);
+    expect(find.text('Acting supervisors'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Permanent supervisors')).dy,
+      lessThan(tester.getTopLeft(find.text('Synthetic Permanent Supervisor')).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('Synthetic Permanent Supervisor')).dy,
+      lessThan(tester.getTopLeft(find.text('Acting supervisors')).dy),
+    );
+    expect(
+      tester.getTopLeft(find.text('Acting supervisors')).dy,
+      lessThan(tester.getTopLeft(find.text('Synthetic Acting Supervisor')).dy),
+    );
+    expect(tester.takeException(), isNull);
+
+    await tester.enterText(find.byType(TextField), 'acting');
+    await tester.pumpAndSettle();
+    expect(find.text('Permanent supervisors'), findsNothing);
+    expect(find.text('Acting supervisors'), findsOneWidget);
+    expect(find.text('Synthetic Acting Supervisor'), findsOneWidget);
+    expect(find.text('Synthetic Permanent Supervisor'), findsNothing);
   });
 
   testWidgets('code card shows meaning, split time windows, and flight count', (

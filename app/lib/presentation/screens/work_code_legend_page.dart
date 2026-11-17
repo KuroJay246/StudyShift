@@ -197,6 +197,12 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                   .contains(query),
         )
         .toList(growable: false);
+    final permanent = filtered
+        .where((profile) => profile.type == SupervisorType.permanent)
+        .toList(growable: false);
+    final acting = filtered
+        .where((profile) => profile.type == SupervisorType.acting)
+        .toList(growable: false);
     return Column(
       children: [
         Padding(
@@ -238,8 +244,16 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                     child: Text('No matching supervisors. Try another search.'),
                   ),
                 )
-              else
-                for (final profile in filtered) _supervisorCard(profile),
+              else ...[
+                if (permanent.isNotEmpty) ...[
+                  _supervisorGroupTitle(context, 'Permanent supervisors'),
+                  for (final profile in permanent) _supervisorCard(profile),
+                ],
+                if (acting.isNotEmpty) ...[
+                  _supervisorGroupTitle(context, 'Acting supervisors'),
+                  for (final profile in acting) _supervisorCard(profile),
+                ],
+              ],
             ],
           ),
         ),
@@ -279,19 +293,20 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
         child: Text(profile.name.characters.first.toUpperCase()),
       ),
       title: Text(profile.name),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            profile.type == SupervisorType.acting
-                ? 'Acting supervisor'
-                : 'Permanent supervisor',
-          ),
-          if (profile.phone.isNotEmpty) Text(profile.phone),
-          if (profile.notes.isNotEmpty)
-            Text(profile.notes, maxLines: 2, overflow: TextOverflow.ellipsis),
-        ],
-      ),
+      subtitle: profile.phone.isEmpty && profile.notes.isEmpty
+          ? null
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (profile.phone.isNotEmpty) Text(profile.phone),
+                if (profile.notes.isNotEmpty)
+                  Text(
+                    profile.notes,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
       isThreeLine: profile.phone.isNotEmpty || profile.notes.isNotEmpty,
       trailing: PopupMenuButton<String>(
         tooltip: 'Actions for ${profile.name}',
@@ -303,6 +318,16 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
           PopupMenuItem(value: 'delete', child: Text('Remove')),
         ],
       ),
+    ),
+  );
+
+  Widget _supervisorGroupTitle(BuildContext context, String title) => Padding(
+    padding: const EdgeInsets.only(top: 8, bottom: 4),
+    child: Text(
+      title,
+      style: Theme.of(
+        context,
+      ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
     ),
   );
 
