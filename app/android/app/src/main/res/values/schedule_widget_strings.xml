@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">StudyShift</string>
+    <string name="schedule_widget_name">StudyShift schedule</string>
+    <string name="schedule_widget_description">A local schedule view for today, the next event, or this week.</string>
+    <string name="today_widget_name">StudyShift · Today</string>
+    <string name="week_widget_name">StudyShift · This week</string>
+    <string name="next_class_widget_name">StudyShift · Next class</string>
+    <string name="upcoming_deadline_widget_name">StudyShift · Upcoming deadline</string>
+    <string name="schedule_widget_unavailable">Schedule unavailable</string>
+    <string name="schedule_widget_open_app">Open StudyShift to refresh</string>
+    <string name="schedule_widget_empty_work">No upcoming work shifts</string>
+    <string name="schedule_widget_empty_study">No upcoming classes or deadlines</string>
+    <string name="schedule_widget_empty_classes">No upcoming classes</string>
+    <string name="schedule_widget_empty_deadlines">No upcoming deadlines</string>
+    <string name="schedule_widget_empty_work_compact">No shifts yet</string>
+    <string name="schedule_widget_empty_study_compact">No study events</string>
+    <string name="schedule_widget_empty_classes_compact">No classes yet</string>
+    <string name="schedule_widget_empty_deadlines_compact">No deadlines</string>
+    <string name="schedule_widget_empty_hint_compact">Open StudyShift to add</string>
+    <string name="schedule_widget_configure_title">Set up your StudyShift widget</string>
+    <string name="schedule_widget_content_label">Show</string>
+    <string name="schedule_widget_type_label">Widget style</string>
+    <string name="schedule_widget_appearance_label">Appearance</string>
+    <string name="schedule_widget_configure_hint">Each widget keeps its own settings. Your schedule stays on this device.</string>
+    <string name="schedule_widget_save">Save widget</string>
+    <string name="schedule_widget_cancel">Cancel</string>
+    <string name="schedule_widget_stale">Schedule may be out of date</string>
+    <string name="schedule_widget_no_events">Nothing scheduled today</string>
+    <string name="schedule_widget_empty_compact">Nothing today</string>
+    <string name="schedule_widget_no_upcoming">No upcoming timed event</string>
+    <string name="schedule_widget_no_upcoming_compact">No upcoming events</string>
+    <string name="schedule_widget_more_events">+%1$d more</string>
+    <string name="schedule_widget_event">Upcoming event</string>
+    <string name="schedule_widget_next_up_in">Next up · in %1$s</string>
+    <string name="schedule_widget_in_progress_short">In progress</string>
+    <string name="schedule_widget_work">Work</string>
+    <string name="schedule_widget_study">Study</string>
+    <string name="schedule_widget_personal">Personal</string>
+    <string name="schedule_widget_deadline">Deadline</string>
+    <string name="schedule_widget_time_unavailable">Time unavailable</string>
+    <string name="schedule_widget_in_progress">In progress · ends %1$s</string>
+    <string name="schedule_widget_ends_at">Ends %1$s</string>
+    <string name="schedule_widget_all_day">All day</string>
+    <string name="schedule_widget_all_day_deadline">All-day deadline</string>
+    <string name="schedule_widget_due_on">Due %1$s</string>
+    <string-array name="schedule_widget_content_options">
+        <item>Next event</item>
+        <item>Work shifts</item>
+        <item>Study</item>
+        <item>Classes</item>
+        <item>Deadlines</item>
+    </string-array>
+    <string-array name="schedule_widget_type_options">
+        <item>Next event · 2 × 2</item>
+        <item>Today · 4 × 2</item>
+        <item>This week · 4 × 1</item>
+    </string-array>
+    <string-array name="schedule_widget_appearance_options">
+        <item>System</item>
+        <item>Light</item>
+        <item>Dark</item>
+        <item>Glass</item>
+        <item>Transparent</item>
+    </string-array>
+    <plurals name="schedule_widget_today_count">
+        <item quantity="one">%1$d event today</item>
+        <item quantity="other">%1$d events today</item>
+    </plurals>
+</resources>

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Theme applied to the Android Window while the process is starting when the OS's Dark Mode setting is off -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <!-- Show a splash screen on the activity. Automatically removed when
+             the Flutter engine draws its first frame -->
+        <item name="android:windowBackground">@drawable/launch_background</item>
+    </style>
+    <!-- Theme applied to the Android Window as soon as the process has started.
+         This theme determines the color of the Android Window while your
+         Flutter UI initializes, as well as behind your Flutter UI while its
+         running.
+
+         This Theme is only used starting with V2 of Flutter's Android embedding. -->
+    <style name="LaunchThemeBlue" parent="@style/LaunchTheme" />
+    <style name="LaunchThemeTeal" parent="@style/LaunchTheme" />
+    <style name="LaunchThemeViolet" parent="@style/LaunchTheme" />
+    <style name="LaunchThemeAmber" parent="@style/LaunchTheme" />
+    <style name="LaunchThemeRed" parent="@style/LaunchTheme" />
+    <!-- Explicit appearance variants make the OS-owned first splash frame agree
+         with the user's in-app appearance preference, even before Flutter starts. -->
+    <style name="LaunchThemeBlueLight" parent="@android:style/Theme.Light.NoTitleBar"><item name="android:windowBackground">@color/studyshift_launch_background_light</item><item name="android:windowLightStatusBar">true</item><item name="android:navigationBarColor">@color/studyshift_launch_background_light</item></style>
+    <style name="LaunchThemeTealLight" parent="@android:style/Theme.Light.NoTitleBar"><item name="android:windowBackground">@color/studyshift_launch_background_light</item><item name="android:windowLightStatusBar">true</item><item name="android:navigationBarColor">@color/studyshift_launch_background_light</item></style>
+    <style name="LaunchThemeVioletLight" parent="@android:style/Theme.Light.NoTitleBar"><item name="android:windowBackground">@color/studyshift_launch_background_light</item><item name="android:windowLightStatusBar">true</item><item name="android:navigationBarColor">@color/studyshift_launch_background_light</item></style>
+    <style name="LaunchThemeAmberLight" parent="@android:style/Theme.Light.NoTitleBar"><item name="android:windowBackground">@color/studyshift_launch_background_light</item><item name="android:windowLightStatusBar">true</item><item name="android:navigationBarColor">@color/studyshift_launch_background_light</item></style>
+    <style name="LaunchThemeRedLight" parent="@android:style/Theme.Light.NoTitleBar"><item name="android:windowBackground">@color/studyshift_launch_background_light</item><item name="android:windowLightStatusBar">true</item><item name="android:navigationBarColor">@color/studyshift_launch_background_light</item></style>
+    <style name="LaunchThemeBlueDark" parent="@android:style/Theme.Black.NoTitleBar"><item name="android:windowBackground">@color/studyshift_launch_background_dark</item><item name="android:windowLightStatusBar">false</item><item name="android:navigationBarColor">@color/studyshift_launch_background_dark</item></style>
+    <style name="LaunchThemeTealDark" parent="@android:style/Theme.Black.NoTitleBar"><item name="android:windowBackground">@color/studyshift_launch_background_dark</item><item name="android:windowLightStatusBar">false</item><item name="android:navigationBarColor">@color/studyshift_launch_background_dark</item></style>
+    <style name="LaunchThemeVioletDark" parent="@android:style/Theme.Black.NoTitleBar"><item name="android:windowBackground">@color/studyshift_launch_background_dark</item><item name="android:windowLightStatusBar">false</item><item name="android:navigationBarColor">@color/studyshift_launch_background_dark</item></style>
+    <style name="LaunchThemeAmberDark" parent="@android:style/Theme.Black.NoTitleBar"><item name="android:windowBackground">@color/studyshift_launch_background_dark</item><item name="android:windowLightStatusBar">false</item><item name="android:navigationBarColor">@color/studyshift_launch_background_dark</item></style>
+    <style name="LaunchThemeRedDark" parent="@android:style/Theme.Black.NoTitleBar"><item name="android:windowBackground">@color/studyshift_launch_background_dark</item><item name="android:windowLightStatusBar">false</item><item name="android:navigationBarColor">@color/studyshift_launch_background_dark</item></style>
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <item name="android:windowBackground">?android:colorBackground</item>
+    </style>
+    <style name="ScheduleWidgetConfigureTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">#0D5BFF</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">#F3F6FF</item>
+        <item name="android:navigationBarColor">#F3F6FF</item>
+    </style>
+</resources>

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="studyshift_launch_background">#F7F9FE</color>
+    <color name="studyshift_launch_background_light">#F7F9FE</color>
+    <color name="studyshift_launch_background_dark">#000000</color>
+</resources>

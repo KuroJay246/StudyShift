@@ -1,0 +1,1030 @@
+import 'dart:ui' show Tristate;
+
+import 'package:drift/native.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shift_study/application/dependencies.dart';
+import 'package:shift_study/data/schedule_database.dart';
+import 'package:shift_study/data/schedule_repository.dart';
+import 'package:shift_study/data/preferences_repository.dart';
+import 'package:shift_study/domain/schedule.dart';
+import 'package:shift_study/domain/academic_term.dart';
+import 'package:shift_study/domain/work_code_legend.dart';
+import 'package:shift_study/platform/device_time_zone.dart';
+import 'package:shift_study/platform/local_reminders.dart';
+import 'package:shift_study/presentation/screens/event_editor_page.dart';
+
+class _TestTimeZone implements DeviceTimeZone {
+  @override
+  Future<String> getLocalIanaId() async => 'America/Barbados';
+}
+
+class _TestReminderService extends LocalReminderService {
+  @override
+  Future<ReminderPermissionResult> requestPermissions() async =>
+      const ReminderPermissionResult(
+        notificationsAllowed: true,
+        exactTimingAllowed: true,
+      );
+}
+
+void main() {
+  testWidgets('work time zone controls fit a narrow phone width', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.work),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final timeZoneHeading = find.text('Advanced');
+    await tester.scrollUntilVisible(
+      timeZoneHeading,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(timeZoneHeading);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Time zone'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('work and study event forms group fields by task', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    for (final (kind, labels) in [
+      (
+        ScheduleKind.work,
+        [
+          'Shift details',
+          'Date and time',
+          'Work details',
+          'Additional details',
+        ],
+      ),
+      (
+        ScheduleKind.classSession,
+        ['Class details', 'Date and time', 'Additional details'],
+      ),
+    ]) {
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: EventEditorPage(key: ValueKey(kind), kind: kind),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      if (kind == ScheduleKind.work) {
+        expect(find.byKey(const ValueKey('work-employer-field')), findsNothing);
+        expect(
+          find.byKey(const ValueKey('work-code-assignment-field')),
+          findsNothing,
+        );
+      }
+
+      for (final label in labels) {
+        if (label == 'Work details' || label == 'Additional details') {
+          await tester.scrollUntilVisible(
+            find.text(label),
+            500,
+            scrollable: find.byType(Scrollable).first,
+          );
+        }
+        expect(find.text(label), findsOneWidget);
+        if (label == 'Work details' || label == 'Additional details') {
+          await tester.tap(find.text(label));
+          await tester.pumpAndSettle();
+        }
+      }
+    }
+  });
+
+  testWidgets(
+    'work event uses matching shift-code assignment and time guidance',
+    (tester) async {
+      final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+      final container = ProviderContainer(
+        overrides: [
+          scheduleDatabaseProvider.overrideWith((ref) {
+            ref.onDispose(database.close);
+            return database;
+          }),
+          deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container
+          .read(workCodeLegendRepositoryProvider)
+          .save(
+            const WorkCodeLegend(
+              id: 'test-legend',
+              employer: 'Synthetic Air',
+              code: 'R1',
+              assignmentDetails: 'Synthetic arrivals and departures',
+              startMinute: 360,
+              endMinute: 840,
+            ),
+          );
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(
+            home: EventEditorPage(kind: ScheduleKind.work),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byType(TextFormField).first,
+        'Synthetic shift',
+      );
+      await tester.scrollUntilVisible(
+        find.text('Work details'),
+        400,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('Work details'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const ValueKey('work-employer-field')),
+        'Synthetic Air',
+      );
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('work-department-field')),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('work-department-field')),
+        'Synthetic ramp operations',
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('work-role-field')),
+        'Ramp agent',
+      );
+      await tester.scrollUntilVisible(
+        find.byKey(const ValueKey('work-code-field')),
+        400,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.enterText(
+        find.byKey(const ValueKey('work-code-field')),
+        'R1',
+      );
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('Save event'),
+        450,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(find.text('Save event'));
+      await tester.tap(find.text('Save event'));
+      await tester.pumpAndSettle();
+      expect(find.text('Enter a name.'), findsNothing);
+      expect(find.text('Enter a time zone.'), findsNothing);
+      expect(find.text('Choose at least one weekday.'), findsNothing);
+      final saved =
+          (await container.read(scheduleRepositoryProvider).getItems()).single;
+      expect(saved.employerName, 'Synthetic Air');
+      expect(saved.departmentName, 'Synthetic ramp operations');
+      expect(saved.jobRole, 'Ramp agent');
+      expect(saved.codeMeaning, 'Synthetic arrivals and departures');
+      expect(saved.intervals, [
+        EventInterval.sameDay(startMinute: 360, endMinute: 840),
+      ]);
+    },
+  );
+
+  testWidgets('study color can be changed from the class add form', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.classSession),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('e.g. Chemistry lecture'), findsOneWidget);
+    expect(find.text('Study color'), findsOneWidget);
+    expect(find.text('10:00 AM'), findsOneWidget);
+    expect(find.text('11:30 AM'), findsOneWidget);
+    await tester.tap(find.byTooltip('Choose Study color'));
+    await tester.pumpAndSettle();
+    expect(find.text('Choose a calendar color'), findsOneWidget);
+    expect(find.byType(Slider), findsNothing);
+    expect(find.bySemanticsLabel('Violet calendar color'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('calendar-color-violet')));
+    await tester.pumpAndSettle();
+
+    expect(
+      (await PreferencesRepository(database).load()).schoolColor,
+      0xFF7C4DFF,
+    );
+  });
+
+  testWidgets('large text separates time and daylight-saving controls', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1080, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(1.3)),
+          child: const MaterialApp(
+            home: EventEditorPage(kind: ScheduleKind.classSession),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final timeCard = find.ancestor(
+      of: find.text('Time'),
+      matching: find.byType(Card),
+    );
+    final daylightSavingLabel = find.text('If the clock time repeats');
+    await tester.ensureVisible(daylightSavingLabel);
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.getTopLeft(daylightSavingLabel).dy,
+      greaterThan(tester.getBottomRight(timeCard).dy),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final kind in [
+    ScheduleKind.work,
+    ScheduleKind.classSession,
+    ScheduleKind.deadline,
+  ]) {
+    testWidgets('$kind editor renders at 175 percent text scale', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+      final container = ProviderContainer(
+        overrides: [
+          scheduleDatabaseProvider.overrideWith((ref) {
+            ref.onDispose(database.close);
+            return database;
+          }),
+          deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MediaQuery(
+            data: const MediaQueryData(textScaler: TextScaler.linear(1.75)),
+            child: MaterialApp(home: EventEditorPage(kind: kind)),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: '$kind editor should remain scrollable without layout overflow.',
+      );
+      await tester.scrollUntilVisible(
+        find.text('Additional details'),
+        320,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('Additional details'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('timed examination form keeps detail sections usable at 175%', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MediaQuery(
+          data: const MediaQueryData(textScaler: TextScaler.linear(1.75)),
+          child: const MaterialApp(
+            home: EventEditorPage(
+              kind: ScheduleKind.deadline,
+              initialDeadlineType: DeadlineType.examination,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('School item'), findsOneWidget);
+    expect(find.text('Examination'), findsOneWidget);
+    expect(find.text('Date and time'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.scrollUntilVisible(
+      find.text('Additional details'),
+      320,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Additional details'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('work entry saves the selected local reminder', (tester) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+        localReminderServiceProvider.overrideWith(
+          (ref) => _TestReminderService(),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.work),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField).first, 'QA shift');
+    await tester.scrollUntilVisible(
+      find.text('Reminder'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.byType(DropdownButtonFormField<int?>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('15 minutes before').last);
+    await tester.pumpAndSettle();
+    tester.testTextInput.hide();
+    await tester.scrollUntilVisible(
+      find.text('Save event'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.ensureVisible(find.text('Save event'));
+    await _saveEvent(tester);
+
+    final saved =
+        (await container.read(scheduleRepositoryProvider).getItems()).single;
+    expect(saved.reminderMinutesBefore, 15);
+  });
+
+  testWidgets('legacy event needs explicit time-zone review before saving', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final repository = ScheduleRepository(database);
+    final legacy = ScheduleItem(
+      id: 'legacy-event-without-zone',
+      kind: ScheduleKind.work,
+      title: 'Legacy shift',
+      startDate: CivilDate(2026, 11, 5),
+      intervals: [EventInterval.sameDay(startMinute: 540, endMinute: 1020)],
+    );
+    await repository.save(legacy);
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.work, existing: legacy),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -1800));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -900));
+    await tester.pumpAndSettle();
+    expect(find.text('Time zone'), findsOneWidget);
+    expect(find.text('Time zone · IANA ID'), findsNothing);
+    final timeZoneField = tester.widget<TextFormField>(
+      find.ancestor(
+        of: find.text('Time zone'),
+        matching: find.byType(TextFormField),
+      ),
+    );
+    expect(timeZoneField.controller!.text, isEmpty);
+
+    await tester.ensureVisible(find.text('Save event'));
+    await _saveEvent(tester);
+    expect(find.text('Enter a time zone.'), findsOneWidget);
+    expect((await repository.getItems()).single.timeZoneId, isNull);
+
+    final confirmZone = find.text('Use device time zone: America/Barbados');
+    await tester.ensureVisible(confirmZone);
+    await tester.tap(confirmZone);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Save event'));
+    await _saveEvent(tester);
+
+    expect((await repository.getItems()).single.timeZoneId, 'America/Barbados');
+  });
+
+  testWidgets('manual work entry saves its default interval in local SQLite', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.work),
+        ),
+      ),
+    );
+    await tester.enterText(
+      find.byType(TextFormField).first,
+      'Synthetic ramp shift',
+    );
+    tester.testTextInput.hide();
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Work details'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Work details'));
+    await tester.pumpAndSettle();
+    final meaningField = find.widgetWithText(
+      TextFormField,
+      'Code assignment details · optional',
+    );
+    await tester.scrollUntilVisible(
+      meaningField,
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.enterText(meaningField, 'Synthetic roster code meaning');
+    tester.testTextInput.hide();
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Additional details'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Additional details'));
+    await tester.pumpAndSettle();
+    final reportingField = find.widgetWithText(
+      TextFormField,
+      'Reporting instructions · optional',
+    );
+    await tester.scrollUntilVisible(
+      reportingField,
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.enterText(reportingField, 'Synthetic report at north gate');
+    tester.testTextInput.hide();
+    await tester.pumpAndSettle();
+    for (final (label, value) in [
+      ('Supervisor · optional', 'Synthetic supervisor'),
+      ('Supervisor phone · optional', '+1 246 555 0100'),
+      ('Shift contact · optional', 'Synthetic operations desk'),
+      ('Contact phone · optional', '+1 246 555 0101'),
+    ]) {
+      final field = find.widgetWithText(TextFormField, label);
+      await tester.scrollUntilVisible(
+        field,
+        400,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.enterText(field, value);
+      tester.testTextInput.hide();
+      await tester.pumpAndSettle();
+    }
+    await _saveEvent(tester);
+
+    final saved = await container.read(scheduleRepositoryProvider).getItems();
+    expect(saved, hasLength(1));
+    expect(saved.single.title, 'Synthetic ramp shift');
+    expect(saved.single.intervals, [
+      EventInterval.sameDay(startMinute: 540, endMinute: 1020),
+    ]);
+    expect(saved.single.timeZoneId, 'America/Barbados');
+    expect(saved.single.codeMeaning, 'Synthetic roster code meaning');
+    expect(saved.single.reportingInstruction, 'Synthetic report at north gate');
+    expect(saved.single.supervisorName, 'Synthetic supervisor');
+    expect(saved.single.supervisorPhone, '+1 246 555 0100');
+    expect(saved.single.contactName, 'Synthetic operations desk');
+    expect(saved.single.contactPhone, '+1 246 555 0101');
+  });
+
+  testWidgets('work form can save a timed overtime entry', (tester) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.work),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextFormField).first, 'Synthetic OT');
+    tester.testTextInput.hide();
+    await tester.pumpAndSettle();
+
+    final categoryField = find.byType(DropdownButtonFormField<WorkCategory>);
+    await tester.ensureVisible(categoryField);
+    await tester.tap(categoryField);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Overtime').last);
+    await tester.pumpAndSettle();
+    await _saveEvent(tester);
+
+    final saved =
+        (await container.read(scheduleRepositoryProvider).getItems()).single;
+    expect(saved.workCategory, WorkCategory.overtime);
+    expect(saved.intervals.single.isValid, isTrue);
+  });
+
+  testWidgets('work editor saves an all-day rest day without fake hours', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.work),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextFormField).first, 'Roster rest day');
+    await tester.tap(find.byType(DropdownButtonFormField<WorkCategory>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Rest day').last);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Rest day · all day'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Starts'), findsNothing);
+    expect(find.text('Rest day · all day'), findsOneWidget);
+    tester.testTextInput.hide();
+    await tester.drag(find.byType(ListView), const Offset(0, -1600));
+    await tester.pumpAndSettle();
+    await _saveEvent(tester);
+
+    final saved =
+        (await container.read(scheduleRepositoryProvider).getItems()).single;
+    expect(saved.workCategory, WorkCategory.restDay);
+    expect(saved.hasNoTime, isTrue);
+    expect(saved.intervals, isEmpty);
+  });
+
+  testWidgets('assignment editor saves a date-only deadline', (tester) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(
+            kind: ScheduleKind.deadline,
+            initialDeadlineType: DeadlineType.assignment,
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(
+      find.byType(TextFormField).first,
+      'Synthetic biology assignment',
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Assignment · due this day'), findsOneWidget);
+    expect(find.text('Starts'), findsNothing);
+    tester.testTextInput.hide();
+    await tester.drag(find.byType(ListView), const Offset(0, -1600));
+    await tester.pumpAndSettle();
+    await _saveEvent(tester);
+
+    final saved =
+        (await container.read(scheduleRepositoryProvider).getItems()).single;
+    expect(saved.kind, ScheduleKind.deadline);
+    expect(saved.deadlineType, DeadlineType.assignment);
+    expect(saved.hasNoTime, isTrue);
+    expect(saved.intervals, isEmpty);
+  });
+
+  testWidgets('examination editor saves a timed school event', (tester) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(
+            kind: ScheduleKind.deadline,
+            initialDeadlineType: DeadlineType.examination,
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(
+      find.byType(TextFormField).first,
+      'Synthetic biology exam',
+    );
+    await tester.scrollUntilVisible(
+      find.text('Additional details'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Additional details'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('event-code-field')),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('event-code-field')),
+      'CS 101',
+    );
+    await tester.pumpAndSettle();
+    tester.testTextInput.hide();
+    await tester.drag(find.byType(ListView), const Offset(0, -1600));
+    await tester.pumpAndSettle();
+    await _saveEvent(tester);
+
+    final saved =
+        (await container.read(scheduleRepositoryProvider).getItems()).single;
+    expect(saved.kind, ScheduleKind.deadline);
+    expect(saved.deadlineType, DeadlineType.examination);
+    expect(saved.code, 'CS 101');
+    expect(saved.hasNoTime, isFalse);
+    expect(saved.intervals, hasLength(1));
+  });
+
+  testWidgets('weekly class entry saves the selected weekday', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(
+            kind: ScheduleKind.classSession,
+            initialDate: CivilDate(2026, 11, 6),
+          ),
+        ),
+      ),
+    );
+    await tester.enterText(
+      find.byType(TextFormField).first,
+      'Synthetic lecture',
+    );
+    await tester.drag(find.byType(ListView), const Offset(0, -1200));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Repeat weekly'));
+    await tester.tap(find.byType(SwitchListTile).first);
+    await tester.pumpAndSettle();
+    expect(find.byType(FilterChip), findsWidgets);
+    final tuesday = find.widgetWithText(FilterChip, 'T').first;
+    await tester.ensureVisible(tuesday);
+    await tester.tap(tuesday);
+    tester.testTextInput.hide();
+    await tester.pumpAndSettle();
+    final tuesdayNode = tester.getSemantics(find.bySemanticsLabel('Tuesday'));
+    expect(
+      tuesdayNode.getSemanticsData().flagsCollection.isSelected,
+      Tristate.isTrue,
+    );
+    expect(find.bySemanticsLabel('Thursday'), findsOneWidget);
+    await tester.drag(find.byType(ListView), const Offset(0, -1600));
+    await tester.pumpAndSettle();
+    await _saveEvent(tester);
+
+    final saved = await container.read(scheduleRepositoryProvider).getItems();
+    expect(saved.single.kind, ScheduleKind.classSession);
+    expect(saved.single.startDate, const CivilDate(2026, 11, 6));
+    expect(saved.single.recurrence?.weekdays, {DateTime.tuesday});
+    semantics.dispose();
+  });
+
+  testWidgets('weekly class entry saves an optional recurrence end date', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.classSession),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextFormField).first, 'Term class');
+    for (
+      var attempt = 0;
+      attempt < 4 && find.text('Repeat weekly').evaluate().isEmpty;
+      attempt++
+    ) {
+      await tester.drag(find.byType(ListView), const Offset(0, -400));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('Repeat weekly'), findsOneWidget);
+    await tester.ensureVisible(find.text('Repeat weekly'));
+    await tester.tap(find.byType(SwitchListTile).first);
+    await tester.pumpAndSettle();
+    final tuesday = find.widgetWithText(FilterChip, 'T').first;
+    await tester.ensureVisible(tuesday);
+    await tester.tap(tuesday);
+    final endDate = find.text('End date · optional');
+    await tester.ensureVisible(endDate);
+    await tester.tap(endDate);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Next month'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('25').last);
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    tester.testTextInput.hide();
+    await tester.drag(find.byType(ListView), const Offset(0, -1600));
+    await tester.pumpAndSettle();
+    await _saveEvent(tester);
+
+    final saved = await container.read(scheduleRepositoryProvider).getItems();
+    expect(saved.single.recurrence?.until, isNotNull);
+    expect(
+      saved.single.recurrence!.until!.compareTo(saved.single.startDate),
+      greaterThanOrEqualTo(0),
+    );
+    expect(saved.single.recurrence!.until!.day, 25);
+  });
+
+  testWidgets('academic term bounds a recurring class from an outside date', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+    final term = AcademicTerm(
+      id: 'synthetic-term',
+      institution: 'Example University',
+      name: 'Autumn Term',
+      startDate: CivilDate(2026, 9, 1),
+      endDate: CivilDate(2026, 12, 15),
+    );
+    await container.read(academicTermRepositoryProvider).save(term);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: EventEditorPage(
+            kind: ScheduleKind.classSession,
+            initialDate: CivilDate(2026, 8, 15),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byType(TextFormField).first,
+      'Synthetic term class',
+    );
+    await tester.scrollUntilVisible(
+      find.text('Repeat weekly'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Repeat weekly'));
+    await tester.pumpAndSettle();
+    final monday = find.widgetWithText(FilterChip, 'M').first;
+    await tester.ensureVisible(monday);
+    await tester.tap(monday);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Additional details'),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Additional details'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('academic-term-field')),
+      400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.byKey(const ValueKey('academic-term-field')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Example University · Autumn Term'));
+    await tester.pumpAndSettle();
+    expect(find.text('Example University · Autumn Term'), findsOneWidget);
+
+    await _saveEvent(tester);
+
+    final saved =
+        (await container.read(scheduleRepositoryProvider).getItems()).single;
+    expect(saved.academicTermId, term.id);
+    expect(saved.startDate, term.startDate);
+    expect(saved.recurrence?.until, term.endDate);
+  });
+}
+
+Future<void> _saveEvent(WidgetTester tester) async {
+  final button = find.text('Save event');
+  final scrollable = find.byType(Scrollable).first;
+  await tester.scrollUntilVisible(button, 400, scrollable: scrollable);
+  // Give the bottom form action enough inset from the test viewport edge.
+  await tester.drag(scrollable, const Offset(0, -80));
+  await tester.pumpAndSettle();
+  await tester.tap(button, warnIfMissed: false);
+  await tester.pumpAndSettle();
+}

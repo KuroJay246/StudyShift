@@ -1,0 +1,6 @@
+<resources>
+    <color name="studyshift_widget_surface">#FFFFFF</color>
+    <color name="studyshift_widget_primary">#0F172A</color>
+    <color name="studyshift_widget_secondary">#475569</color>
+    <color name="studyshift_widget_border">#DCE5F3</color>
+</resources>

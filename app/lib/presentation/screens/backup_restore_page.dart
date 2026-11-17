@@ -1,0 +1,402 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
+
+import '../../application/dependencies.dart';
+import '../../data/schedule_backup.dart';
+import '../../data/schedule_repository.dart';
+import '../../platform/schedule_backup_file_bridge.dart';
+import '../design/studyshift_spacing.dart';
+
+enum _RestoreChoice { merge, replace }
+
+class BackupRestorePage extends ConsumerStatefulWidget {
+  const BackupRestorePage({super.key});
+
+  @override
+  ConsumerState<BackupRestorePage> createState() => _BackupRestorePageState();
+}
+
+class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
+  final _codec = const ScheduleBackupCodec();
+  final _files = const ScheduleBackupFileBridge();
+  bool _working = false;
+  String? _message;
+  bool _messageIsError = false;
+
+  Future<void> _createBackup() async {
+    final passphrase = await _askForPassphrase(confirm: true);
+    if (passphrase == null || !mounted) return;
+    setState(() {
+      _working = true;
+      _message = null;
+    });
+    try {
+      final items = await ref.read(scheduleRepositoryProvider).getItems();
+      final legends = await ref
+          .read(workCodeLegendRepositoryProvider)
+          .getItems();
+      final terms = await ref.read(academicTermRepositoryProvider).getItems();
+      final bytes = await _codec.encode(
+        items,
+        passphrase: passphrase,
+        workCodeLegends: legends,
+        academicTerms: terms,
+      );
+      final now = DateTime.now();
+      final saved = await _files.save(
+        bytes,
+        fileName:
+            'shift-study-${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}.ssbackup',
+      );
+      if (!mounted) return;
+      _showMessage(
+        saved
+            ? 'Encrypted backup saved. Keep the passphrase somewhere safe; it cannot be recovered.'
+            : 'Backup save cancelled.',
+      );
+    } on Object catch (error) {
+      if (mounted) _showMessage(_safeError(error), isError: true);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<void> _restoreBackup() async {
+    setState(() {
+      _working = true;
+      _message = null;
+    });
+    Uint8List? bytes;
+    try {
+      bytes = await _files.open();
+      if (bytes == null || !mounted) return;
+    } catch (error) {
+      if (mounted) _showMessage(_safeError(error), isError: true);
+      return;
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+
+    final passphrase = await _askForPassphrase(confirm: false);
+    if (passphrase == null || !mounted) return;
+    setState(() => _working = true);
+    try {
+      final backup = await _codec.decode(bytes, passphrase: passphrase);
+      if (!mounted) return;
+      final choice = await _chooseRestore(
+        backup.items.length,
+        backup.workCodeLegends.length,
+        backup.academicTerms.length,
+        backup.createdAt,
+      );
+      if (choice == null || !mounted) return;
+      late final ScheduleRestoreResult result;
+      await ref.read(scheduleDatabaseProvider).transaction(() async {
+        final termIds = await ref
+            .read(academicTermRepositoryProvider)
+            .restoreItems(
+              backup.academicTerms,
+              replaceExisting: choice == _RestoreChoice.replace,
+            );
+        final restoredItems = backup.items
+            .map((item) {
+              final termId = item.academicTermId;
+              return termId == null
+                  ? item
+                  : item.copyWith(academicTermId: termIds[termId]);
+            })
+            .toList(growable: false);
+        result = await ref
+            .read(scheduleRepositoryProvider)
+            .restoreItems(
+              restoredItems,
+              replaceExisting: choice == _RestoreChoice.replace,
+            );
+        await ref
+            .read(workCodeLegendRepositoryProvider)
+            .restoreItems(
+              backup.workCodeLegends,
+              replaceExisting: choice == _RestoreChoice.replace,
+            );
+      });
+      ref.invalidate(scheduleItemsProvider);
+      ref.invalidate(workCodeLegendsProvider);
+      ref.invalidate(academicTermsProvider);
+      if (mounted) {
+        _showMessage(_restoreSummary(result, choice));
+      }
+    } on Object catch (error) {
+      if (mounted) _showMessage(_safeError(error), isError: true);
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
+  }
+
+  Future<String?> _askForPassphrase({required bool confirm}) =>
+      showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => _PassphraseDialog(confirm: confirm),
+      );
+
+  Future<_RestoreChoice?> _chooseRestore(
+    int count,
+    int legendCount,
+    int termCount,
+    DateTime createdAt,
+  ) => showDialog<_RestoreChoice>(
+    context: context,
+    builder: (context) {
+      final date = MaterialLocalizations.of(context)
+          .formatMediumDate(createdAt.toLocal());
+      return AlertDialog(
+        title: const Text('Review this backup'),
+        content: Text(
+          'Created $date · $count ${count == 1 ? 'event' : 'events'} · $termCount ${termCount == 1 ? 'academic term' : 'academic terms'} · $legendCount ${legendCount == 1 ? 'roster code' : 'roster codes'}. Nothing changes until you choose.\n\nMerge adds new IDs and keeps anything already saved. Replace deletes every event, academic term and roster code on this device, then installs the backup. This cannot be undone in the app.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, _RestoreChoice.merge),
+            child: const Text('Merge new events'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(context, _RestoreChoice.replace),
+            child: const Text('Replace schedule'),
+          ),
+        ],
+      );
+    },
+  );
+
+  void _showMessage(String message, {bool isError = false}) {
+    setState(() {
+      _message = message;
+      _messageIsError = isError;
+    });
+  }
+
+  String _safeError(Object error) {
+    if (error is FormatException) return error.message;
+    if (error is PlatformException) {
+      return error.message ?? 'The backup file could not be accessed.';
+    }
+    return 'The backup could not be completed. Your saved schedule is unchanged.';
+  }
+
+  String _restoreSummary(ScheduleRestoreResult result, _RestoreChoice choice) {
+    if (choice == _RestoreChoice.replace) {
+      return 'Schedule replaced: ${result.inserted} ${result.inserted == 1 ? 'event' : 'events'} restored.';
+    }
+    return 'Backup merged: ${result.inserted} added; ${result.skipped} already saved and kept unchanged.';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = Theme.of(context).colorScheme;
+    return Scaffold(
+      appBar: AppBar(title: const Text('Backup & restore')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+        children: [
+          Text(
+            'Keep a safe copy',
+            style: Theme.of(context).textTheme.headlineSmall
+                ?.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Backups stay under your control. Choose where the file is saved or opened with the Android document picker.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: 18),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(StudyShiftSpacing.cardPadding),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.lock_outline_rounded, size: 26),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Encrypted schedule backup',
+                    style: Theme.of(context).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Your event details are encrypted with a passphrase before the file picker opens. The passphrase is never stored.',
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: _working ? null : _createBackup,
+                    icon: const Icon(Icons.save_alt_rounded),
+                    label: const Text('Create backup'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(StudyShiftSpacing.cardPadding),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.restore_rounded, size: 26),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Restore a schedule',
+                    style: Theme.of(context).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'The backup is checked and unlocked before any saved event changes. Review it, then merge new events or replace the schedule.',
+                  ),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: _working ? null : _restoreBackup,
+                    icon: const Icon(Icons.folder_open_rounded),
+                    label: const Text('Choose backup file'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_working) ...[
+            const SizedBox(height: 20),
+            const LinearProgressIndicator(),
+            const SizedBox(height: 8),
+            const Text('Working with your local backup…'),
+          ],
+          if (_message != null) ...[
+            const SizedBox(height: 16),
+            Semantics(
+              liveRegion: true,
+              child: Card(
+                color: _messageIsError
+                    ? palette.errorContainer
+                    : palette.secondaryContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(_message!),
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          const ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.key_outlined),
+            title: Text('Keep the passphrase safe'),
+            subtitle: Text(
+              'It cannot be recovered. A backup file without its passphrase cannot be restored.',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PassphraseDialog extends StatefulWidget {
+  const _PassphraseDialog({required this.confirm});
+
+  final bool confirm;
+
+  @override
+  State<_PassphraseDialog> createState() => _PassphraseDialogState();
+}
+
+class _PassphraseDialogState extends State<_PassphraseDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _passphrase = TextEditingController();
+  final _confirmation = TextEditingController();
+
+  @override
+  void dispose() {
+    _passphrase.dispose();
+    _confirmation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text(widget.confirm ? 'Protect your backup' : 'Unlock your backup'),
+    content: Form(
+      key: _formKey,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextFormField(
+            controller: _passphrase,
+            autofocus: true,
+            obscureText: true,
+            enableSuggestions: false,
+            autocorrect: false,
+            decoration: InputDecoration(
+              labelText: 'Passphrase',
+              helperText: widget.confirm ? 'Use at least 12 characters.' : null,
+            ),
+            validator: (value) {
+              final length = value?.trim().length ?? 0;
+              if (length < 12) return 'Use at least 12 characters.';
+              if ((value?.length ?? 0) > 256) {
+                return 'Use 256 characters or fewer.';
+              }
+              return null;
+            },
+            onFieldSubmitted: (_) {
+              if (!widget.confirm && _formKey.currentState!.validate()) {
+                Navigator.pop(context, _passphrase.text);
+              }
+            },
+          ),
+          if (widget.confirm) ...[
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _confirmation,
+              obscureText: true,
+              enableSuggestions: false,
+              autocorrect: false,
+              decoration: const InputDecoration(
+                labelText: 'Confirm passphrase',
+              ),
+              validator: (value) => value != _passphrase.text
+                  ? 'Passphrases do not match.'
+                  : null,
+              onFieldSubmitted: (_) {
+                if (_formKey.currentState!.validate()) {
+                  Navigator.pop(context, _passphrase.text);
+                }
+              },
+            ),
+          ],
+        ],
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(
+        onPressed: () {
+          if (_formKey.currentState!.validate()) {
+            Navigator.pop(context, _passphrase.text);
+          }
+        },
+        child: Text(widget.confirm ? 'Create encrypted file' : 'Unlock'),
+      ),
+    ],
+  );
+}

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="LaunchTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <item name="android:windowSplashScreenBackground">@color/studyshift_launch_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_blue</item>
+    </style>
+    <style name="LaunchThemeBlueLight"><item name="android:windowSplashScreenBackground">@color/studyshift_launch_background_light</item><item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_blue</item></style>
+    <style name="LaunchThemeTealLight"><item name="android:windowSplashScreenBackground">@color/studyshift_launch_background_light</item><item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_teal</item></style>
+    <style name="LaunchThemeVioletLight"><item name="android:windowSplashScreenBackground">@color/studyshift_launch_background_light</item><item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_violet</item></style>
+    <style name="LaunchThemeAmberLight"><item name="android:windowSplashScreenBackground">@color/studyshift_launch_background_light</item><item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_amber</item></style>
+    <style name="LaunchThemeRedLight"><item name="android:windowSplashScreenBackground">@color/studyshift_launch_background_light</item><item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_red</item></style>
+    <style name="LaunchThemeBlueDark"><item name="android:windowSplashScreenBackground">@color/studyshift_launch_background_dark</item><item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_blue</item></style>
+    <style name="LaunchThemeTealDark"><item name="android:windowSplashScreenBackground">@color/studyshift_launch_background_dark</item><item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_teal</item></style>
+    <style name="LaunchThemeVioletDark"><item name="android:windowSplashScreenBackground">@color/studyshift_launch_background_dark</item><item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_violet</item></style>
+    <style name="LaunchThemeAmberDark"><item name="android:windowSplashScreenBackground">@color/studyshift_launch_background_dark</item><item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_amber</item></style>
+    <style name="LaunchThemeRedDark"><item name="android:windowSplashScreenBackground">@color/studyshift_launch_background_dark</item><item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_red</item></style>
+    <style name="LaunchThemeBlue" parent="@style/LaunchTheme">
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_blue</item>
+    </style>
+    <style name="LaunchThemeTeal" parent="@style/LaunchTheme">
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_teal</item>
+    </style>
+    <style name="LaunchThemeViolet" parent="@style/LaunchTheme">
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_violet</item>
+    </style>
+    <style name="LaunchThemeAmber" parent="@style/LaunchTheme">
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_amber</item>
+    </style>
+    <style name="LaunchThemeRed" parent="@style/LaunchTheme">
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/studyshift_splash_icon_red</item>
+    </style>
+</resources>

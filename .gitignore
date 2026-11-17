@@ -1,0 +1,65 @@
+# Flutter / Dart generated files (for later implementation)
+.dart_tool/
+.packages
+.pub-cache/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+
+# Android / Gradle
+.gradle/
+**/local.properties
+**/key.properties
+**/*.jks
+**/*.keystore
+**/signing.properties
+
+# iOS / Xcode
+**/Pods/
+**/.symlinks/
+**/DerivedData/
+**/*.xcuserstate
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local user data and import fixtures
+.local-data/
+private-imports/
+docs/qa/
+ss-galaxy-more-final.xml
+*.ics
+*.xlsx
+*.xls
+*.pdf
+*.jpg
+*.jpeg
+*.png
+*.heic
+*.db
+*.sqlite
+*.sqlite3
+
+# Keep generated product concept boards reviewable; runtime/private images stay ignored above.
+!/.impeccable/
+!/.impeccable/mocks/
+!/.impeccable/mocks/decision/
+!/.impeccable/mocks/decision/*.png
+!/.impeccable/mocks/decision/*.png.json
+
+# Approved StudyShift runtime branding assets are source inputs, not private media.
+!app/assets/branding/studyshift-symbol*.png
+!app/assets/branding/studyshift-icon-*.png
+!app/assets/branding/studyshift-launcher-icon.png
+!app/android/app/src/main/res/drawable-nodpi/studyshift_symbol_*.png
+
+# Project-scoped SDK installs (never commit binaries)
+.devtools/
+.tools/
+
+# Android local device data
+.avd/

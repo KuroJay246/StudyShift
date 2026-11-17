@@ -1,0 +1,6 @@
+<resources>
+    <color name="studyshift_widget_work">#7DB4FF</color>
+    <color name="studyshift_widget_study">#B69CFF</color>
+    <color name="studyshift_widget_personal">#5EEAD4</color>
+    <color name="studyshift_widget_deadline">#FFC27A</color>
+</resources>

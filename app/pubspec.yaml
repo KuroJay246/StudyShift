@@ -1,0 +1,40 @@
+name: shift_study
+description: "Private, offline-first personal scheduling for work, study and everyday life."
+publish_to: 'none'
+version: 0.1.0+16329
+
+environment:
+  sdk: ^3.13.7
+
+dependencies:
+  archive: 3.6.1
+  crypto: 3.0.8
+  cryptography: 2.9.0
+  cryptography_flutter: 2.3.4
+  drift: 2.35.3
+  drift_flutter: 0.3.1
+  firstfloor_calendar: 1.0.14
+  flutter:
+    sdk: flutter
+  flutter_svg: 2.3.2
+  flutter_local_notifications: 21.0.0
+  flutter_riverpod: 3.4.3
+  go_router: 18.1.3
+  spreadsheet_decoder: 2.3.0
+  timezone: 0.11.2
+  xml: 6.6.1
+
+dev_dependencies:
+  integration_test:
+    sdk: flutter
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  drift_dev: ^2.35.2
+  build_runner: ^2.17.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icons/lucide/
+    - assets/branding/

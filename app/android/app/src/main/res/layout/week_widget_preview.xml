@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/studyshift_widget_background"
+    android:gravity="top"
+    android:orientation="vertical"
+    android:padding="12dp">
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="THIS WEEK" android:textColor="@color/studyshift_widget_work"
+        android:textSize="12sp" android:textStyle="bold" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" android:text="Your week at a glance"
+        android:textColor="@color/studyshift_widget_primary" android:textSize="14sp"
+        android:textStyle="bold" />
+    <TextView android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="5dp" android:text="Mon   Tue   Wed   Thu   Fri   Sat   Sun"
+        android:textColor="@color/studyshift_widget_secondary" android:textSize="12sp" />
+</LinearLayout>

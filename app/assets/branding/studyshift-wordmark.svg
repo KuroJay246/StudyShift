@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 90" role="img" aria-labelledby="title">
+  <title id="title">StudyShift — Work, Study, Plan</title>
+  <text x="4" y="55" font-family="Inter, Roboto, Arial, sans-serif" font-size="48" font-weight="700" font-style="italic" letter-spacing="-2" fill="#0B1F5B">Study</text>
+  <text x="151" y="55" font-family="Inter, Roboto, Arial, sans-serif" font-size="48" font-weight="700" font-style="italic" letter-spacing="-2" fill="#0D5BFF">Shift</text>
+  <text x="7" y="80" font-family="Inter, Roboto, Arial, sans-serif" font-size="14" font-weight="500" letter-spacing="4" fill="#475569">WORK  •  STUDY  •  PLAN</text>
+</svg>
