@@ -260,9 +260,16 @@ class _TodayPageState extends ConsumerState<TodayPage>
         );
         final today = CivilDate.fromDateTime(now);
         final isToday = selectedDay == today;
-        final nextEventDate = next == null
+        final featuredNext =
+            active ??
+            (next != null &&
+                    (occurrences.isEmpty ||
+                        CivilDate.fromDateTime(next.interval.start) == today)
+                ? next
+                : null);
+        final nextEventDate = featuredNext == null
             ? null
-            : CivilDate.fromDateTime(next.interval.start);
+            : CivilDate.fromDateTime(featuredNext.interval.start);
         final nextEventDateLabel =
             nextEventDate == null || nextEventDate == today
             ? null
@@ -429,23 +436,25 @@ class _TodayPageState extends ConsumerState<TodayPage>
                         if (place != null) _selectWeatherPlace(place);
                       },
                 featuredContent: isToday
-                    ? next != null
+                    ? featuredNext != null
                           ? _NextEventPanel(
-                              item: next.occurrence.item,
+                              item: featuredNext.occurrence.item,
                               time: formatMinute(
-                                next.interval.start.hour * 60 +
-                                    next.interval.start.minute,
+                                featuredNext.interval.start.hour * 60 +
+                                    featuredNext.interval.start.minute,
                                 use24Hour: use24,
                               ),
                               endTime: formatMinute(
-                                next.interval.end.hour * 60 +
-                                    next.interval.end.minute,
+                                featuredNext.interval.end.hour * 60 +
+                                    featuredNext.interval.end.minute,
                                 use24Hour: use24,
                               ),
                               countdown: _countdown(
                                 active == null
-                                    ? next.interval.start.difference(now)
-                                    : next.interval.end.difference(now),
+                                    ? featuredNext.interval.start.difference(
+                                        now,
+                                      )
+                                    : featuredNext.interval.end.difference(now),
                                 ending: active != null,
                               ),
                               isInProgress: active != null,
@@ -454,8 +463,8 @@ class _TodayPageState extends ConsumerState<TodayPage>
                               onTap: () => showScheduleDetails(
                                 context,
                                 ref,
-                                next.occurrence.item,
-                                occurrenceDate: next.occurrence.date,
+                                featuredNext.occurrence.item,
+                                occurrenceDate: featuredNext.occurrence.date,
                               ),
                             )
                           : _NextEventEmptyPanel(

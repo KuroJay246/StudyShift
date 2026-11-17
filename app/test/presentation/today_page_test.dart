@@ -747,6 +747,17 @@ void main() {
         ),
       );
     }
+    await ScheduleRepository(database).save(
+      ScheduleItem(
+        id: 'tomorrow-upcoming',
+        kind: ScheduleKind.work,
+        title: 'Synthetic tomorrow shift',
+        startDate: today.addDays(1),
+        intervals: [
+          EventInterval.sameDay(startMinute: 9 * 60, endMinute: 17 * 60),
+        ],
+      ),
+    );
     final container = ProviderContainer(
       overrides: [
         scheduleDatabaseProvider.overrideWith((ref) {
