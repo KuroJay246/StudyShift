@@ -76,7 +76,6 @@ class RosterGridImportParser {
     caseSensitive: false,
   );
   static final _separatorsPattern = RegExp(r'[/|,;]');
-  static const _rowTolerance = .014;
 
   RosterGridDetection detect(List<OcrTextToken> tokens) {
     if (tokens.length > 50000) {
@@ -98,16 +97,29 @@ class RosterGridImportParser {
         if (dayNumbers.toSet().length != dateTokens.length) continue;
         final columns = <RosterGridColumn>[];
         final centers = <double>[];
-        for (final token in dateTokens) {
+        for (var dateIndex = 0; dateIndex < dateTokens.length; dateIndex++) {
+          final token = dateTokens[dateIndex];
           final day = _dayNumber(token.text)!;
           if (columns.isNotEmpty &&
               (token.centerX - centers.last).abs() < .025) {
             continue;
           }
+          final neighboringGaps = <double>[
+            if (dateIndex > 0)
+              (token.centerX - dateTokens[dateIndex - 1].centerX).abs(),
+            if (dateIndex + 1 < dateTokens.length)
+              (dateTokens[dateIndex + 1].centerX - token.centerX).abs(),
+          ];
+          final weekdaySearchRadius = neighboringGaps.isEmpty
+              ? .02
+              : (neighboringGaps.reduce((a, b) => a < b ? a : b) * .45)
+                    .clamp(.005, .04)
+                    .toDouble();
           final weekdayToken = _nearestWeekday(
             rows,
             token,
             dateRowIndex: index,
+            maxHorizontalDistance: weekdaySearchRadius,
           );
           columns.add(
             RosterGridColumn(
@@ -186,10 +198,14 @@ class RosterGridImportParser {
   List<List<OcrTextToken>> _groupRows(Iterable<OcrTextToken> source) {
     final ordered = source.toList()
       ..sort((a, b) => a.centerY.compareTo(b.centerY));
+    final heights = ordered.map((token) => token.bottom - token.top).toList()
+      ..sort();
+    final medianHeight = heights.isEmpty ? 0 : heights[heights.length ~/ 2];
+    final rowTolerance = (medianHeight * .9).clamp(.004, .014).toDouble();
     final rows = <List<OcrTextToken>>[];
     for (final token in ordered) {
       if (rows.isEmpty ||
-          (rows.last.first.centerY - token.centerY).abs() > _rowTolerance) {
+          (rows.last.first.centerY - token.centerY).abs() > rowTolerance) {
         rows.add([token]);
       } else {
         rows.last.add(token);
@@ -219,13 +235,9 @@ class RosterGridImportParser {
     });
     final result = <RosterGridRow>[];
     for (final row in rows.skip(headerIndex + 1)) {
-      final label = row
-          .where((token) => token.centerX < firstDateBoundary)
-          .map((token) => token.text.trim())
-          .where((text) => text.isNotEmpty)
-          .join(' ')
-          .replaceAll(RegExp(r'\s+'), ' ')
-          .trim();
+      final label = _rowLabel(
+        row.where((token) => token.centerX < firstDateBoundary),
+      );
       if (label.length < 2) continue;
       // ML Kit groups a whole horizontal line together. A name-like token
       // inside date columns can be a second side-by-side staff row, so keep
@@ -262,17 +274,141 @@ class RosterGridImportParser {
     return result;
   }
 
+  String _rowLabel(Iterable<OcrTextToken> source) {
+    final words = <(String, OcrTextToken)>[];
+    for (final token in source) {
+      for (final rawWord in token.text.split(RegExp(r'\s+'))) {
+        final word = rawWord.replaceAll(RegExp(r'^[!$|]+|[!$|]+$'), '').trim();
+        if (word.isEmpty || !RegExp(r'[A-Za-zÀ-ÿ]').hasMatch(word)) continue;
+        if (_looksLikeRosterMarker((word, token))) continue;
+        final normalized = word.toLowerCase();
+        final isRepeatedCopy = words.any((existing) {
+          if (existing.$1.toLowerCase() != normalized) return false;
+          final previous = existing.$2;
+          final overlapWidth =
+              (previous.right < token.right ? previous.right : token.right) -
+              (previous.left > token.left ? previous.left : token.left);
+          final overlapHeight =
+              (previous.bottom < token.bottom
+                  ? previous.bottom
+                  : token.bottom) -
+              (previous.top > token.top ? previous.top : token.top);
+          final intersection =
+              (overlapWidth > 0 ? overlapWidth : 0) *
+              (overlapHeight > 0 ? overlapHeight : 0);
+          final previousArea =
+              (previous.right - previous.left) *
+              (previous.bottom - previous.top);
+          final tokenArea =
+              (token.right - token.left) * (token.bottom - token.top);
+          final smallerArea = previousArea < tokenArea
+              ? previousArea
+              : tokenArea;
+          final verticalDistance = (previous.centerY - token.centerY).abs();
+          final horizontalGap = (previous.right <= token.left)
+              ? token.left - previous.right
+              : (token.right <= previous.left)
+              ? previous.left - token.right
+              : 0.0;
+          final nearbyRepeatedWord =
+              verticalDistance <= .015 && horizontalGap <= .03;
+          return (smallerArea > 0 && intersection / smallerArea >= .1) ||
+              nearbyRepeatedWord;
+        });
+        if (!isRepeatedCopy) words.add((word, token));
+      }
+    }
+    final cleanedWords = <(String, OcrTextToken)>[];
+    for (final candidate in words) {
+      if (cleanedWords.isNotEmpty) {
+        final previous = cleanedWords.last;
+        if (previous.$1.toLowerCase() == candidate.$1.toLowerCase()) {
+          continue;
+        }
+        if (_looksLikeRepeatedOcrWord(previous, candidate)) {
+          if (candidate.$1.length > previous.$1.length) {
+            cleanedWords[cleanedWords.length - 1] = candidate;
+          }
+          continue;
+        }
+      }
+      cleanedWords.add(candidate);
+    }
+    return cleanedWords.map((word) => word.$1).join(' ');
+  }
+
+  bool _looksLikeRepeatedOcrWord(
+    (String, OcrTextToken) previous,
+    (String, OcrTextToken) candidate,
+  ) {
+    if (previous.$1.length < 5 || candidate.$1.length < 5) return false;
+    final left = previous.$1.toLowerCase();
+    final right = candidate.$1.toLowerCase();
+    if (!_editDistanceAtMostOne(left, right)) return false;
+    final a = previous.$2;
+    final b = candidate.$2;
+    final verticalDistance = (a.centerY - b.centerY).abs();
+    final horizontalGap = a.right <= b.left
+        ? b.left - a.right
+        : b.right <= a.left
+        ? a.left - b.right
+        : 0.0;
+    return verticalDistance <= .015 && horizontalGap <= .06;
+  }
+
+  bool _editDistanceAtMostOne(String left, String right) {
+    if ((left.length - right.length).abs() > 1) return false;
+    var leftIndex = 0;
+    var rightIndex = 0;
+    var edits = 0;
+    while (leftIndex < left.length && rightIndex < right.length) {
+      if (left[leftIndex] == right[rightIndex]) {
+        leftIndex++;
+        rightIndex++;
+        continue;
+      }
+      edits++;
+      if (edits > 1) return false;
+      if (left.length > right.length) {
+        leftIndex++;
+      } else if (right.length > left.length) {
+        rightIndex++;
+      } else {
+        leftIndex++;
+        rightIndex++;
+      }
+    }
+    if (leftIndex < left.length || rightIndex < right.length) edits++;
+    return edits <= 1;
+  }
+
+  bool _looksLikeRosterMarker((String, OcrTextToken) candidate) {
+    final text = candidate.$1.toLowerCase();
+    // Decorative roster marks after names can be recognized as an S or "Is"
+    // even when OCR gives them a full-width text box.
+    if (text == 's' || text == 'is') return true;
+    final token = candidate.$2;
+    final width = token.right - token.left;
+    final height = token.bottom - token.top;
+    if (RegExp(r'^[il1|]{1,2}s$').hasMatch(text)) {
+      return height > 0 && width / height <= 1;
+    }
+    if (!RegExp(r'^[il1|]{1,2}$').hasMatch(text)) return false;
+    return height > 0 && width / height <= .65;
+  }
+
   OcrTextToken? _nearestWeekday(
     List<List<OcrTextToken>> rows,
     OcrTextToken dateToken, {
     required int dateRowIndex,
+    required double maxHorizontalDistance,
   }) {
     final matches = <(OcrTextToken, double)>[];
     for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
       if ((rowIndex - dateRowIndex).abs() > 1) continue;
       for (final token in rows[rowIndex]) {
         if (_weekdayPattern.hasMatch(token.text.trim()) &&
-            (token.centerX - dateToken.centerX).abs() < .04 &&
+            (token.centerX - dateToken.centerX).abs() < maxHorizontalDistance &&
             (token.centerY - dateToken.centerY).abs() < .055) {
           matches.add((token, (token.centerY - dateToken.centerY).abs()));
         }

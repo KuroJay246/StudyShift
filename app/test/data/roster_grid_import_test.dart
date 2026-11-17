@@ -23,6 +23,201 @@ void main() {
     ]);
   });
 
+  test('matches weekdays to their own columns in a dense roster header', () {
+    const tokens = [
+      OcrTextToken(text: 'Mon', left: .16, top: .10, right: .19, bottom: .12),
+      OcrTextToken(text: 'Tue', left: .195, top: .10, right: .225, bottom: .12),
+      OcrTextToken(text: 'Wed', left: .230, top: .10, right: .260, bottom: .12),
+      OcrTextToken(text: 'Thu', left: .265, top: .10, right: .295, bottom: .12),
+      OcrTextToken(text: '16', left: .16, top: .13, right: .19, bottom: .15),
+      OcrTextToken(text: '17', left: .195, top: .13, right: .225, bottom: .15),
+      OcrTextToken(text: '18', left: .230, top: .13, right: .260, bottom: .15),
+      OcrTextToken(text: '19', left: .265, top: .13, right: .295, bottom: .15),
+      OcrTextToken(
+        text: 'Person One',
+        left: .02,
+        top: .21,
+        right: .13,
+        bottom: .23,
+      ),
+      OcrTextToken(text: 'A1', left: .16, top: .21, right: .19, bottom: .23),
+      OcrTextToken(text: 'A2', left: .195, top: .21, right: .225, bottom: .23),
+      OcrTextToken(text: 'VS', left: .230, top: .21, right: .260, bottom: .23),
+      OcrTextToken(text: 'OFF', left: .265, top: .21, right: .295, bottom: .23),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(table.columns.map((column) => column.weekday), [
+      DateTime.monday,
+      DateTime.tuesday,
+      DateTime.wednesday,
+      DateTime.thursday,
+    ]);
+    expect(parser.mapDates(table, DateTime(2026, 11, 16)), [
+      DateTime(2026, 11, 16),
+      DateTime(2026, 11, 17),
+      DateTime(2026, 11, 18),
+      DateTime(2026, 11, 19),
+    ]);
+  });
+
+  test('keeps vertically close staff rows separate using OCR text height', () {
+    const tokens = [
+      OcrTextToken(text: '16', left: .20, top: .10, right: .23, bottom: .11),
+      OcrTextToken(text: '17', left: .30, top: .10, right: .33, bottom: .11),
+      OcrTextToken(text: '18', left: .40, top: .10, right: .43, bottom: .11),
+      OcrTextToken(
+        text: 'Person One',
+        left: .02,
+        top: .20,
+        right: .16,
+        bottom: .208,
+      ),
+      OcrTextToken(text: 'A1', left: .20, top: .20, right: .23, bottom: .208),
+      OcrTextToken(
+        text: 'Person Two',
+        left: .02,
+        top: .211,
+        right: .16,
+        bottom: .219,
+      ),
+      OcrTextToken(text: 'VS', left: .30, top: .211, right: .33, bottom: .219),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(table.rows.map((row) => row.label), ['Person One', 'Person Two']);
+    expect(table.rows.first.cells.first.text, 'A1');
+    expect(table.rows.last.cells[1].text, 'VS');
+  });
+
+  test('cleans repeated and stray OCR marks from roster row labels', () {
+    final tokens = [
+      ..._sampleGrid(),
+      const OcrTextToken(
+        text: 'Person',
+        left: .02,
+        top: .35,
+        right: .05,
+        bottom: .37,
+      ),
+      const OcrTextToken(
+        text: 'Person',
+        left: .022,
+        top: .351,
+        right: .052,
+        bottom: .371,
+      ),
+      const OcrTextToken(
+        text: 'Person',
+        left: .055,
+        top: .35,
+        right: .085,
+        bottom: .37,
+      ),
+      const OcrTextToken(
+        text: 'Worker!',
+        left: .09,
+        top: .35,
+        right: .12,
+        bottom: .37,
+      ),
+      const OcrTextToken(
+        text: r'$',
+        left: .125,
+        top: .35,
+        right: .13,
+        bottom: .37,
+      ),
+      const OcrTextToken(
+        text: 'A1',
+        left: .18,
+        top: .35,
+        right: .22,
+        bottom: .37,
+      ),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(table.rows.last.label, 'Person Worker');
+  });
+
+  test('cleans duplicate OCR words and marker tokens in any token order', () {
+    final tokens = [
+      ..._sampleGrid(),
+      const OcrTextToken(
+        text: 'Cedar',
+        left: .01,
+        top: .35,
+        right: .04,
+        bottom: .37,
+      ),
+      const OcrTextToken(
+        text: 'Cedar',
+        left: .075,
+        top: .35,
+        right: .105,
+        bottom: .37,
+      ),
+      const OcrTextToken(
+        text: 'Quill',
+        left: .11,
+        top: .35,
+        right: .135,
+        bottom: .37,
+      ),
+      const OcrTextToken(
+        text: 'Is',
+        left: .10,
+        top: .35,
+        right: .12,
+        bottom: .37,
+      ),
+      const OcrTextToken(
+        text: 'ls',
+        left: .132,
+        top: .35,
+        right: .138,
+        bottom: .37,
+      ),
+      const OcrTextToken(
+        text: 'A1',
+        left: .18,
+        top: .35,
+        right: .22,
+        bottom: .37,
+      ),
+      const OcrTextToken(
+        text: 'Haskel',
+        left: .01,
+        top: .40,
+        right: .06,
+        bottom: .42,
+      ),
+      const OcrTextToken(
+        text: 'Haskell',
+        left: .07,
+        top: .40,
+        right: .13,
+        bottom: .42,
+      ),
+      const OcrTextToken(
+        text: 'A1',
+        left: .18,
+        top: .40,
+        right: .22,
+        bottom: .42,
+      ),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(table.rows[table.rows.length - 2].label, 'Cedar Quill');
+    expect(table.rows.last.label, 'Haskell');
+  });
+
   test('maps chosen header to calendar dates and rejects weekday mismatch', () {
     final table = parser.detect(_sampleGrid()).candidates.single;
 
