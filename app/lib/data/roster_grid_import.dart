@@ -83,7 +83,7 @@ class RosterGridImportParser {
   const RosterGridImportParser();
 
   static final _dayPattern = RegExp(
-    r'^\s*(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)[,./ -]+([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\s*$|^\s*([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\s*$',
+    r'^\s*(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)[,./ -]+([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\s*$|^\s*([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?[,./ -]+(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\s*$|^\s*([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\s*$',
     caseSensitive: false,
   );
   static final _isoDatePattern = RegExp(
@@ -475,7 +475,9 @@ class RosterGridImportParser {
     }
     final match = _dayPattern.firstMatch(text.trim());
     if (match == null) return null;
-    final day = int.tryParse(match.group(1) ?? match.group(2)!);
+    final day = int.tryParse(
+      match.group(1) ?? match.group(2) ?? match.group(3)!,
+    );
     return day == null ? null : _RosterDateHeader(day: day);
   }
 

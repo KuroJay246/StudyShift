@@ -75,6 +75,50 @@ void main() {
     ]);
   });
 
+  test('detects numbered dates merged before their weekday headers', () {
+    const tokens = [
+      OcrTextToken(
+        text: '16 Mon',
+        left: .17,
+        top: .10,
+        right: .23,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: '17 Tue',
+        left: .29,
+        top: .10,
+        right: .35,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: '18 Wed',
+        left: .41,
+        top: .10,
+        right: .48,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: 'Person One',
+        left: .02,
+        top: .20,
+        right: .13,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'A1', left: .18, top: .20, right: .22, bottom: .22),
+      OcrTextToken(text: 'OFF', left: .30, top: .20, right: .34, bottom: .22),
+      OcrTextToken(text: 'VS', left: .42, top: .20, right: .46, bottom: .22),
+    ];
+
+    final detection = parser.detect(tokens);
+
+    expect(detection.candidates, hasLength(1));
+    expect(
+      detection.candidates.single.columns.map((column) => column.weekday),
+      [DateTime.monday, DateTime.tuesday, DateTime.wednesday],
+    );
+  });
+
   test('matches weekdays to their own columns in a dense roster header', () {
     const tokens = [
       OcrTextToken(text: 'Mon', left: .16, top: .10, right: .19, bottom: .12),

@@ -133,7 +133,7 @@ void main() {
     });
   }
 
-  testWidgets('slow local startup keeps the branded loading screen visible', (
+  testWidgets('slow local startup leaves the splash and shows a loading state', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -147,9 +147,9 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 2600));
 
-    expect(find.byType(StudyShiftBrandIcon), findsOneWidget);
-    expect(find.text('Loading your schedule…'), findsOneWidget);
-    expect(find.text('Still loading your schedule…'), findsNothing);
+    expect(find.byType(StudyShiftBrandIcon), findsNothing);
+    expect(find.text('Still loading your schedule…'), findsOneWidget);
+    expect(find.text('Loading your schedule…'), findsNothing);
     expect(find.text('Your schedule could not be opened'), findsNothing);
     expect(tester.takeException(), isNull);
 

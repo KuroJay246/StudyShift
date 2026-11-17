@@ -84,6 +84,9 @@ class _StartupLaunchGateState extends State<StartupLaunchGate> {
         ),
       );
     }
+    if (_minimumElapsed && !widget.finished) {
+      return const StartupLoadingScreen();
+    }
     return StudyShiftSplash(
       ready: widget.ready,
       accentTheme: widget.accentTheme,
