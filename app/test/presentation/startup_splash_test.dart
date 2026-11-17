@@ -185,7 +185,7 @@ void main() {
     expect(find.text('StudyShift'), findsOneWidget);
     expect(find.text('Today screen'), findsNothing);
 
-    await tester.pump(const Duration(milliseconds: 1799));
+    await tester.pump(const Duration(milliseconds: 1199));
     expect(find.text('StudyShift'), findsOneWidget);
     expect(find.text('Today screen'), findsNothing);
 

@@ -2,7 +2,7 @@
 
 **Updated:** 2026-11-17
 **Repository:** `main`
-**Current app version:** `0.1.0+20351` (personal debug build; not a release)
+**Current app version:** `0.1.0+20352` (personal debug build; not a release)
 
 This report distinguishes implementation and emulator evidence from physical-device and release acceptance. Percentages below are planning estimates, not pass rates or a claim that the app is production-ready.
 
@@ -23,10 +23,10 @@ This report distinguishes implementation and emulator evidence from physical-dev
 - Android native unit suite: **55 passed**, with no failures or errors.
 - Navigation profile: **3/3 integration tests passed**, including 24 warmed page swipes across three rounds. UI-build p90 stayed under the 16.67 ms frame budget. Emulator raster timings were noisy, so this is not proof of physical-device smoothness.
 - Android permission-manifest guard passed the current release manifest and rejected a temporary manifest with an unauthorized contacts permission.
-- Current emulator package: Android 16 / API 36, personal debug build `0.1.0+20351`. It installed on `emulator-5554`; no phone was connected and no schedule entries were added or changed. Phone acceptance is paused while the Galaxy is disconnected.
+- Current emulator package: Android 16 / API 36, personal debug build `0.1.0+20352`. It installed on `emulator-5554`; no phone was connected and no schedule entries were added or changed. Phone acceptance is paused while the Galaxy is disconnected.
 - OCR import notice: the current build requires an explicit one-time confirmation before opening either OCR picker. The focused import-screen suite passed **13/13**, including cancel-before-picker and confirmed OCR import paths; `flutter analyze --no-pub` reported no issues.
 - Roster-date OCR: parser and import-screen regression suites passed **34/34**, including explicit ISO dates across a month boundary, merged weekday/date headers in either order (`Mon 16`, `16 Mon`), and automatic first-date prefill. No owner roster data was copied into fixtures.
-- Startup: splash tests passed **11/11**. Slow local startup now leaves the branded splash for the short intro, then shows a clear loading state until schedule data is ready. The cold personal debug launch reported **5.45 s** to Android's displayed-activity marker, with Today visible shortly after; this does not prove the design spec's three-second maximum on release hardware.
+- Startup: splash tests passed **11/11**. The branded intro now matches its **1.2 s** animation; slow local startup then shows a clear loading state until schedule data is ready. Cold personal debug launches on `emulator-5554` reported **5.38–9.51 s** to Android's displayed-activity marker, with Today visible in the following capture; this does not establish the design spec's three-second maximum on release hardware.
 - Public source snapshot is on `origin/main`. Private device notes, owner schedule data, signing material, generated APKs, and runtime screenshots are excluded.
 
 ## Open gates

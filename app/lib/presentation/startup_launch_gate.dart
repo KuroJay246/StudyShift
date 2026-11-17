@@ -40,7 +40,7 @@ class _StartupLaunchGateState extends State<StartupLaunchGate> {
       if (!mounted) return;
       final reducedMotion = MediaQuery.disableAnimationsOf(context);
       _minimumTimer = Timer(
-        Duration(milliseconds: reducedMotion ? 250 : 1800),
+        Duration(milliseconds: reducedMotion ? 250 : 1200),
         _onMinimumElapsed,
       );
     });
