@@ -23,6 +23,58 @@ void main() {
     ]);
   });
 
+  test('detects weekdays merged into numbered date header tokens', () {
+    const tokens = [
+      OcrTextToken(
+        text: 'Mon 16',
+        left: .17,
+        top: .10,
+        right: .23,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: 'Tue 17',
+        left: .29,
+        top: .10,
+        right: .35,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: 'Wed 18',
+        left: .41,
+        top: .10,
+        right: .48,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: 'Person One',
+        left: .02,
+        top: .20,
+        right: .13,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'A1', left: .18, top: .20, right: .22, bottom: .22),
+      OcrTextToken(text: 'OFF', left: .30, top: .20, right: .34, bottom: .22),
+      OcrTextToken(text: 'VS', left: .42, top: .20, right: .46, bottom: .22),
+    ];
+
+    final detection = parser.detect(tokens);
+
+    expect(detection.candidates, hasLength(1));
+    final table = detection.candidates.single;
+    expect(table.columns.map((column) => column.dayNumber), [16, 17, 18]);
+    expect(table.columns.map((column) => column.weekday), [
+      DateTime.monday,
+      DateTime.tuesday,
+      DateTime.wednesday,
+    ]);
+    expect(parser.mapDates(table, DateTime(2026, 11, 16)), [
+      DateTime(2026, 11, 16),
+      DateTime(2026, 11, 17),
+      DateTime(2026, 11, 18),
+    ]);
+  });
+
   test('matches weekdays to their own columns in a dense roster header', () {
     const tokens = [
       OcrTextToken(text: 'Mon', left: .16, top: .10, right: .19, bottom: .12),
