@@ -164,6 +164,131 @@ END:VCALENDAR''';
     expect(imported.single.importProvenance!.sourceName, 'synthetic-exams.pdf');
   });
 
+  testWidgets('roster table keeps unknown codes out of saved shift drafts', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    final today = DateTime.now();
+    final nextDay = DateTime(today.year, today.month, today.day + 1);
+    final followingDay = DateTime(today.year, today.month, today.day + 2);
+    final tokens = [
+      for (final entry in [
+        (today.day, .20),
+        (nextDay.day, .40),
+        (followingDay.day, .60),
+      ])
+        {
+          'text': '${entry.$1}',
+          'left': entry.$2 - .02,
+          'top': .10,
+          'right': entry.$2 + .02,
+          'bottom': .12,
+          'page': 0,
+        },
+      {
+        'text': 'Person One',
+        'left': .02,
+        'top': .20,
+        'right': .12,
+        'bottom': .22,
+        'page': 0,
+      },
+      {
+        'text': 'A1',
+        'left': .18,
+        'top': .20,
+        'right': .22,
+        'bottom': .22,
+        'page': 0,
+      },
+      {
+        'text': 'UNMAPPED',
+        'left': .38,
+        'top': .20,
+        'right': .42,
+        'bottom': .22,
+        'page': 0,
+      },
+    ];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(fileChannel, (call) async {
+          expect(call.method, 'openOcrImport');
+          return {
+            'name': 'synthetic-roster.pdf',
+            'text': 'Synthetic roster table',
+            'tokens': jsonEncode(tokens),
+          };
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(fileChannel, null);
+    });
+    await WorkCodeLegendRepository(database).save(
+      const WorkCodeLegend(
+        id: 'a1',
+        code: 'A1',
+        startMinute: 360,
+        endMinute: 540,
+      ),
+    );
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          scheduleDatabaseProvider.overrideWithValue(database),
+          deviceTimeZoneIdProvider.overrideWith(
+            (ref) async => 'America/Barbados',
+          ),
+        ],
+        child: const MaterialApp(
+          home: SettingsPage(mode: ScheduleMode.workAndSchool),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import calendar'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Read a roster table'));
+    await tester.tap(find.text('Read a roster table'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -700));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.textContaining('Choose first date'));
+    await tester.tap(find.textContaining('Choose first date'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+    await tester.tap(find.text('OK'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Choose first date'), findsNothing);
+    expect(
+      find.text('Detected dates · review each date before continuing'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining(
+        MaterialLocalizations.of(
+          tester.element(find.text('Build shift review')),
+        ).formatMediumDate(today),
+      ),
+      findsWidgets,
+    );
+    await tester.tap(find.byKey(const ValueKey('roster-staff-row-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Person One').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Person One'), findsOneWidget);
+    await tester.ensureVisible(find.text('Build shift review'));
+    await tester.tap(find.text('Build shift review'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -700));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Shift code: A1'), findsOneWidget);
+    expect(find.text('Codes to review · 1'), findsOneWidget);
+    expect(find.textContaining('UNMAPPED'), findsOneWidget);
+    expect(await ScheduleRepository(database).getItems(), isEmpty);
+  });
+
   testWidgets('OCR reimport under a new filename is flagged and unchecked', (
     tester,
   ) async {
@@ -718,13 +843,13 @@ WORK-SPLIT-7,2026-11-10,Sample work shift,shift,14:00,18:00,America/Barbados
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
     addTearDown(database.close);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(
-          fileChannel,
-          (call) async => {
+        .setMockMethodCallHandler(fileChannel, (call) async {
+          expect(call.method, 'openCalendar');
+          return {
             'name': 'synthetic-roster.csv',
             'bytes': Uint8List.fromList(utf8.encode(csv)),
-          },
-        );
+          };
+        });
     addTearDown(
       () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(fileChannel, null),
@@ -747,6 +872,8 @@ WORK-SPLIT-7,2026-11-10,Sample work shift,shift,14:00,18:00,America/Barbados
     await tester.tap(find.text('Import calendar'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).first, const Offset(0, -500));
     await tester.pumpAndSettle();
     expect(find.text('Match your roster columns'), findsOneWidget);
     expect(await ScheduleRepository(database).getItems(), isEmpty);

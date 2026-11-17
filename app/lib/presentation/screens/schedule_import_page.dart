@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -8,6 +9,7 @@ import '../../application/dependencies.dart';
 import '../../data/csv_schedule_import.dart';
 import '../../data/ics_schedule_import.dart';
 import '../../data/ocr_schedule_import.dart';
+import '../../data/roster_grid_import.dart';
 import '../../data/xlsx_schedule_import.dart';
 import '../../data/schedule_import_models.dart';
 import '../../data/schedule_import_history_repository.dart';
@@ -78,6 +80,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   ScheduleImportSourceType? _pendingTableType;
   List<String> _tableHeaders = const [];
   Map<String, String> _columnSelections = const {};
+  RosterGridDetection? _rosterDetection;
+  int _selectedRosterTable = 0;
+  int? _selectedRosterRow;
+  DateTime? _rosterFirstDate;
+  List<String> _unresolvedRosterCells = const [];
 
   static const _tableFields = <String, String>{
     'date': 'Event date *',
@@ -111,6 +118,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _sourceName = null;
       _recognizedText = null;
       _sourceType = null;
+      _rosterDetection = null;
+      _selectedRosterTable = 0;
+      _selectedRosterRow = null;
+      _rosterFirstDate = null;
+      _unresolvedRosterCells = const [];
     });
     try {
       final selected = await _fileBridge.openCalendar();
@@ -349,6 +361,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _sourceName = null;
       _recognizedText = null;
       _sourceType = null;
+      _rosterDetection = null;
+      _selectedRosterTable = 0;
+      _selectedRosterRow = null;
+      _rosterFirstDate = null;
+      _unresolvedRosterCells = const [];
     });
     try {
       final selected = await _fileBridge.openOcrImport();
@@ -403,6 +420,205 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       if (mounted) setState(() => _loading = false);
     }
   }
+
+  Future<void> _selectRosterTable() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+      _rows = const [];
+      _notices = const [];
+      _sourceName = null;
+      _recognizedText = null;
+      _sourceType = null;
+      _rosterDetection = null;
+      _selectedRosterTable = 0;
+      _selectedRosterRow = null;
+      _rosterFirstDate = null;
+      _unresolvedRosterCells = const [];
+    });
+    try {
+      final selected = await _fileBridge.openOcrImport();
+      if (selected == null) return;
+      final text = selected.extractedText;
+      if (text == null) {
+        throw const FormatException(
+          'The recognized roster text is unavailable.',
+        );
+      }
+      final detection = const RosterGridImportParser().detect(
+        selected.ocrTokens,
+      );
+      if (!mounted) return;
+      setState(() {
+        _sourceName = selected.name;
+        _sourceType = selected.name.toLowerCase().endsWith('.pdf')
+            ? ScheduleImportSourceType.pdfOcr
+            : ScheduleImportSourceType.imageOcr;
+        _recognizedText = text;
+        _rosterDetection = detection;
+        if (detection.candidates.isEmpty) {
+          _error = 'No clear date columns were detected. You can still review the recognized text and add uncertain shifts manually.';
+        }
+      });
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = _friendlyError(error));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _chooseRosterFirstDate() async {
+    final initial = _rosterFirstDate ?? DateTime.now();
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(initial.year - 2),
+      lastDate: DateTime(initial.year + 5),
+      helpText: 'Confirm the first roster date',
+    );
+    if (selected != null && mounted) {
+      setState(
+        () => _rosterFirstDate = DateTime(
+          selected.year,
+          selected.month,
+          selected.day,
+        ),
+      );
+    }
+  }
+
+  Future<void> _buildRosterGridDrafts() async {
+    final detection = _rosterDetection;
+    final firstDate = _rosterFirstDate;
+    final selectedRow = _selectedRosterRow;
+    if (detection == null || firstDate == null || selectedRow == null) return;
+    final localizations = MaterialLocalizations.of(context);
+    final table = detection.candidates[_selectedRosterTable];
+    if (selectedRow < 0 || selectedRow >= table.rows.length) return;
+    try {
+      final dates = const RosterGridImportParser().mapDates(table, firstDate);
+      final deviceZone = await ref.read(deviceTimeZoneIdProvider.future);
+      final legends = await ref
+          .read(workCodeLegendRepositoryProvider)
+          .getItems();
+      final existingItems = await ref
+          .read(scheduleRepositoryProvider)
+          .getItems();
+      final byId = {for (final item in existingItems) item.id: item};
+      final existingOcrItems = existingItems.where(_hasOcrProvenance).toList();
+      final matchedIds = <String>{};
+      final row = table.rows[selectedRow];
+      final proposals = <_ImportRow>[];
+      final unresolved = <String>[];
+      for (
+        var columnIndex = 0;
+        columnIndex < table.columns.length;
+        columnIndex++
+      ) {
+        final cell = row.cells[columnIndex];
+        if (cell.text.isEmpty || _isOffMarker(cell.text)) continue;
+        final normalizedCell = cell.text.trim().toUpperCase();
+        final matches = cell.isAmbiguous
+            ? const <WorkCodeLegend>[]
+            : legends.where((legend) {
+                return legend.code.trim().toUpperCase() == normalizedCell;
+              }).toList();
+        final legend =
+            matches.length == 1 && matches.single.timeWindows.isNotEmpty
+            ? matches.single
+            : null;
+        if (legend == null) {
+          unresolved.add(
+            '${localizations.formatMediumDate(dates[columnIndex])} · ${cell.text}',
+          );
+          continue;
+        }
+        final intervals = legend.timeWindows
+            .map(
+              (window) => EventInterval(
+                startDayOffset: 0,
+                startMinute: window.startMinute,
+                endDayOffset: window.endDayOffset,
+                endMinute: window.endMinute,
+              ),
+            )
+            .toList(growable: false);
+        final sourceText = 'Roster cell ${cell.text}';
+        final key = sha256
+            .convert(
+              utf8.encode(
+                '$_sourceName\n${table.page}\n$selectedRow\n$columnIndex\n$sourceText',
+              ),
+            )
+            .toString();
+        final title = legend.assignmentDetails.trim().isEmpty
+            ? '${legend.employer.isEmpty ? '' : '${legend.employer} · '}${legend.code}'
+            : '${legend.employer.isEmpty ? '' : '${legend.employer} · '}${legend.assignmentDetails}';
+        final item = ScheduleItem(
+          id: 'roster-ocr-$key',
+          kind: ScheduleKind.work,
+          title: title,
+          startDate: CivilDate(
+            dates[columnIndex].year,
+            dates[columnIndex].month,
+            dates[columnIndex].day,
+          ),
+          intervals: intervals,
+          timeZoneId: deviceZone,
+          code: legend.code,
+          codeMeaning: legend.assignmentDetails,
+          employerName: legend.employer,
+          workCategory: WorkCategory.shift,
+          importProvenance: ScheduleImportProvenance(
+            format: _sourceType == ScheduleImportSourceType.imageOcr
+                ? 'image-ocr'
+                : 'pdf-ocr',
+            uid: 'roster-cell-$key',
+            sourceName: _sourceName ?? 'schedule.pdf',
+            sourceText: sourceText,
+            importedAt: DateTime.now().toUtc(),
+          ),
+        );
+        final proposal = ScheduleImportProposal(
+          item: item,
+          sourceText: sourceText,
+        );
+        final reviewRow = _ocrReviewRow(
+          proposal,
+          byId: byId,
+          unusedExistingOcrItems: existingOcrItems,
+          matchedOcrIds: matchedIds,
+        );
+        proposals.add(reviewRow.copyWith(included: reviewRow.existing == null));
+      }
+      if (!mounted) return;
+      setState(() {
+        _rows = proposals;
+        _unresolvedRosterCells = unresolved;
+        _notices = [
+          ScheduleImportNotice(
+            'Drafts use only the selected staff row and confirmed date columns. Unmatched or ambiguous cells are kept for manual review and never converted into shifts.',
+          ),
+        ];
+        _error = proposals.isEmpty && unresolved.isEmpty
+            ? 'No shift codes were found in the selected row. Check the row choice and date columns.'
+            : null;
+      });
+    } on FormatException catch (error) {
+      if (mounted) setState(() => _error = error.message);
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = _friendlyError(error));
+    }
+  }
+
+  bool _isOffMarker(String raw) => const {
+    'X',
+    'OFF',
+    'REST',
+    'DAY OFF',
+    'D/O',
+    'DO',
+  }.contains(raw.trim().toUpperCase());
 
   _ImportRow _ocrReviewRow(
     ScheduleImportProposal proposal, {
@@ -696,6 +912,12 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
+              onPressed: _loading || _saving ? null : _selectRosterTable,
+              icon: const Icon(Icons.grid_on_outlined),
+              label: const Text('Read a roster table'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
               onPressed: _loading || _saving
                   ? null
                   : () => _selectOcrFile(examTimetable: true),
@@ -719,6 +941,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 icon: Icons.description_outlined,
                 message: 'Source: $_sourceName',
               ),
+            ],
+            if (_rosterDetection case final detection?
+                when detection.candidates.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              _buildRosterGridSetup(detection),
             ],
             if (_recognizedText != null) ...[
               const SizedBox(height: 8),
@@ -776,6 +1003,33 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                         setState(() => _replaceMatches = value),
                   ),
                 ),
+            ],
+            if (_unresolvedRosterCells.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(StudyShiftSpacing.x3),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Codes to review · ${_unresolvedRosterCells.length}',
+                        style: Theme.of(context).textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'These cells were not added as shifts. Add or correct a matching shift-code definition, then review the roster again.',
+                      ),
+                      for (final cell in _unresolvedRosterCells)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(cell),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             ],
             if (_notices.isNotEmpty) ...[
               const SizedBox(height: 18),
@@ -883,6 +1137,155 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 label: Text(
                   _loading ? 'Reading columns…' : 'Match columns and preview',
                 ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRosterGridSetup(RosterGridDetection detection) {
+    final selectedTable = detection.candidates[_selectedRosterTable];
+    final dateLabel = _rosterFirstDate == null
+        ? 'Choose first date'
+        : MaterialLocalizations.of(context).formatMediumDate(_rosterFirstDate!);
+    final localizations = MaterialLocalizations.of(context);
+    List<DateTime> mappedDates = const [];
+    String? dateMappingError;
+    if (_rosterFirstDate != null) {
+      try {
+        mappedDates = const RosterGridImportParser().mapDates(
+          selectedTable,
+          _rosterFirstDate!,
+        );
+      } on FormatException catch (error) {
+        dateMappingError = error.message;
+      }
+    }
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(StudyShiftSpacing.x3),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Match your roster table',
+              style: Theme.of(context).textTheme.titleMedium
+                  ?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Confirm the date headings and select your own staff row. Only that row becomes shift drafts.',
+            ),
+            if (detection.candidates.length > 1) ...[
+              const SizedBox(height: 12),
+              DropdownButtonFormField<int>(
+                key: const ValueKey('roster-table-choice'),
+                initialValue: _selectedRosterTable,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Detected date row',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  for (
+                    var index = 0;
+                    index < detection.candidates.length;
+                    index++
+                  )
+                    DropdownMenuItem(
+                      value: index,
+                      child: Text(
+                        'Page ${detection.candidates[index].page + 1}: ${detection.candidates[index].columns.map((column) => column.dayNumber).join(' · ')}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: (value) => setState(() {
+                  _selectedRosterTable = value ?? 0;
+                  _selectedRosterRow = null;
+                  _rows = const [];
+                  _unresolvedRosterCells = const [];
+                }),
+              ),
+            ],
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: _loading || _saving ? null : _chooseRosterFirstDate,
+              icon: const Icon(Icons.calendar_month_outlined),
+              label: Text('First roster date · $dateLabel'),
+            ),
+            if (dateMappingError != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                dateMappingError,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ] else if (mappedDates.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Detected dates · review each date before continuing',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 4,
+                runSpacing: 0,
+                children: [
+                  for (final date in mappedDates)
+                    Chip(
+                      visualDensity: VisualDensity.compact,
+                      label: Text(localizations.formatMediumDate(date)),
+                    ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 12),
+            DropdownButtonFormField<int>(
+              key: ValueKey('roster-staff-row-$_selectedRosterTable'),
+              initialValue: _selectedRosterRow,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Your staff row',
+                border: OutlineInputBorder(),
+                helperText: 'Names are read from the selected document and stay in this review.',
+              ),
+              items: [
+                for (var index = 0; index < selectedTable.rows.length; index++)
+                  DropdownMenuItem(
+                    value: index,
+                    child: Text(
+                      selectedTable.rows[index].label,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (value) => setState(() {
+                _selectedRosterRow = value;
+                _rows = const [];
+                _unresolvedRosterCells = const [];
+              }),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Date columns detected: ${selectedTable.columns.length}. Possible staff rows: ${selectedTable.rows.length}. Saved shift-code definitions fill times where they match; unclear codes remain unchecked.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed:
+                    _loading ||
+                        _saving ||
+                        _rosterFirstDate == null ||
+                        dateMappingError != null ||
+                        _selectedRosterRow == null
+                    ? null
+                    : _buildRosterGridDrafts,
+                icon: const Icon(Icons.fact_check_outlined),
+                label: const Text('Build shift review'),
               ),
             ),
           ],

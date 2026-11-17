@@ -1,0 +1,439 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shift_study/data/roster_grid_import.dart';
+
+void main() {
+  const parser = RosterGridImportParser();
+
+  test('detects weekday and numbered date columns in a roster grid', () {
+    final result = parser.detect(_sampleGrid());
+
+    expect(result.candidates, hasLength(1));
+    final table = result.candidates.single;
+    expect(table.columns.map((column) => column.dayNumber), [16, 17, 18]);
+    expect(table.columns.map((column) => column.weekday), [
+      DateTime.monday,
+      DateTime.tuesday,
+      DateTime.wednesday,
+    ]);
+    expect(table.rows.map((row) => row.label), ['Person One', 'Person Two']);
+    expect(table.rows.first.cells.map((cell) => cell.text), [
+      'A1',
+      'OFF',
+      'VS',
+    ]);
+  });
+
+  test('maps chosen header to calendar dates and rejects weekday mismatch', () {
+    final table = parser.detect(_sampleGrid()).candidates.single;
+
+    expect(parser.mapDates(table, DateTime(2026, 11, 16)), [
+      DateTime(2026, 11, 16),
+      DateTime(2026, 11, 17),
+      DateTime(2026, 11, 18),
+    ]);
+    expect(
+      () => parser.mapDates(table, DateTime(2026, 11, 17)),
+      throwsFormatException,
+    );
+  });
+
+  test(
+    'rejects a small backwards date jump instead of guessing a new month',
+    () {
+      const table = RosterGridCandidate(
+        page: 0,
+        headerTop: .1,
+        columns: [
+          RosterGridColumn(dayNumber: 18),
+          RosterGridColumn(dayNumber: 16),
+          RosterGridColumn(dayNumber: 17),
+        ],
+        rows: [],
+      );
+
+      expect(
+        () => parser.mapDates(table, DateTime(2026, 11, 18)),
+        throwsFormatException,
+      );
+    },
+  );
+
+  test('maps legitimate late-month roster columns into the next month', () {
+    const table = RosterGridCandidate(
+      page: 0,
+      headerTop: .1,
+      columns: [
+        RosterGridColumn(dayNumber: 20),
+        RosterGridColumn(dayNumber: 21),
+        RosterGridColumn(dayNumber: 1),
+      ],
+      rows: [],
+    );
+
+    expect(parser.mapDates(table, DateTime(2026, 11, 20)), [
+      DateTime(2026, 11, 20),
+      DateTime(2026, 11, 21),
+      DateTime(2026, 12, 1),
+    ]);
+  });
+
+  test('keeps an ambiguous multi-code cell unresolved', () {
+    final tokens = [
+      ..._sampleGrid(),
+      OcrTextToken(text: 'A1/VS', left: .17, top: .20, right: .24, bottom: .22),
+    ];
+    final result = parser.detect(tokens);
+
+    expect(result.candidates.single.rows.first.cells.first.isAmbiguous, isTrue);
+  });
+
+  test('does not infer a roster from a plain event list', () {
+    final result = parser.detect(const [
+      OcrTextToken(
+        text: '2026-11-17 09:00 17:00 Ramp shift',
+        left: .1,
+        top: .1,
+        right: .9,
+        bottom: .12,
+      ),
+    ]);
+
+    expect(result.candidates, isEmpty);
+  });
+
+  test('does not mistake numeric shift codes for numbered date headers', () {
+    const tokens = [
+      OcrTextToken(text: 'A1', left: .55, top: .13, right: .59, bottom: .15),
+      OcrTextToken(text: 'LO2', left: .67, top: .13, right: .73, bottom: .15),
+      OcrTextToken(text: 'VS3', left: .79, top: .13, right: .84, bottom: .15),
+      OcrTextToken(
+        text: 'Person One',
+        left: .02,
+        top: .20,
+        right: .13,
+        bottom: .22,
+      ),
+    ];
+
+    expect(parser.detect(tokens).candidates, isEmpty);
+  });
+
+  test('keeps separate same-date roster tables on one page', () {
+    final first = _sampleGrid();
+    final second = [
+      const OcrTextToken(
+        text: 'Mon',
+        left: .17,
+        top: .50,
+        right: .23,
+        bottom: .52,
+      ),
+      const OcrTextToken(
+        text: 'Tue',
+        left: .29,
+        top: .50,
+        right: .35,
+        bottom: .52,
+      ),
+      const OcrTextToken(
+        text: 'Wed',
+        left: .41,
+        top: .50,
+        right: .48,
+        bottom: .52,
+      ),
+      const OcrTextToken(
+        text: '16th',
+        left: .17,
+        top: .53,
+        right: .23,
+        bottom: .55,
+      ),
+      const OcrTextToken(
+        text: '17th',
+        left: .29,
+        top: .53,
+        right: .35,
+        bottom: .55,
+      ),
+      const OcrTextToken(
+        text: '18th',
+        left: .41,
+        top: .53,
+        right: .48,
+        bottom: .55,
+      ),
+      const OcrTextToken(
+        text: 'Person Three',
+        left: .02,
+        top: .60,
+        right: .13,
+        bottom: .62,
+      ),
+      const OcrTextToken(
+        text: 'VS',
+        left: .18,
+        top: .60,
+        right: .22,
+        bottom: .62,
+      ),
+      const OcrTextToken(
+        text: 'A1',
+        left: .30,
+        top: .60,
+        right: .34,
+        bottom: .62,
+      ),
+      const OcrTextToken(
+        text: 'LO1',
+        left: .42,
+        top: .60,
+        right: .46,
+        bottom: .62,
+      ),
+    ];
+
+    final result = parser.detect([...first, ...second]);
+
+    expect(result.candidates, hasLength(2));
+    expect(result.candidates.last.rows.single.label, 'Person Three');
+  });
+
+  test('declines two roster grids arranged side by side on one date row', () {
+    const tokens = [
+      OcrTextToken(text: '16', left: .08, top: .10, right: .12, bottom: .12),
+      OcrTextToken(text: '17', left: .13, top: .10, right: .17, bottom: .12),
+      OcrTextToken(text: '18', left: .18, top: .10, right: .22, bottom: .12),
+      OcrTextToken(text: '16', left: .40, top: .10, right: .44, bottom: .12),
+      OcrTextToken(text: '17', left: .45, top: .10, right: .49, bottom: .12),
+      OcrTextToken(text: '18', left: .50, top: .10, right: .54, bottom: .12),
+      OcrTextToken(
+        text: 'Person One',
+        left: .01,
+        top: .20,
+        right: .06,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'A1', left: .09, top: .20, right: .11, bottom: .22),
+      OcrTextToken(text: 'VS', left: .14, top: .20, right: .16, bottom: .22),
+      OcrTextToken(text: 'LO1', left: .19, top: .20, right: .21, bottom: .22),
+      OcrTextToken(
+        text: 'Person Two',
+        left: .32,
+        top: .20,
+        right: .37,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'AA', left: .41, top: .20, right: .43, bottom: .22),
+      OcrTextToken(text: 'PM', left: .46, top: .20, right: .48, bottom: .22),
+      OcrTextToken(text: 'VA', left: .51, top: .20, right: .53, bottom: .22),
+    ];
+
+    expect(parser.detect(tokens).candidates, isEmpty);
+  });
+
+  test('declines side by side roster grids with separate date runs', () {
+    const tokens = [
+      OcrTextToken(text: '1', left: .06, top: .10, right: .10, bottom: .12),
+      OcrTextToken(text: '2', left: .12, top: .10, right: .16, bottom: .12),
+      OcrTextToken(text: '3', left: .18, top: .10, right: .22, bottom: .12),
+      OcrTextToken(text: '4', left: .28, top: .10, right: .32, bottom: .12),
+      OcrTextToken(text: '5', left: .34, top: .10, right: .38, bottom: .12),
+      OcrTextToken(text: '6', left: .40, top: .10, right: .44, bottom: .12),
+      OcrTextToken(
+        text: 'Person One',
+        left: .01,
+        top: .20,
+        right: .05,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'A1', left: .07, top: .20, right: .09, bottom: .22),
+      OcrTextToken(text: 'VS', left: .13, top: .20, right: .15, bottom: .22),
+      OcrTextToken(text: 'LO1', left: .19, top: .20, right: .21, bottom: .22),
+      OcrTextToken(
+        text: 'Person Two',
+        left: .23,
+        top: .20,
+        right: .27,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'AA', left: .29, top: .20, right: .31, bottom: .22),
+      OcrTextToken(text: 'PM', left: .35, top: .20, right: .37, bottom: .22),
+      OcrTextToken(text: 'VA', left: .41, top: .20, right: .43, bottom: .22),
+    ];
+
+    expect(parser.detect(tokens).candidates, isEmpty);
+  });
+
+  test('keeps rows with an embedded second staff label fully unresolved', () {
+    const tokens = [
+      OcrTextToken(text: '1', left: .06, top: .10, right: .10, bottom: .12),
+      OcrTextToken(text: '2', left: .12, top: .10, right: .16, bottom: .12),
+      OcrTextToken(text: '3', left: .18, top: .10, right: .22, bottom: .12),
+      OcrTextToken(text: '4', left: .24, top: .10, right: .28, bottom: .12),
+      OcrTextToken(text: '5', left: .30, top: .10, right: .34, bottom: .12),
+      OcrTextToken(text: '6', left: .36, top: .10, right: .40, bottom: .12),
+      OcrTextToken(
+        text: 'Person One',
+        left: .01,
+        top: .20,
+        right: .04,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'A1', left: .07, top: .20, right: .09, bottom: .22),
+      OcrTextToken(text: 'VS', left: .13, top: .20, right: .15, bottom: .22),
+      OcrTextToken(text: 'LO1', left: .19, top: .20, right: .21, bottom: .22),
+      OcrTextToken(
+        text: 'Person',
+        left: .225,
+        top: .20,
+        right: .24,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'Two', left: .242, top: .20, right: .255, bottom: .22),
+      OcrTextToken(text: 'AA', left: .25, top: .20, right: .27, bottom: .22),
+      OcrTextToken(text: 'PM', left: .31, top: .20, right: .33, bottom: .22),
+      OcrTextToken(text: 'VA', left: .37, top: .20, right: .39, bottom: .22),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(table.rows.single.cells.every((cell) => cell.isAmbiguous), isTrue);
+  });
+
+  test('keeps an all-caps embedded staff label fully unresolved', () {
+    const tokens = [
+      OcrTextToken(text: '1', left: .06, top: .10, right: .10, bottom: .12),
+      OcrTextToken(text: '2', left: .12, top: .10, right: .16, bottom: .12),
+      OcrTextToken(text: '3', left: .18, top: .10, right: .22, bottom: .12),
+      OcrTextToken(text: '4', left: .24, top: .10, right: .28, bottom: .12),
+      OcrTextToken(text: '5', left: .30, top: .10, right: .34, bottom: .12),
+      OcrTextToken(text: '6', left: .36, top: .10, right: .40, bottom: .12),
+      OcrTextToken(
+        text: 'PERSON ONE',
+        left: .01,
+        top: .20,
+        right: .04,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'A1', left: .07, top: .20, right: .09, bottom: .22),
+      OcrTextToken(text: 'VS', left: .13, top: .20, right: .15, bottom: .22),
+      OcrTextToken(text: 'LO1', left: .19, top: .20, right: .21, bottom: .22),
+      OcrTextToken(
+        text: 'CHARLIE',
+        left: .225,
+        top: .20,
+        right: .245,
+        bottom: .22,
+      ),
+      OcrTextToken(
+        text: 'DELTA',
+        left: .247,
+        top: .20,
+        right: .275,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'AA', left: .25, top: .20, right: .27, bottom: .22),
+      OcrTextToken(text: 'PM', left: .31, top: .20, right: .33, bottom: .22),
+      OcrTextToken(text: 'VA', left: .37, top: .20, right: .39, bottom: .22),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(table.rows.single.cells.every((cell) => cell.isAmbiguous), isTrue);
+  });
+
+  test('keeps an initial and all-caps surname fully unresolved', () {
+    const tokens = [
+      OcrTextToken(text: '1', left: .06, top: .10, right: .10, bottom: .12),
+      OcrTextToken(text: '2', left: .12, top: .10, right: .16, bottom: .12),
+      OcrTextToken(text: '3', left: .18, top: .10, right: .22, bottom: .12),
+      OcrTextToken(text: '4', left: .24, top: .10, right: .28, bottom: .12),
+      OcrTextToken(text: '5', left: .30, top: .10, right: .34, bottom: .12),
+      OcrTextToken(text: '6', left: .36, top: .10, right: .40, bottom: .12),
+      OcrTextToken(
+        text: 'Person One',
+        left: .01,
+        top: .20,
+        right: .04,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'A1', left: .07, top: .20, right: .09, bottom: .22),
+      OcrTextToken(text: 'VS', left: .13, top: .20, right: .15, bottom: .22),
+      OcrTextToken(text: 'LO1', left: .19, top: .20, right: .21, bottom: .22),
+      OcrTextToken(text: 'K', left: .225, top: .20, right: .228, bottom: .22),
+      OcrTextToken(
+        text: 'MORGAN',
+        left: .230,
+        top: .20,
+        right: .258,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'AA', left: .25, top: .20, right: .27, bottom: .22),
+      OcrTextToken(text: 'PM', left: .31, top: .20, right: .33, bottom: .22),
+      OcrTextToken(text: 'VA', left: .37, top: .20, right: .39, bottom: .22),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(table.rows.single.cells.every((cell) => cell.isAmbiguous), isTrue);
+  });
+
+  test('does not flag adjacent short uppercase shift codes as a name', () {
+    const tokens = [
+      OcrTextToken(text: '1', left: .06, top: .10, right: .10, bottom: .12),
+      OcrTextToken(text: '2', left: .12, top: .10, right: .16, bottom: .12),
+      OcrTextToken(text: '3', left: .18, top: .10, right: .22, bottom: .12),
+      OcrTextToken(text: '4', left: .24, top: .10, right: .28, bottom: .12),
+      OcrTextToken(text: '5', left: .30, top: .10, right: .34, bottom: .12),
+      OcrTextToken(text: '6', left: .36, top: .10, right: .40, bottom: .12),
+      OcrTextToken(
+        text: 'Person One',
+        left: .01,
+        top: .20,
+        right: .04,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'A1', left: .07, top: .20, right: .09, bottom: .22),
+      OcrTextToken(text: 'LAVS', left: .13, top: .20, right: .15, bottom: .22),
+      OcrTextToken(text: 'OFF', left: .153, top: .20, right: .170, bottom: .22),
+      OcrTextToken(text: 'LO1', left: .19, top: .20, right: .21, bottom: .22),
+      OcrTextToken(text: 'AA', left: .25, top: .20, right: .27, bottom: .22),
+      OcrTextToken(text: 'PM', left: .31, top: .20, right: .33, bottom: .22),
+      OcrTextToken(text: 'VA', left: .37, top: .20, right: .39, bottom: .22),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(table.rows.single.cells.every((cell) => !cell.isAmbiguous), isTrue);
+  });
+}
+
+List<OcrTextToken> _sampleGrid() => const [
+  OcrTextToken(text: 'Mon', left: .17, top: .10, right: .23, bottom: .12),
+  OcrTextToken(text: 'Tue', left: .29, top: .10, right: .35, bottom: .12),
+  OcrTextToken(text: 'Wed', left: .41, top: .10, right: .48, bottom: .12),
+  OcrTextToken(text: '16th', left: .17, top: .13, right: .23, bottom: .15),
+  OcrTextToken(text: '17th', left: .29, top: .13, right: .35, bottom: .15),
+  OcrTextToken(text: '18th', left: .41, top: .13, right: .48, bottom: .15),
+  OcrTextToken(
+    text: 'Person One',
+    left: .02,
+    top: .20,
+    right: .13,
+    bottom: .22,
+  ),
+  OcrTextToken(text: 'A1', left: .18, top: .20, right: .22, bottom: .22),
+  OcrTextToken(text: 'OFF', left: .30, top: .20, right: .34, bottom: .22),
+  OcrTextToken(text: 'VS', left: .42, top: .20, right: .46, bottom: .22),
+  OcrTextToken(
+    text: 'Person Two',
+    left: .02,
+    top: .28,
+    right: .13,
+    bottom: .30,
+  ),
+  OcrTextToken(text: 'X', left: .18, top: .28, right: .22, bottom: .30),
+  OcrTextToken(text: 'A1', left: .30, top: .28, right: .34, bottom: .30),
+  OcrTextToken(text: 'LO1', left: .42, top: .28, right: .46, bottom: .30),
+];

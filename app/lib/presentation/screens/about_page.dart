@@ -64,7 +64,7 @@ class _AboutPageState extends ConsumerState<AboutPage> {
           const Card(
             child: ListTile(
               leading: Icon(Icons.person_outline_rounded),
-              title: Text('Created by Juna Miller'),
+              title: Text('Created by Jaylan Maynard'),
               subtitle: Text(
                 'StudyShift is a personal scheduling app for work, study and '
                 'everyday planning. Your schedule stays on this device and '

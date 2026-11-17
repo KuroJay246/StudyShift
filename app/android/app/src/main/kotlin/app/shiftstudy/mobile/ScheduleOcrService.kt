@@ -11,6 +11,8 @@ import android.os.Message
 import android.os.Messenger
 import android.util.Log
 import com.google.mlkit.common.MlKit
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.IOException
 
 internal class ScheduleOcrService : Service() {
@@ -49,10 +51,9 @@ internal class ScheduleOcrService : Service() {
             if (name.isNullOrBlank() || uri?.scheme != "content") {
                 throw IOException("The selected document could not be opened.")
             }
-            result.data.putString(
-                KEY_TEXT,
-                ScheduleOcrReader.extract(contentResolver, uri, name),
-            )
+            val document = ScheduleOcrReader.extract(contentResolver, uri, name)
+            result.data.putString(KEY_TEXT, document.text)
+            result.data.putString(KEY_TOKENS, document.tokens.toJsonWithinLimit())
         } catch (error: Exception) {
             Log.w(TAG, "Schedule OCR failed (${error.javaClass.simpleName}).")
             result.data.putString(
@@ -70,6 +71,29 @@ internal class ScheduleOcrService : Service() {
         const val KEY_URI = "uri"
         const val KEY_NAME = "name"
         const val KEY_TEXT = "text"
+        const val KEY_TOKENS = "tokens"
         const val KEY_ERROR = "error"
     }
+}
+
+private const val MAX_OCR_LAYOUT_JSON_CHARS = 300_000
+
+private fun List<OcrTextToken>.toJsonWithinLimit(): String = buildString {
+    append('[')
+    var count = 0
+    for (token in this@toJsonWithinLimit) {
+        val value = JSONObject()
+            .put("text", token.text)
+            .put("left", token.left.toDouble())
+            .put("top", token.top.toDouble())
+            .put("right", token.right.toDouble())
+            .put("bottom", token.bottom.toDouble())
+            .put("page", token.page)
+            .toString()
+        val extra = value.length + if (count == 0) 0 else 1
+        if (length + extra + 1 > MAX_OCR_LAYOUT_JSON_CHARS) break
+        if (count++ > 0) append(',')
+        append(value)
+    }
+    append(']')
 }

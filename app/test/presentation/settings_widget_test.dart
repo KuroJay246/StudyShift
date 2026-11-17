@@ -515,7 +515,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Version 0.1.0 (47)'), findsOneWidget);
-    expect(find.text('Created by Juna Miller'), findsOneWidget);
+    expect(find.text('Created by Jaylan Maynard'), findsOneWidget);
     expect(find.text('Private by design'), findsNothing);
     expect(
       (tester.widget<Image>(find.byType(Image).first).image as AssetImage)

@@ -728,10 +728,11 @@ class MainActivity : FlutterActivity() {
             Handler(Looper.getMainLooper()) { response ->
                 if (response.what != ScheduleOcrService.MESSAGE_RESULT) return@Handler true
                 val text = response.data.getString(ScheduleOcrService.KEY_TEXT)
+                val tokens = response.data.getString(ScheduleOcrService.KEY_TOKENS)
                 val error = response.data.getString(ScheduleOcrService.KEY_ERROR)
                 finish {
                     if (text != null) {
-                        pending.success(mapOf("name" to name, "text" to text))
+                        pending.success(mapOf("name" to name, "text" to text, "tokens" to tokens))
                     } else {
                         pending.error(
                             "ocr_failed",
