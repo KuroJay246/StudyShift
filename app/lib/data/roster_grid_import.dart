@@ -22,10 +22,25 @@ class OcrTextToken {
 }
 
 class RosterGridColumn {
-  const RosterGridColumn({required this.dayNumber, this.weekday});
+  const RosterGridColumn({
+    required this.dayNumber,
+    this.weekday,
+    this.month,
+    this.year,
+  });
 
   final int dayNumber;
   final int? weekday;
+  final int? month;
+  final int? year;
+}
+
+class _RosterDateHeader {
+  const _RosterDateHeader({required this.day, this.month, this.year});
+
+  final int day;
+  final int? month;
+  final int? year;
 }
 
 class RosterGridCell {
@@ -71,8 +86,11 @@ class RosterGridImportParser {
     r'^\s*([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\s*$',
     caseSensitive: false,
   );
-  static final _weekdayPattern = RegExp(
-    r'^(mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\.?$',
+  static final _isoDatePattern = RegExp(
+    r'^\s*(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\s*$',
+  );
+  static final _weekdayInTextPattern = RegExp(
+    r'\b(mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b',
     caseSensitive: false,
   );
   static final _separatorsPattern = RegExp(r'[/|,;]');
@@ -89,17 +107,24 @@ class RosterGridImportParser {
       for (var index = 0; index < rows.length; index++) {
         final dateTokens =
             rows[index]
-                .where((token) => _dayNumber(token.text) != null)
+                .where((token) => _dateHeader(token.text) != null)
                 .toList()
               ..sort((a, b) => a.centerX.compareTo(b.centerX));
         if (dateTokens.length < 3) continue;
-        final dayNumbers = dateTokens.map((token) => _dayNumber(token.text)!);
-        if (dayNumbers.toSet().length != dateTokens.length) continue;
+        final dateHeaders = dateTokens
+            .map((token) => _dateHeader(token.text)!)
+            .toList(growable: false);
+        final dateKeys = dateHeaders.map((header) {
+          if (header.month == null) return 'day:${header.day}';
+          return '${header.year ?? ''}-${header.month}-${header.day}';
+        });
+        if (dateKeys.toSet().length != dateTokens.length) continue;
         final columns = <RosterGridColumn>[];
         final centers = <double>[];
         for (var dateIndex = 0; dateIndex < dateTokens.length; dateIndex++) {
           final token = dateTokens[dateIndex];
-          final day = _dayNumber(token.text)!;
+          final header = dateHeaders[dateIndex];
+          final day = header.day;
           if (columns.isNotEmpty &&
               (token.centerX - centers.last).abs() < .025) {
             continue;
@@ -124,9 +149,13 @@ class RosterGridImportParser {
           columns.add(
             RosterGridColumn(
               dayNumber: day,
-              weekday: weekdayToken == null
-                  ? null
-                  : _weekday(weekdayToken.text),
+              weekday:
+                  _weekdayFromText(token.text) ??
+                  (weekdayToken == null
+                      ? null
+                      : _weekdayFromText(weekdayToken.text)),
+              month: header.month,
+              year: header.year,
             ),
           );
           centers.add(token.centerX);
@@ -153,7 +182,11 @@ class RosterGridImportParser {
 
   List<DateTime> mapDates(RosterGridCandidate table, DateTime firstDate) {
     if (table.columns.isEmpty ||
-        table.columns.first.dayNumber != firstDate.day) {
+        table.columns.first.dayNumber != firstDate.day ||
+        (table.columns.first.month != null &&
+            table.columns.first.month != firstDate.month) ||
+        (table.columns.first.year != null &&
+            table.columns.first.year != firstDate.year)) {
       throw const FormatException(
         'Choose a first date that matches the first date column.',
       );
@@ -164,7 +197,15 @@ class RosterGridImportParser {
     var previousDay = 0;
     for (var index = 0; index < table.columns.length; index++) {
       final column = table.columns[index];
-      if (index > 0 && column.dayNumber < previousDay) {
+      if (column.year != null) {
+        year = column.year!;
+      }
+      if (column.month != null) {
+        if (index > 0 && column.year == null && column.month! < month) {
+          year++;
+        }
+        month = column.month!;
+      } else if (index > 0 && column.dayNumber < previousDay) {
         if (previousDay - column.dayNumber < 10) {
           throw const FormatException(
             'The roster date columns are out of order or combine separate tables.',
@@ -175,7 +216,9 @@ class RosterGridImportParser {
           month = 1;
           year++;
         }
-      } else if (index > 0 && column.dayNumber == previousDay) {
+      } else if (column.month == null &&
+          index > 0 &&
+          column.dayNumber == previousDay) {
         throw const FormatException('The roster repeats a date column.');
       }
       final date = DateTime(year, month, column.dayNumber);
@@ -407,7 +450,7 @@ class RosterGridImportParser {
     for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
       if ((rowIndex - dateRowIndex).abs() > 1) continue;
       for (final token in rows[rowIndex]) {
-        if (_weekdayPattern.hasMatch(token.text.trim()) &&
+        if (_weekdayFromText(token.text) != null &&
             (token.centerX - dateToken.centerX).abs() < maxHorizontalDistance &&
             (token.centerY - dateToken.centerY).abs() < .055) {
           matches.add((token, (token.centerY - dateToken.centerY).abs()));
@@ -419,14 +462,27 @@ class RosterGridImportParser {
     return matches.first.$1;
   }
 
-  int? _dayNumber(String text) {
+  _RosterDateHeader? _dateHeader(String text) {
+    final iso = _isoDatePattern.firstMatch(text);
+    if (iso != null) {
+      final year = int.tryParse(iso.group(1)!);
+      final month = int.tryParse(iso.group(2)!);
+      final day = int.tryParse(iso.group(3)!);
+      if (year != null && month != null && day != null) {
+        return _RosterDateHeader(day: day, month: month, year: year);
+      }
+      return null;
+    }
     final match = _dayPattern.firstMatch(text.trim());
     if (match == null) return null;
-    return int.tryParse(match.group(1)!);
+    final day = int.tryParse(match.group(1)!);
+    return day == null ? null : _RosterDateHeader(day: day);
   }
 
-  int? _weekday(String text) {
-    final value = text.trim().toLowerCase();
+  int? _weekdayFromText(String text) {
+    final match = _weekdayInTextPattern.firstMatch(text.trim());
+    if (match == null) return null;
+    final value = match.group(1)!.toLowerCase();
     if (value.startsWith('mon')) return DateTime.monday;
     if (value.startsWith('tue')) return DateTime.tuesday;
     if (value.startsWith('wed')) return DateTime.wednesday;
@@ -491,9 +547,13 @@ class RosterGridImportParser {
   List<RosterGridCandidate> _deduplicate(List<RosterGridCandidate> items) {
     final seen = <String>{};
     return items.where((item) {
+      final columnsKey = item.columns
+          .map((column) {
+            return '${column.year ?? ''}-${column.month ?? ''}-${column.dayNumber}';
+          })
+          .join(',');
       final key =
-          '${item.page}:${item.columns.map((c) => c.dayNumber).join(',')}:'
-          '${item.headerTop.toStringAsFixed(3)}';
+          '${item.page}:$columnsKey:${item.headerTop.toStringAsFixed(3)}';
       return seen.add(key);
     }).toList();
   }

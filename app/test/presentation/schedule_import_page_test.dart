@@ -204,6 +204,86 @@ END:VCALENDAR''';
     expect(find.text('Before using OCR'), findsNothing);
   });
 
+  testWidgets('full roster dates prefill the first-date confirmation', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    final tokens = [
+      for (final entry in [
+        ('2026-11-30', .16),
+        ('2026-12-01', .41),
+        ('2026-12-02', .66),
+      ])
+        {
+          'text': entry.$1,
+          'left': entry.$2,
+          'top': .10,
+          'right': entry.$2 + .08,
+          'bottom': .12,
+          'page': 0,
+        },
+      {
+        'text': 'Person One',
+        'left': .02,
+        'top': .20,
+        'right': .13,
+        'bottom': .22,
+        'page': 0,
+      },
+      for (final entry in [('A1', .18), ('VS', .43), ('OFF', .68)])
+        {
+          'text': entry.$1,
+          'left': entry.$2,
+          'top': .20,
+          'right': entry.$2 + .04,
+          'bottom': .22,
+          'page': 0,
+        },
+    ];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(fileChannel, (call) async {
+          expect(call.method, 'openOcrImport');
+          return {
+            'name': 'synthetic-full-date-roster.pdf',
+            'text': 'Synthetic roster table',
+            'tokens': jsonEncode(tokens),
+          };
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(fileChannel, null);
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [scheduleDatabaseProvider.overrideWithValue(database)],
+        child: const MaterialApp(
+          home: SettingsPage(mode: ScheduleMode.workAndSchool),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import calendar'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Read a roster table'));
+    await tester.tap(find.text('Read a roster table'));
+    await tester.pumpAndSettle();
+    await _acceptOcrNotice(tester);
+    await tester.drag(find.byType(ListView), const Offset(0, -700));
+    await tester.pumpAndSettle();
+
+    final expectedDate = MaterialLocalizations.of(
+      tester.element(find.text('Build shift review')),
+    ).formatMediumDate(DateTime(2026, 11, 30));
+    expect(find.text('First roster date · $expectedDate'), findsOneWidget);
+    expect(
+      find.text('Detected dates · review each date before continuing'),
+      findsOneWidget,
+    );
+    expect(find.text('Build shift review'), findsOneWidget);
+  });
+
   testWidgets('roster table keeps unknown codes out of saved shift drafts', (
     tester,
   ) async {

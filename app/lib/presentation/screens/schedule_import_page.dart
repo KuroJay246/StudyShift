@@ -453,7 +453,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       final dateLikeTokenCount = selected.ocrTokens
           .where(
             (token) => RegExp(
-              r'^\s*([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\s*$',
+              r'^\s*(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\s*$',
               caseSensitive: false,
             ).hasMatch(token.text),
           )
@@ -474,6 +474,9 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             : ScheduleImportSourceType.imageOcr;
         _recognizedText = text;
         _rosterDetection = detection;
+        _rosterFirstDate = detection.candidates.isEmpty
+            ? null
+            : _inferredRosterFirstDate(detection.candidates.first);
         if (detection.candidates.isEmpty) {
           _error =
               'No clear date columns were detected. OCR saw ${selected.ocrTokens.length} layout words, including $dateLikeTokenCount date-like numbers and $weekdayTokenCount weekday labels. Review the recognized text and add uncertain shifts manually.';
@@ -511,6 +514,21 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       ),
     );
     return confirmed == true;
+  }
+
+  DateTime? _inferredRosterFirstDate(RosterGridCandidate candidate) {
+    if (candidate.columns.isEmpty) return null;
+    final first = candidate.columns.first;
+    final month = first.month;
+    final year = first.year;
+    if (month == null || year == null) return null;
+    final date = DateTime(year, month, first.dayNumber);
+    if (date.year != year ||
+        date.month != month ||
+        date.day != first.dayNumber) {
+      return null;
+    }
+    return date;
   }
 
   Future<void> _chooseRosterFirstDate() async {
@@ -1250,6 +1268,9 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 ],
                 onChanged: (value) => setState(() {
                   _selectedRosterTable = value ?? 0;
+                  _rosterFirstDate = _inferredRosterFirstDate(
+                    detection.candidates[_selectedRosterTable],
+                  );
                   _selectedRosterRow = null;
                   _rows = const [];
                   _unresolvedRosterCells = const [];

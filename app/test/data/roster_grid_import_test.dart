@@ -62,6 +62,54 @@ void main() {
     ]);
   });
 
+  test(
+    'detects full ISO date headers and maps their actual month and year',
+    () {
+      const tokens = [
+        OcrTextToken(
+          text: '2026-11-30',
+          left: .16,
+          top: .10,
+          right: .24,
+          bottom: .12,
+        ),
+        OcrTextToken(
+          text: '2026-12-01',
+          left: .41,
+          top: .10,
+          right: .49,
+          bottom: .12,
+        ),
+        OcrTextToken(
+          text: '2026-12-02',
+          left: .66,
+          top: .10,
+          right: .74,
+          bottom: .12,
+        ),
+        OcrTextToken(
+          text: 'Person One',
+          left: .02,
+          top: .20,
+          right: .13,
+          bottom: .22,
+        ),
+        OcrTextToken(text: 'A1', left: .18, top: .20, right: .22, bottom: .22),
+        OcrTextToken(text: 'VS', left: .44, top: .20, right: .48, bottom: .22),
+        OcrTextToken(text: 'OFF', left: .70, top: .20, right: .74, bottom: .22),
+      ];
+
+      final table = parser.detect(tokens).candidates.single;
+
+      expect(table.columns.map((column) => column.dayNumber), [30, 1, 2]);
+      expect(parser.mapDates(table, DateTime(2026, 11, 30)), [
+        DateTime(2026, 11, 30),
+        DateTime(2026, 12, 1),
+        DateTime(2026, 12, 2),
+      ]);
+    },
+  );
+
   test('keeps vertically close staff rows separate using OCR text height', () {
     const tokens = [
       OcrTextToken(text: '16', left: .20, top: .10, right: .23, bottom: .11),
