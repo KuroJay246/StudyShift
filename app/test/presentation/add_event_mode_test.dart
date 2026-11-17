@@ -100,7 +100,7 @@ void main() {
     });
   }
 
-  testWidgets('Work + School offers only work and class from Week', (
+  testWidgets('Work + School Add sheet opens each schedule type', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(360, 800);
@@ -152,7 +152,25 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Work shift'), findsOneWidget);
     expect(find.text('Class'), findsOneWidget);
+    expect(find.text('Assignment'), findsOneWidget);
+    expect(find.text('Examination'), findsOneWidget);
     expect(find.text('Personal event'), findsNothing);
+    await tester.tap(find.text('Examination'));
+    await tester.pumpAndSettle();
+    final editor = tester.widget<EventEditorPage>(find.byType(EventEditorPage));
+    expect(editor.kind, ScheduleKind.deadline);
+    expect(editor.initialDeadlineType, DeadlineType.examination);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Add event'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Assignment'));
+    await tester.pumpAndSettle();
+    final assignmentEditor = tester.widget<EventEditorPage>(
+      find.byType(EventEditorPage),
+    );
+    expect(assignmentEditor.kind, ScheduleKind.deadline);
+    expect(assignmentEditor.initialDeadlineType, DeadlineType.assignment);
   });
 
   testWidgets('Study navigation can start a date-only assignment', (

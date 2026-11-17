@@ -704,6 +704,8 @@ void main() {
     expect(find.text('Add to your schedule'), findsOneWidget);
     expect(find.text('Work shift'), findsOneWidget);
     expect(find.text('Class'), findsOneWidget);
+    expect(find.text('Assignment'), findsOneWidget);
+    expect(find.text('Examination'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.binding.handlePopRoute();

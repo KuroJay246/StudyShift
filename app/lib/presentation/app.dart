@@ -16,6 +16,14 @@ import 'widgets/shift_brand_mark.dart';
 
 enum _StudyAddSelection { classSession, assignment, examination }
 
+enum _ScheduleAddSelection {
+  work,
+  classSession,
+  assignment,
+  examination,
+  personal,
+}
+
 class ModeSetupPage extends ConsumerWidget {
   const ModeSetupPage({super.key});
 
@@ -489,21 +497,56 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
       await _addFromSchool(initialDate);
       return;
     }
-    final kind = switch (_selected) {
+    final directKind = switch (_selected) {
       _Destination.work => ScheduleKind.work,
-      _Destination.school => ScheduleKind.classSession,
+      _Destination.school => null,
       _Destination.plans => ScheduleKind.personal,
       _ when widget.mode == ScheduleMode.workOnly => ScheduleKind.work,
       _ when widget.mode == ScheduleMode.schoolOnly =>
         ScheduleKind.classSession,
       _ when widget.mode == ScheduleMode.personalPlanner =>
         ScheduleKind.personal,
-      _ => await _chooseKind(),
+      _ => null,
     };
-    if (kind == null || !mounted) return;
+    if (directKind != null) {
+      await _openEventEditor(directKind, initialDate: initialDate);
+      return;
+    }
+
+    final selection = await _chooseKind();
+    if (selection == null || !mounted) return;
+    final kind = switch (selection) {
+      _ScheduleAddSelection.work => ScheduleKind.work,
+      _ScheduleAddSelection.classSession => ScheduleKind.classSession,
+      _ScheduleAddSelection.personal => ScheduleKind.personal,
+      _ScheduleAddSelection.assignment ||
+      _ScheduleAddSelection.examination => ScheduleKind.deadline,
+    };
+    final deadlineType = switch (selection) {
+      _ScheduleAddSelection.assignment => DeadlineType.assignment,
+      _ScheduleAddSelection.examination => DeadlineType.examination,
+      _ => null,
+    };
+    await _openEventEditor(
+      kind,
+      initialDate: initialDate,
+      deadlineType: deadlineType,
+    );
+  }
+
+  Future<void> _openEventEditor(
+    ScheduleKind kind, {
+    CivilDate? initialDate,
+    DeadlineType? deadlineType,
+  }) async {
+    if (!mounted) return;
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
-        builder: (_) => EventEditorPage(kind: kind, initialDate: initialDate),
+        builder: (_) => EventEditorPage(
+          kind: kind,
+          initialDate: initialDate,
+          initialDeadlineType: deadlineType,
+        ),
       ),
     );
   }
@@ -572,7 +615,8 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
     );
   }
 
-  Future<ScheduleKind?> _chooseKind() => showModalBottomSheet<ScheduleKind>(
+  Future<_ScheduleAddSelection?>
+  _chooseKind() => showModalBottomSheet<_ScheduleAddSelection>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
@@ -595,19 +639,35 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
                 ListTile(
                   leading: const ShiftIcon('briefcase-business'),
                   title: const Text('Work shift'),
-                  onTap: () => Navigator.pop(context, ScheduleKind.work),
+                  onTap: () =>
+                      Navigator.pop(context, _ScheduleAddSelection.work),
                 ),
                 ListTile(
                   leading: const ShiftIcon('graduation-cap'),
                   title: const Text('Class'),
+                  onTap: () => Navigator.pop(
+                    context,
+                    _ScheduleAddSelection.classSession,
+                  ),
+                ),
+                ListTile(
+                  leading: const ShiftIcon('clipboard-check'),
+                  title: const Text('Assignment'),
                   onTap: () =>
-                      Navigator.pop(context, ScheduleKind.classSession),
+                      Navigator.pop(context, _ScheduleAddSelection.assignment),
+                ),
+                ListTile(
+                  leading: const ShiftIcon('calendar-check'),
+                  title: const Text('Examination'),
+                  onTap: () =>
+                      Navigator.pop(context, _ScheduleAddSelection.examination),
                 ),
               ] else ...[
                 ListTile(
                   leading: const ShiftIcon('calendar-plus-2'),
                   title: const Text('Personal event'),
-                  onTap: () => Navigator.pop(context, ScheduleKind.personal),
+                  onTap: () =>
+                      Navigator.pop(context, _ScheduleAddSelection.personal),
                 ),
               ],
             ],
