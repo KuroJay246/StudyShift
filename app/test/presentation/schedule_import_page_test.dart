@@ -214,6 +214,7 @@ END:VCALENDAR''';
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
           expect(call.method, 'openOcrImport');
+          expect(call.arguments, {'rosterTable': true});
           return {
             'name': 'synthetic-roster.pdf',
             'text': 'Synthetic roster table',

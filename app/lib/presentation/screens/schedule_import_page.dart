@@ -437,7 +437,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _unresolvedRosterCells = const [];
     });
     try {
-      final selected = await _fileBridge.openOcrImport();
+      final selected = await _fileBridge.openOcrImport(rosterTable: true);
       if (selected == null) return;
       final text = selected.extractedText;
       if (text == null) {
@@ -448,6 +448,22 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       final detection = const RosterGridImportParser().detect(
         selected.ocrTokens,
       );
+      final dateLikeTokenCount = selected.ocrTokens
+          .where(
+            (token) => RegExp(
+              r'^\s*([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\s*$',
+              caseSensitive: false,
+            ).hasMatch(token.text),
+          )
+          .length;
+      final weekdayTokenCount = selected.ocrTokens
+          .where(
+            (token) => RegExp(
+              r'^(mon|tue|wed|thu|fri|sat|sun)',
+              caseSensitive: false,
+            ).hasMatch(token.text.trim()),
+          )
+          .length;
       if (!mounted) return;
       setState(() {
         _sourceName = selected.name;
@@ -457,7 +473,8 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         _recognizedText = text;
         _rosterDetection = detection;
         if (detection.candidates.isEmpty) {
-          _error = 'No clear date columns were detected. You can still review the recognized text and add uncertain shifts manually.';
+          _error =
+              'No clear date columns were detected. OCR saw ${selected.ocrTokens.length} layout words, including $dateLikeTokenCount date-like numbers and $weekdayTokenCount weekday labels. Review the recognized text and add uncertain shifts manually.';
         }
       });
     } on Object catch (error) {

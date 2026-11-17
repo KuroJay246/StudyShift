@@ -51,7 +51,12 @@ internal class ScheduleOcrService : Service() {
             if (name.isNullOrBlank() || uri?.scheme != "content") {
                 throw IOException("The selected document could not be opened.")
             }
-            val document = ScheduleOcrReader.extract(contentResolver, uri, name)
+            val document = ScheduleOcrReader.extract(
+                contentResolver,
+                uri,
+                name,
+                rosterTable = data.getBoolean(KEY_ROSTER_TABLE),
+            )
             result.data.putString(KEY_TEXT, document.text)
             result.data.putString(KEY_TOKENS, document.tokens.toJsonWithinLimit())
         } catch (error: Exception) {
@@ -70,6 +75,7 @@ internal class ScheduleOcrService : Service() {
         const val MESSAGE_RESULT = 2
         const val KEY_URI = "uri"
         const val KEY_NAME = "name"
+        const val KEY_ROSTER_TABLE = "rosterTable"
         const val KEY_TEXT = "text"
         const val KEY_TOKENS = "tokens"
         const val KEY_ERROR = "error"

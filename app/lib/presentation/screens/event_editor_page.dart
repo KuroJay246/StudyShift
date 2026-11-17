@@ -837,32 +837,52 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
               if (!_hasNoTime) ...[
                 for (var i = 0; i < _starts.length; i++)
                   Card(
-                    margin: const EdgeInsets.only(bottom: 8),
+                    margin: const EdgeInsets.only(bottom: 6),
+                    clipBehavior: Clip.antiAlias,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
+                        horizontal: 8,
+                        vertical: 6,
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (_starts.length == 1) ...[
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 6),
-                              child: Text(
-                                'Time',
-                                style: Theme.of(context).textTheme.labelLarge,
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  _starts.length == 1
+                                      ? 'Time'
+                                      : 'Interval ${i + 1}',
+                                  style: Theme.of(context).textTheme.labelLarge,
+                                ),
                               ),
-                            ),
-                          ] else ...[
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 6),
-                              child: Text(
-                                'Interval ${i + 1}',
-                                style: Theme.of(context).textTheme.labelLarge,
-                              ),
-                            ),
-                          ],
+                              if (_starts.length > 1)
+                                IconButton(
+                                  tooltip: 'Remove interval',
+                                  visualDensity: VisualDensity.compact,
+                                  constraints: const BoxConstraints.tightFor(
+                                    width: 32,
+                                    height: 32,
+                                  ),
+                                  padding: EdgeInsets.zero,
+                                  onPressed: () => setState(() {
+                                    _starts.removeAt(i);
+                                    _ends.removeAt(i);
+                                    _endDayOffset =
+                                        _minute(_ends.last) <=
+                                            _minute(_starts.last)
+                                        ? 1
+                                        : 0;
+                                    _endDateManuallyEdited = false;
+                                  }),
+                                  icon: const Icon(
+                                    Icons.remove_circle_outline,
+                                    size: 18,
+                                  ),
+                                ),
+                            ],
+                          ),
                           Row(
                             children: [
                               Expanded(
@@ -873,10 +893,10 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                                 ),
                               ),
                               const Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 6),
+                                padding: EdgeInsets.symmetric(horizontal: 4),
                                 child: Icon(
                                   Icons.arrow_forward_rounded,
-                                  size: 18,
+                                  size: 16,
                                 ),
                               ),
                               Expanded(
@@ -888,33 +908,6 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                               ),
                             ],
                           ),
-                          if (_starts.length > 1)
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton.icon(
-                                style: TextButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                  ),
-                                ),
-                                onPressed: () => setState(() {
-                                  _starts.removeAt(i);
-                                  _ends.removeAt(i);
-                                  _endDayOffset =
-                                      _minute(_ends.last) <=
-                                          _minute(_starts.last)
-                                      ? 1
-                                      : 0;
-                                  _endDateManuallyEdited = false;
-                                }),
-                                icon: const Icon(
-                                  Icons.remove_circle_outline,
-                                  size: 18,
-                                ),
-                                label: const Text('Remove interval'),
-                              ),
-                            ),
                         ],
                       ),
                     ),
@@ -1492,7 +1485,7 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
     onPressed: onPressed,
     style: OutlinedButton.styleFrom(
       alignment: Alignment.centerLeft,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       visualDensity: VisualDensity.compact,
     ),
     child: Column(

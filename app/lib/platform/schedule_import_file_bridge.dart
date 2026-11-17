@@ -36,9 +36,12 @@ class ScheduleImportFileBridge {
     return ImportedCalendarFile(name: name, bytes: bytes);
   }
 
-  Future<ImportedCalendarFile?> openOcrImport() async {
+  Future<ImportedCalendarFile?> openOcrImport({
+    bool rosterTable = false,
+  }) async {
     final selected = await _channel.invokeMapMethod<String, Object?>(
       'openOcrImport',
+      {'rosterTable': rosterTable},
     );
     if (selected == null) return null;
     final name = selected['name'];

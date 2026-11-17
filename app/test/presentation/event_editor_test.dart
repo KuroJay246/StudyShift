@@ -30,6 +30,42 @@ class _TestReminderService extends LocalReminderService {
 }
 
 void main() {
+  testWidgets('work interval controls remain compact on a narrow phone', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.work),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final starts = tester.getRect(find.text('Starts'));
+    final ends = tester.getRect(find.text('Ends'));
+    expect(starts.left, greaterThanOrEqualTo(0));
+    expect(ends.right, lessThanOrEqualTo(320));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('changing start date preserves a chosen end date', (
     tester,
   ) async {

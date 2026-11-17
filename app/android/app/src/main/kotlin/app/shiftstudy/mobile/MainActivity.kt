@@ -264,7 +264,11 @@ class MainActivity : FlutterActivity() {
                     )
                     "openOcrImport" -> openDocumentPicker(
                         result = result,
-                        requestCode = OPEN_OCR_IMPORT_REQUEST,
+                        requestCode = if (call.argument<Boolean>("rosterTable") == true) {
+                            OPEN_ROSTER_TABLE_REQUEST
+                        } else {
+                            OPEN_OCR_IMPORT_REQUEST
+                        },
                         mimeType = "*/*",
                         mimeTypes = arrayOf("application/pdf", "image/*"),
                     )
@@ -649,7 +653,8 @@ class MainActivity : FlutterActivity() {
             requestCode != SAVE_CALENDAR_REQUEST &&
             requestCode != OPEN_BACKUP_REQUEST &&
             requestCode != OPEN_CALENDAR_REQUEST &&
-            requestCode != OPEN_OCR_IMPORT_REQUEST) {
+            requestCode != OPEN_OCR_IMPORT_REQUEST &&
+            requestCode != OPEN_ROSTER_TABLE_REQUEST) {
             super.onActivityResult(requestCode, resultCode, data)
             return
         }
@@ -680,7 +685,7 @@ class MainActivity : FlutterActivity() {
                     output.flush()
                 } ?: throw IOException("Could not write to the selected location.")
                 pending.success(true)
-            } else if (requestCode == OPEN_OCR_IMPORT_REQUEST) {
+            } else if (requestCode == OPEN_OCR_IMPORT_REQUEST || requestCode == OPEN_ROSTER_TABLE_REQUEST) {
                 val name = documentName(uri)
                 val extension = name.substringAfterLast('.', "").lowercase()
                 if (extension !in setOf("pdf", "png", "jpg", "jpeg", "webp", "bmp")) {
@@ -694,7 +699,12 @@ class MainActivity : FlutterActivity() {
                         throw IOException("Selected document exceeds the 10 MB import limit.")
                     }
                 }
-                extractScheduleInOcrProcess(uri, name, pending)
+                extractScheduleInOcrProcess(
+                    uri,
+                    name,
+                    pending,
+                    rosterTable = requestCode == OPEN_ROSTER_TABLE_REQUEST,
+                )
             } else if (requestCode == OPEN_CALENDAR_REQUEST) {
                 pending.success(
                     mapOf(
@@ -714,6 +724,7 @@ class MainActivity : FlutterActivity() {
         uri: Uri,
         name: String,
         pending: MethodChannel.Result,
+        rosterTable: Boolean,
     ) {
         var connection: ServiceConnection? = null
         var finished = false
@@ -753,6 +764,7 @@ class MainActivity : FlutterActivity() {
                             data = Bundle().apply {
                                 putString(ScheduleOcrService.KEY_URI, uri.toString())
                                 putString(ScheduleOcrService.KEY_NAME, name)
+                                putBoolean(ScheduleOcrService.KEY_ROSTER_TABLE, rosterTable)
                             }
                             replyTo = client
                         },
@@ -829,6 +841,7 @@ class MainActivity : FlutterActivity() {
         private const val OPEN_CALENDAR_REQUEST = 5313
         private const val SAVE_CALENDAR_REQUEST = 5314
         private const val OPEN_OCR_IMPORT_REQUEST = 5315
+        private const val OPEN_ROSTER_TABLE_REQUEST = 5316
         private const val MAX_BACKUP_BYTES = 10 * 1024 * 1024
         private const val MAX_CALENDAR_BYTES = 5 * 1024 * 1024
         private const val MAX_OCR_FILE_BYTES = 10 * 1024 * 1024
