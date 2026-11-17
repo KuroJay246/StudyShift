@@ -337,6 +337,11 @@ void main() {
   testWidgets('work shifts show a three-item preview with a See all toggle', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
     final repository = ScheduleRepository(database);
     final tomorrow = CivilDate.fromDateTime(DateTime.now()).addDays(1);
@@ -384,6 +389,11 @@ void main() {
     expect(find.text('See all'), findsOneWidget);
 
     await tester.ensureVisible(find.text('See all'));
+    expect(
+      tester.getRect(find.text('See all')).right,
+      lessThanOrEqualTo(344),
+      reason: 'The See all action must keep the page margin on narrow screens.',
+    );
     await tester.tap(find.text('See all'));
     await tester.pumpAndSettle();
     expect(find.text('Preview shift 4'), findsOneWidget);
