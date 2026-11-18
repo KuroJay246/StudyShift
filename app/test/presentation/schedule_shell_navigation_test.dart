@@ -435,6 +435,8 @@ void main() {
 
       final workPage = find.byType(WorkPage, skipOffstage: false);
       expect(tester.getTopLeft(workPage).dx, greaterThan(0));
+      final weekPage = find.byType(WeekPage, skipOffstage: false);
+      final startX = tester.getTopLeft(weekPage).dx;
       final weekTitle = find.descendant(
         of: find.byType(AppBar),
         matching: find.text('Calendar'),
@@ -442,22 +444,51 @@ void main() {
       expect(weekTitle, findsOneWidget);
       expect(tester.getTopLeft(weekTitle).dx, lessThan(40));
 
+      final verticalDrag = await tester.startGesture(const Offset(206, 520));
+      await tester.pump();
+      await verticalDrag.moveBy(
+        const Offset(-100, 120),
+        timeStamp: const Duration(milliseconds: 60),
+      );
+      await tester.pump();
+      await verticalDrag.up();
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        1,
+        reason: 'A mostly vertical Calendar drag must remain a scroll gesture.',
+      );
+      expect(tester.getTopLeft(weekPage).dx, closeTo(startX, 0.1));
+
       final gesture = await tester.startGesture(const Offset(206, 520));
       await tester.pump();
       await gesture.moveBy(
-        const Offset(-42, 0),
+        const Offset(-120, 0),
         timeStamp: const Duration(milliseconds: 40),
       );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
+      expect(
+        tester.getTopLeft(weekPage).dx,
+        lessThan(startX - 20),
+        reason: 'The destination should track the drag before release.',
+      );
 
       await gesture.up();
       await tester.pumpAndSettle();
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-        1,
-        reason: 'The timeline owns horizontal drags inside its scroll area.',
+        2,
+        reason: 'A destination swipe across Calendar content should navigate.',
       );
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Calendar'),
+        ),
+      );
+      await tester.pumpAndSettle();
 
       final rangeHeader = find.byKey(
         const ValueKey('week-range-navigation-header'),

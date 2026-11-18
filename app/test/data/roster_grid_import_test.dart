@@ -75,6 +75,204 @@ void main() {
     ]);
   });
 
+  test('applies a separate month and year header to numbered date columns', () {
+    const tokens = [
+      OcrTextToken(
+        text: 'November',
+        left: .25,
+        top: .06,
+        right: .38,
+        bottom: .08,
+      ),
+      OcrTextToken(text: '2026', left: .39, top: .06, right: .44, bottom: .08),
+      OcrTextToken(text: '16', left: .17, top: .10, right: .23, bottom: .12),
+      OcrTextToken(text: '17', left: .29, top: .10, right: .35, bottom: .12),
+      OcrTextToken(text: '18', left: .41, top: .10, right: .48, bottom: .12),
+      OcrTextToken(
+        text: 'Person One',
+        left: .02,
+        top: .20,
+        right: .13,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'A1', left: .18, top: .20, right: .22, bottom: .22),
+      OcrTextToken(text: 'OFF', left: .30, top: .20, right: .34, bottom: .22),
+      OcrTextToken(text: 'VS', left: .42, top: .20, right: .46, bottom: .22),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(table.columns.map((column) => column.month), [11, null, null]);
+    expect(table.columns.map((column) => column.year), [2026, null, null]);
+    expect(parser.mapDates(table, DateTime(2026, 11, 16)), [
+      DateTime(2026, 11, 16),
+      DateTime(2026, 11, 17),
+      DateTime(2026, 11, 18),
+    ]);
+  });
+
+  test('detects month-name date headers split across OCR word tokens', () {
+    const tokens = [
+      OcrTextToken(text: 'Nov', left: .15, top: .10, right: .19, bottom: .12),
+      OcrTextToken(text: '16', left: .20, top: .10, right: .23, bottom: .12),
+      OcrTextToken(text: 'Nov', left: .27, top: .10, right: .31, bottom: .12),
+      OcrTextToken(text: '17', left: .32, top: .10, right: .35, bottom: .12),
+      OcrTextToken(text: 'Nov', left: .39, top: .10, right: .43, bottom: .12),
+      OcrTextToken(text: '18', left: .44, top: .10, right: .48, bottom: .12),
+      OcrTextToken(
+        text: 'Person One',
+        left: .02,
+        top: .20,
+        right: .13,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'A1', left: .18, top: .20, right: .22, bottom: .22),
+      OcrTextToken(text: 'OFF', left: .30, top: .20, right: .34, bottom: .22),
+      OcrTextToken(text: 'VS', left: .42, top: .20, right: .46, bottom: .22),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(table.columns.map((column) => column.month), [11, 11, 11]);
+    expect(table.columns.map((column) => column.dayNumber), [16, 17, 18]);
+    expect(parser.mapDates(table, DateTime(2026, 11, 16)), [
+      DateTime(2026, 11, 16),
+      DateTime(2026, 11, 17),
+      DateTime(2026, 11, 18),
+    ]);
+  });
+
+  test('maps month-name date headers that include an explicit year', () {
+    const tokens = [
+      OcrTextToken(
+        text: '16 November 2026',
+        left: .17,
+        top: .10,
+        right: .23,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: '17 November 2026',
+        left: .29,
+        top: .10,
+        right: .35,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: '18 November 2026',
+        left: .41,
+        top: .10,
+        right: .48,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: 'Person One',
+        left: .02,
+        top: .20,
+        right: .13,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'A1', left: .18, top: .20, right: .22, bottom: .22),
+      OcrTextToken(text: 'OFF', left: .30, top: .20, right: .34, bottom: .22),
+      OcrTextToken(text: 'VS', left: .42, top: .20, right: .46, bottom: .22),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(table.columns.map((column) => column.year), [2026, 2026, 2026]);
+    expect(parser.mapDates(table, DateTime(2026, 11, 16)), [
+      DateTime(2026, 11, 16),
+      DateTime(2026, 11, 17),
+      DateTime(2026, 11, 18),
+    ]);
+  });
+
+  test('rejects an impossible day in a month-name date header', () {
+    const tokens = [
+      OcrTextToken(
+        text: '30 February 2026',
+        left: .17,
+        top: .10,
+        right: .23,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: '2 March 2026',
+        left: .29,
+        top: .10,
+        right: .35,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: '3 March 2026',
+        left: .41,
+        top: .10,
+        right: .48,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: 'Person One',
+        left: .02,
+        top: .20,
+        right: .13,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'A1', left: .18, top: .20, right: .22, bottom: .22),
+      OcrTextToken(text: 'OFF', left: .30, top: .20, right: .34, bottom: .22),
+      OcrTextToken(text: 'VS', left: .42, top: .20, right: .46, bottom: .22),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(
+      () => parser.mapDates(table, DateTime(2026, 2, 28)),
+      throwsFormatException,
+    );
+  });
+
+  test('requires manual confirmation to match an explicit header year', () {
+    const tokens = [
+      OcrTextToken(
+        text: '16 November 2026',
+        left: .17,
+        top: .10,
+        right: .23,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: '17 November 2026',
+        left: .29,
+        top: .10,
+        right: .35,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: '18 November 2026',
+        left: .41,
+        top: .10,
+        right: .48,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: 'Person One',
+        left: .02,
+        top: .20,
+        right: .13,
+        bottom: .22,
+      ),
+      OcrTextToken(text: 'A1', left: .18, top: .20, right: .22, bottom: .22),
+      OcrTextToken(text: 'OFF', left: .30, top: .20, right: .34, bottom: .22),
+      OcrTextToken(text: 'VS', left: .42, top: .20, right: .46, bottom: .22),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(
+      () => parser.mapDates(table, DateTime(2025, 11, 16)),
+      throwsFormatException,
+    );
+  });
+
   test('detects numbered dates merged before their weekday headers', () {
     const tokens = [
       OcrTextToken(

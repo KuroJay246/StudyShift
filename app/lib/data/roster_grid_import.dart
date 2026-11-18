@@ -43,6 +43,13 @@ class _RosterDateHeader {
   final int? year;
 }
 
+class _RosterHeaderToken {
+  const _RosterHeaderToken(this.token, this.header);
+
+  final OcrTextToken token;
+  final _RosterDateHeader header;
+}
+
 class RosterGridCell {
   const RosterGridCell({required this.text, required this.isAmbiguous});
 
@@ -93,6 +100,10 @@ class RosterGridImportParser {
     r'\b(mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\b',
     caseSensitive: false,
   );
+  static final _monthNamePattern = RegExp(
+    r'jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?',
+    caseSensitive: false,
+  );
   static final _separatorsPattern = RegExp(r'[/|,;]');
 
   RosterGridDetection detect(List<OcrTextToken> tokens) {
@@ -105,15 +116,10 @@ class RosterGridImportParser {
     for (final page in tokens.map((token) => token.page).toSet()) {
       final rows = _groupRows(tokens.where((token) => token.page == page));
       for (var index = 0; index < rows.length; index++) {
-        final dateTokens =
-            rows[index]
-                .where((token) => _dateHeader(token.text) != null)
-                .toList()
-              ..sort((a, b) => a.centerX.compareTo(b.centerX));
+        final dateTokens = _dateTokens(rows[index])
+          ..sort((a, b) => a.token.centerX.compareTo(b.token.centerX));
         if (dateTokens.length < 3) continue;
-        final dateHeaders = dateTokens
-            .map((token) => _dateHeader(token.text)!)
-            .toList(growable: false);
+        final dateHeaders = dateTokens.map((entry) => entry.header).toList();
         final dateKeys = dateHeaders.map((header) {
           if (header.month == null) return 'day:${header.day}';
           return '${header.year ?? ''}-${header.month}-${header.day}';
@@ -122,8 +128,13 @@ class RosterGridImportParser {
         final columns = <RosterGridColumn>[];
         final centers = <double>[];
         for (var dateIndex = 0; dateIndex < dateTokens.length; dateIndex++) {
-          final token = dateTokens[dateIndex];
-          final header = dateHeaders[dateIndex];
+          final entry = dateTokens[dateIndex];
+          final token = entry.token;
+          final header = entry.header;
+          final context = _monthYearContext(rows, index);
+          final month =
+              header.month ?? (dateIndex == 0 ? context?.month : null);
+          final year = header.year ?? (dateIndex == 0 ? context?.year : null);
           final day = header.day;
           if (columns.isNotEmpty &&
               (token.centerX - centers.last).abs() < .025) {
@@ -131,9 +142,9 @@ class RosterGridImportParser {
           }
           final neighboringGaps = <double>[
             if (dateIndex > 0)
-              (token.centerX - dateTokens[dateIndex - 1].centerX).abs(),
+              (token.centerX - dateTokens[dateIndex - 1].token.centerX).abs(),
             if (dateIndex + 1 < dateTokens.length)
-              (dateTokens[dateIndex + 1].centerX - token.centerX).abs(),
+              (dateTokens[dateIndex + 1].token.centerX - token.centerX).abs(),
           ];
           final weekdaySearchRadius = neighboringGaps.isEmpty
               ? .02
@@ -154,8 +165,8 @@ class RosterGridImportParser {
                   (weekdayToken == null
                       ? null
                       : _weekdayFromText(weekdayToken.text)),
-              month: header.month,
-              year: header.year,
+              month: month,
+              year: year,
             ),
           );
           centers.add(token.centerX);
@@ -473,12 +484,147 @@ class RosterGridImportParser {
       }
       return null;
     }
+    final monthDate = _monthDateHeader(text.trim());
+    if (monthDate != null) return monthDate;
     final match = _dayPattern.firstMatch(text.trim());
     if (match == null) return null;
     final day = int.tryParse(
       match.group(1) ?? match.group(2) ?? match.group(3)!,
     );
     return day == null ? null : _RosterDateHeader(day: day);
+  }
+
+  List<_RosterHeaderToken> _dateTokens(List<OcrTextToken> row) {
+    final ordered = [...row]..sort((a, b) => a.left.compareTo(b.left));
+    final result = <_RosterHeaderToken>[];
+    for (var start = 0; start < ordered.length; start++) {
+      final token = ordered[start];
+      final single = _dateHeader(token.text);
+      if (single != null) result.add(_RosterHeaderToken(token, single));
+      for (
+        var end = start + 1;
+        end < ordered.length && end <= start + 2;
+        end++
+      ) {
+        final next = ordered[end];
+        if (next.left - ordered[end - 1].right > .025) break;
+        final text = ordered
+            .skip(start)
+            .take(end - start + 1)
+            .map((part) => part.text)
+            .join(' ');
+        final header = _dateHeader(text);
+        if (header == null) continue;
+        result.add(
+          _RosterHeaderToken(
+            OcrTextToken(
+              text: text,
+              left: token.left,
+              top: token.top,
+              right: next.right,
+              bottom: token.bottom,
+              page: token.page,
+            ),
+            header,
+          ),
+        );
+      }
+    }
+    final compoundBounds = result
+        .where(
+          (entry) =>
+              entry.token.text.contains(' ') && entry.header.month != null,
+        )
+        .map((entry) => (entry.token.left, entry.token.right))
+        .toList();
+    result.removeWhere((entry) {
+      final isDayOnly = entry.header.month == null && entry.header.year == null;
+      return isDayOnly &&
+          compoundBounds.any(
+            (bounds) =>
+                entry.token.centerX >= bounds.$1 &&
+                entry.token.centerX <= bounds.$2,
+          );
+    });
+    final unique = <String, _RosterHeaderToken>{};
+    for (final entry in result) {
+      final key =
+          '${entry.header.year}-${entry.header.month}-${entry.header.day}-${entry.token.centerX.toStringAsFixed(3)}';
+      unique.putIfAbsent(key, () => entry);
+    }
+    return unique.values.toList();
+  }
+
+  _RosterDateHeader? _monthDateHeader(String text) {
+    final monthFirst = RegExp(
+      r'^([a-z]+)[,./ -]+([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?(?:[,./ -]+(\d{4}))?$',
+      caseSensitive: false,
+    ).firstMatch(text);
+    final dayFirst = RegExp(
+      r'^([1-9]|[12]\d|3[01])(?:st|nd|rd|th)?[,./ -]+([a-z]+)(?:[,./ -]+(\d{4}))?$',
+      caseSensitive: false,
+    ).firstMatch(text);
+    final match = monthFirst ?? dayFirst;
+    if (match == null) return null;
+    final monthText = monthFirst == null ? match.group(2)! : match.group(1)!;
+    final dayText = monthFirst == null ? match.group(1)! : match.group(2)!;
+    if (!_monthNamePattern.hasMatch(monthText) ||
+        _monthNamePattern.firstMatch(monthText)!.start != 0 ||
+        _monthNamePattern.firstMatch(monthText)!.end != monthText.length) {
+      return null;
+    }
+    final month = _monthNumber(monthText);
+    final day = int.tryParse(dayText.replaceAll(RegExp(r'(st|nd|rd|th)$'), ''));
+    final year = int.tryParse(match.group(3) ?? '');
+    if (month == null || day == null) return null;
+    return _RosterDateHeader(day: day, month: month, year: year);
+  }
+
+  _RosterDateHeader? _monthYearContext(
+    List<List<OcrTextToken>> rows,
+    int dateRowIndex,
+  ) {
+    final start = (dateRowIndex - 2).clamp(0, dateRowIndex);
+    final text = rows
+        .skip(start)
+        .take(dateRowIndex - start)
+        .map((row) => row.map((token) => token.text).join(' '))
+        .join(' ');
+    final match = RegExp(
+      r'\b([a-z]+)\s*[,/-]?\s*(\d{4})\b|\b(\d{4})\s*[,/-]?\s*([a-z]+)\b',
+      caseSensitive: false,
+    ).firstMatch(text);
+    if (match == null) return null;
+    final monthText = match.group(1) ?? match.group(4)!;
+    if (!_monthNamePattern.hasMatch(monthText) ||
+        _monthNamePattern.firstMatch(monthText)!.start != 0 ||
+        _monthNamePattern.firstMatch(monthText)!.end != monthText.length) {
+      return null;
+    }
+    final month = _monthNumber(monthText);
+    final year = int.tryParse(match.group(2) ?? match.group(3)!);
+    return month == null || year == null
+        ? null
+        : _RosterDateHeader(day: 1, month: month, year: year);
+  }
+
+  int? _monthNumber(String text) {
+    final value = text.toLowerCase().substring(0, 3);
+    const months = {
+      'jan': 1,
+      'feb': 2,
+      'mar': 3,
+      'apr': 4,
+      'may': 5,
+      'jun': 6,
+      'jul': 7,
+      'aug': 8,
+      'sep': 9,
+      'oct': 10,
+      'nov': 11,
+      'dec': 12,
+    };
+    return months[value];
   }
 
   int? _weekdayFromText(String text) {
