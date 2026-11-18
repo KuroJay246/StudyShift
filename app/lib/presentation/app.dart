@@ -1,4 +1,3 @@
-import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -214,10 +213,6 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
   double _settleStart = 0;
   double _settleEnd = 0;
   int _gestureStartIndex = 0;
-  int? _calendarPointer;
-  Offset? _calendarPointerOrigin;
-  Offset? _calendarPointerPosition;
-  Axis? _calendarGestureAxis;
 
   DateTime _now() => widget.clock?.call() ?? DateTime.now();
 
@@ -430,63 +425,6 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
       );
     }
     _settleToIndex(targetIndex, items);
-  }
-
-  void _trackCalendarDestinationSwipe(
-    PointerEvent event,
-    double width,
-    List<_NavItem> items,
-  ) {
-    if (_selected != _Destination.week) return;
-    if (event is PointerDownEvent) {
-      if (_calendarPointer == null) {
-        _calendarPointer = event.pointer;
-        _calendarPointerOrigin = event.position;
-        _calendarPointerPosition = event.position;
-        _calendarGestureAxis = null;
-        _startDestinationDrag();
-      }
-      return;
-    }
-    if (event.pointer != _calendarPointer) return;
-    if (event is PointerMoveEvent) {
-      final origin = _calendarPointerOrigin;
-      final previous = _calendarPointerPosition;
-      if (origin == null || previous == null) return;
-      final totalDelta = event.position - origin;
-      if (_calendarGestureAxis == null) {
-        if (totalDelta.distance < kTouchSlop) {
-          _calendarPointerPosition = event.position;
-          return;
-        }
-        _calendarGestureAxis = totalDelta.dx.abs() > totalDelta.dy.abs()
-            ? Axis.horizontal
-            : Axis.vertical;
-        if (_calendarGestureAxis == Axis.horizontal) {
-          _updateDestinationDragBy(totalDelta.dx, width);
-        }
-      } else if (_calendarGestureAxis == Axis.horizontal) {
-        final delta = event.position - previous;
-        _updateDestinationDragBy(delta.dx, width);
-      }
-      _calendarPointerPosition = event.position;
-      return;
-    }
-    if (event is PointerUpEvent) {
-      _calendarPointer = null;
-      _calendarPointerOrigin = null;
-      _calendarPointerPosition = null;
-      _calendarGestureAxis = null;
-      _finishDestinationDrag(DragEndDetails(), items);
-      return;
-    }
-    if (event is PointerCancelEvent) {
-      _calendarPointer = null;
-      _calendarPointerOrigin = null;
-      _calendarPointerPosition = null;
-      _calendarGestureAxis = null;
-      _settleToIndex(_gestureStartIndex, items);
-    }
   }
 
   void _openReminderDestination(ReminderDestination destination) {
@@ -873,30 +811,8 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
                     ],
                   );
                   if (_selected == _Destination.week) {
-                    return Listener(
+                    return KeyedSubtree(
                       key: const Key('schedule-main-pages'),
-                      behavior: HitTestBehavior.opaque,
-                      onPointerDown: (event) => _trackCalendarDestinationSwipe(
-                        event,
-                        constraints.maxWidth,
-                        items,
-                      ),
-                      onPointerMove: (event) => _trackCalendarDestinationSwipe(
-                        event,
-                        constraints.maxWidth,
-                        items,
-                      ),
-                      onPointerUp: (event) => _trackCalendarDestinationSwipe(
-                        event,
-                        constraints.maxWidth,
-                        items,
-                      ),
-                      onPointerCancel: (event) =>
-                          _trackCalendarDestinationSwipe(
-                            event,
-                            constraints.maxWidth,
-                            items,
-                          ),
                       child: pageTrack,
                     );
                   }

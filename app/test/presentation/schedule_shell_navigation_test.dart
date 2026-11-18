@@ -288,7 +288,10 @@ void main() {
         1,
       );
 
-      await tester.dragFrom(const Offset(206, 500), const Offset(-120, 0));
+      await tester.drag(
+        find.byKey(const Key('schedule-primary-swipe-handle')),
+        const Offset(-120, 0),
+      );
       await tester.pumpAndSettle();
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
@@ -396,7 +399,7 @@ void main() {
   });
 
   testWidgets(
-    'week grid keeps horizontal control; safe header pages navigate',
+    'calendar body keeps its horizontal control; header swipe navigates pages',
     (tester) async {
       tester.view.physicalSize = const Size(412, 915);
       tester.view.devicePixelRatio = 1;
@@ -469,18 +472,18 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       expect(
-        tester.getTopLeft(weekPage).dx,
-        lessThan(startX - 20),
-        reason: 'The destination should track the drag before release.',
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        1,
+        reason: 'Horizontal calendar content gestures stay on the calendar.',
       );
-
       await gesture.up();
       await tester.pumpAndSettle();
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-        2,
-        reason: 'A destination swipe across Calendar content should navigate.',
+        1,
+        reason: 'The calendar must not switch destinations from body swipes.',
       );
+      expect(tester.getTopLeft(weekPage).dx, closeTo(startX, 0.1));
 
       await tester.tap(
         find.descendant(
@@ -498,9 +501,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-        2,
+        1,
+        reason: 'The week range header changes the calendar range only.',
       );
-      expect(tester.getTopLeft(workPage).dx, closeTo(0, 1));
+      expect(tester.getTopLeft(workPage).dx, greaterThan(0));
     },
   );
 
