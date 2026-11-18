@@ -4,6 +4,49 @@ $appRoot = Split-Path -Parent $PSScriptRoot
 $repoRoot = Split-Path -Parent $appRoot
 $manifestPath = Join-Path $appRoot 'build\app\intermediates\merged_manifest\personalRelease\processPersonalReleaseMainManifest\AndroidManifest.xml'
 $guardPath = Join-Path $PSScriptRoot 'verify_merged_release_manifest.ps1'
+$gradleWrapper = Join-Path $appRoot 'android\gradlew.bat'
+$gradleProject = Join-Path $appRoot 'android'
+
+# Release APK/AAB tasks must run the merged-manifest allowlist verifier as part
+# of their dependency graph, not rely on a separately remembered manual check.
+$previousSigningEnvironment = @{}
+foreach ($name in @(
+    'SHIFT_STUDY_KEYSTORE',
+    'SHIFT_STUDY_KEYSTORE_PASSWORD',
+    'SHIFT_STUDY_KEY_ALIAS',
+    'SHIFT_STUDY_KEY_PASSWORD'
+)) {
+    $previousSigningEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
+try {
+    $env:SHIFT_STUDY_KEYSTORE = Join-Path $env:TEMP 'studyshift-test-key-is-not-created.jks'
+    $env:SHIFT_STUDY_KEYSTORE_PASSWORD = 'test-only-dry-run'
+    $env:SHIFT_STUDY_KEY_ALIAS = 'test-only-dry-run'
+    $env:SHIFT_STUDY_KEY_PASSWORD = 'test-only-dry-run'
+    Push-Location $gradleProject
+    try {
+        foreach ($releaseTask in @(':app:packagePersonalRelease', ':app:bundlePersonalRelease')) {
+            $taskGraph = (& $gradleWrapper --dry-run $releaseTask --console=plain 2>&1 | Out-String)
+            $taskGraphExitCode = $LASTEXITCODE
+            if ($taskGraphExitCode -ne 0) {
+                throw "Could not inspect the '$releaseTask' Gradle task graph.`n$taskGraph"
+            }
+            if ($taskGraph -notmatch 'verifyPersonalReleaseManifest') {
+                throw "'$releaseTask' does not depend on the merged-manifest verifier.`n$taskGraph"
+            }
+            Write-Output "PASS $releaseTask task graph includes the merged-manifest verifier"
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+finally {
+    foreach ($name in $previousSigningEnvironment.Keys) {
+        [Environment]::SetEnvironmentVariable($name, $previousSigningEnvironment[$name], 'Process')
+    }
+}
+
 if (-not (Test-Path -LiteralPath $manifestPath)) {
     throw "Merged personal-release manifest is missing; run :app:processPersonalReleaseMainManifest first: $manifestPath"
 }

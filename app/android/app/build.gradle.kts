@@ -106,6 +106,36 @@ gradle.taskGraph.whenReady {
     if (hasReleasePackagingTask) verifyPrivateReleaseSigningConfiguration()
 }
 
+val verifyPersonalReleaseManifest = tasks.register<org.gradle.api.tasks.Exec>(
+    "verifyPersonalReleaseManifest",
+) {
+    group = "verification"
+    description = "Checks the merged personal-release manifest against the security allowlist."
+
+    val mergedManifest = layout.buildDirectory.file(
+        "intermediates/merged_manifest/personalRelease/processPersonalReleaseMainManifest/AndroidManifest.xml",
+    )
+    dependsOn("processPersonalReleaseMainManifest")
+    commandLine(
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        file("../../tool/verify_merged_release_manifest.ps1").absolutePath,
+        "-ManifestPath",
+        mergedManifest.get().asFile.absolutePath,
+    )
+}
+
+tasks.configureEach {
+    if (name.equals("packagePersonalRelease", ignoreCase = true) ||
+        name.equals("bundlePersonalRelease", ignoreCase = true)
+    ) {
+        dependsOn(verifyPersonalReleaseManifest)
+    }
+}
+
 tasks.configureEach {
     if (
         name.contains("Release", ignoreCase = true) &&
