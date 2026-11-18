@@ -2,7 +2,7 @@
 
 **Updated:** 2026-11-17
 **Repository:** `main`
-**Current app version:** `0.1.0+20353` (personal debug build; not a release)
+**Current app version:** `0.1.0+20354` (personal debug build; not a release)
 
 This report distinguishes implementation and emulator evidence from physical-device and release acceptance. Percentages below are planning estimates, not pass rates or a claim that the app is production-ready.
 
@@ -33,7 +33,7 @@ This report distinguishes implementation and emulator evidence from physical-dev
 ## Open gates
 
 1. **Galaxy acceptance:** The physical Galaxy is disconnected. Reconnect it before device acceptance. The owner's existing roster must remain unchanged.
-2. **OCR privacy:** The current on-device ML Kit path reports performance/utilization metrics. That behavior has not been shown to meet the project's no-telemetry rule. An offline alternative also needs a current, security-reviewed Android build and model review.
+2. **OCR privacy:** Google confirms ML Kit processes the image and recognized text on-device, but its Android SDK sends technical diagnostics and usage metrics. StudyShift requires a one-time, per-import disclosure and confirmation before opening an OCR picker; schedule content and recognition output are not sent. Confirm the final product disclosure/data-safety treatment against the project's no-telemetry-by-default policy. The offline alternative still needs a current, security-reviewed Android build and model review.
 3. **Signing and update:** Release key custody remains owner-controlled. A signed APK and retained-data update test are not available until that gate is completed.
 
 ## Completion statement
