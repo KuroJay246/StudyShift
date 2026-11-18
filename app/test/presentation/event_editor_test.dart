@@ -31,6 +31,88 @@ class _TestReminderService extends LocalReminderService {
 }
 
 void main() {
+  testWidgets('date buttons keep the full date available on a narrow phone', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: EventEditorPage(
+            kind: ScheduleKind.work,
+            initialDate: CivilDate(2026, 11, 17),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final startDate = tester.widget<Text>(
+      find.byKey(const ValueKey('event-start-date-value')),
+    );
+    final endDate = tester.widget<Text>(
+      find.byKey(const ValueKey('event-end-date-value')),
+    );
+    expect(startDate.maxLines, 2);
+    expect(startDate.overflow, isNull);
+    expect(endDate.maxLines, 2);
+    expect(endDate.overflow, isNull);
+  });
+
+  testWidgets('work editor explains where to manage saved roster references', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.work),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Work details'),
+      360,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(find.text('Work details'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('manage-roster-references')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('work interval controls remain compact on a narrow phone', (
     tester,
   ) async {

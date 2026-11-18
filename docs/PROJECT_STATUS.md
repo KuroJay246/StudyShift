@@ -2,7 +2,7 @@
 
 **Updated:** 2026-11-17
 **Repository:** `main`
-**Current app version:** `0.1.0+20354` (personal debug build; not a release)
+**Current app version:** `0.1.0+20356` (personal debug build; not a release)
 
 This report distinguishes implementation and emulator evidence from physical-device and release acceptance. Percentages below are planning estimates, not pass rates or a claim that the app is production-ready.
 
@@ -19,12 +19,13 @@ This report distinguishes implementation and emulator evidence from physical-dev
 
 ## Verification evidence
 
-- Flutter suite: **429 passed** after the Calendar swipe and roster-date parser changes. Focused navigation, roster parsing, Work filters, and schedule-query suites passed; `flutter analyze --no-pub`: **no issues**.
+- Flutter suite: **431 passed** after the Calendar swipe, roster-date parser and narrow event-form improvements. Focused navigation, roster parsing, Work filters, and schedule-query suites passed; `flutter analyze --no-pub`: **no issues**.
 - Android native unit suite: **55 passed**, with no failures or errors.
 - Navigation profile: **3/3 integration tests passed**, including 24 warmed page swipes across three rounds. UI-build p90 stayed under the 16.67 ms frame budget. Emulator raster p90 was about **100–125 ms** for swipes, while the solid-page control baseline was **109 ms**; the shared raster cost makes these measurements inconclusive for app-specific smoothness, and they do not establish physical-device smoothness.
 - Android permission-manifest guard passed the current release manifest and rejected a temporary manifest with an unauthorized contacts permission.
-- Current emulator package: Android 16 / API 36, personal debug build `0.1.0+20354`. It installed on `emulator-5554`; Today launched, the Calendar-to-Work horizontal swipe completed, and the Work destination appeared selected. The synthetic active-shift test labels in-progress shifts “Happening now” and excludes them from Upcoming. No phone was connected and no schedule entries were added or changed. Phone acceptance is paused while the Galaxy is disconnected.
+- Current emulator package: Android 16 / API 36, personal debug build `0.1.0+20356`. It is installed on `emulator-5554`; Today and Work launched, the Add Shift form rendered at the emulator's large text scale with readable Start/End date buttons, and the empty shift-code state opened its management page. No schedule entries were added or changed. Calendar-to-Work swipe and active-shift behavior remain supported by the earlier `0.1.0+20354` runtime checks. Phone acceptance is paused while the Galaxy is disconnected.
 - OCR import notice: the current build requires an explicit one-time confirmation before opening either OCR picker. The focused import-screen suite passed **13/13**, including cancel-before-picker and confirmed OCR import paths; `flutter analyze --no-pub` reported no issues.
+- Event form refinement: narrow layouts show Start/End dates vertically with up to two readable lines instead of truncating the selected dates. Empty saved shift-code and supervisor lists now show a direct route to manage those references; loading and error states are visible. Event-editor suite passed **26/26**.
 - Roster-date OCR: parser suite passed **26/26** and import-screen suite passed **13/13**, including ISO dates, month-name headers, separated month/year context, invalid-date rejection, and manual confirmation of the first date. No owner roster data was copied into fixtures.
 - Offline OCR investigation: a disposable Tesseract **5.5.4** prototype built an **8.2 MB** AAR for `arm64-v8a` and `x86_64`, with an embedded English model and no permissions in the library manifest. On API 36 x86_64, the fully ruled synthetic roster baseline recovered **0/10** day/date headers and **0/20** code cells. One threshold and long-gridline-removal pass recovered **10/10** headers and **16/20** exact code cells, with no false code-like words, at **1.24 s/page**. The unruled baseline also read 16/20 codes (**1.40 s/page**). Remaining `A1` cells were misread as `Al`; a focused PSM 8 uppercase/digit whitelist read only `A`, so it did not improve recognition. The candidate is **not integrated or accepted** until roster accuracy, dependency security, and privacy review pass.
 - Startup: splash tests passed **11/11**. The branded intro now matches its **1.2 s** animation; slow local startup then shows a clear loading state until schedule data is ready. Cold personal debug launches on `emulator-5554` reported **5.38–9.51 s** to Android's displayed-activity marker, with Today visible in the following capture; this does not establish the design spec's three-second maximum on release hardware.

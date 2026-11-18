@@ -12,6 +12,7 @@ import '../../platform/local_reminders.dart';
 import '../schedule_format.dart';
 import '../design/studyshift_spacing.dart';
 import '../app_theme.dart';
+import 'work_code_legend_page.dart';
 
 class EventEditorPage extends ConsumerStatefulWidget {
   const EventEditorPage({
@@ -610,11 +611,20 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
     }
   }
 
+  Future<void> _openWorkReferences() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const WorkCodeLegendPage()),
+    );
+    if (!mounted) return;
+    ref.invalidate(workCodeLegendsProvider);
+    ref.invalidate(supervisorProfilesProvider);
+  }
+
   @override
   Widget build(BuildContext context) {
     final preferences = ref.watch(appPreferencesProvider).value;
-    final legends =
-        ref.watch(workCodeLegendsProvider).asData?.value ?? const [];
+    final legendsAsync = ref.watch(workCodeLegendsProvider);
+    final legends = legendsAsync.asData?.value ?? const [];
     final termsAsync =
         widget.kind == ScheduleKind.classSession ||
             widget.kind == ScheduleKind.deadline
@@ -622,9 +632,11 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
         : null;
     final terms = termsAsync?.asData?.value ?? const <AcademicTerm>[];
     final selectedTerm = _selectedAcademicTerm(terms);
-    final supervisors = widget.kind == ScheduleKind.work
-        ? ref.watch(supervisorProfilesProvider).asData?.value ?? const []
-        : const <SupervisorProfile>[];
+    final supervisorsAsync = widget.kind == ScheduleKind.work
+        ? ref.watch(supervisorProfilesProvider)
+        : null;
+    final supervisors =
+        supervisorsAsync?.asData?.value ?? const <SupervisorProfile>[];
     final selectedSupervisor = supervisors
         .where(
           (profile) =>
@@ -786,28 +798,41 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                   padding: EdgeInsets.symmetric(vertical: 12),
                   child: Text('Assignment · due this day'),
                 ),
-              Row(
-                children: [
-                  Expanded(
-                    child: _datePickerButton(
-                      label: 'Start date',
-                      date: _date,
-                      onPressed: _pickDate,
-                      loc: loc,
-                    ),
-                  ),
-                  if (!_hasNoTime) ...[
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _datePickerButton(
-                        label: 'End date',
-                        date: _date.addDays(_endDayOffset),
-                        onPressed: _pickEndDate,
-                        loc: loc,
-                      ),
-                    ),
-                  ],
-                ],
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final startDate = _datePickerButton(
+                    key: const ValueKey('event-start-date-button'),
+                    valueKey: const ValueKey('event-start-date-value'),
+                    label: 'Start date',
+                    date: _date,
+                    onPressed: _pickDate,
+                    loc: loc,
+                  );
+                  if (_hasNoTime) return startDate;
+                  final endDate = _datePickerButton(
+                    key: const ValueKey('event-end-date-button'),
+                    valueKey: const ValueKey('event-end-date-value'),
+                    label: 'End date',
+                    date: _date.addDays(_endDayOffset),
+                    onPressed: _pickEndDate,
+                    loc: loc,
+                  );
+                  final largeText =
+                      MediaQuery.textScalerOf(context).scale(14) > 17;
+                  if (constraints.maxWidth < 360 || largeText) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [startDate, const SizedBox(height: 8), endDate],
+                    );
+                  }
+                  return Row(
+                    children: [
+                      Expanded(child: startDate),
+                      const SizedBox(width: 8),
+                      Expanded(child: endDate),
+                    ],
+                  );
+                },
               ),
               if (!_hasNoTime) ...[
                 const SizedBox(height: 10),
@@ -1044,7 +1069,16 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                       maxLength: 512,
                     ),
                     const SizedBox(height: 8),
-                    if (legends.isNotEmpty)
+                    if (legendsAsync.isLoading)
+                      _referenceStatus('Loading saved shift codes…')
+                    else if (legendsAsync.hasError)
+                      TextButton.icon(
+                        onPressed: () =>
+                            ref.invalidate(workCodeLegendsProvider),
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text('Could not load shift codes · Retry'),
+                      )
+                    else if (legends.isNotEmpty)
                       DropdownButtonFormField<String?>(
                         key: const ValueKey('work-code-legend-selector'),
                         initialValue: _legendForCode(legends)?.id,
@@ -1097,6 +1131,15 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                             _applyLegendEntry(selected);
                           });
                         },
+                      ),
+                    if (legends.isEmpty &&
+                        !legendsAsync.isLoading &&
+                        !legendsAsync.hasError)
+                      TextButton.icon(
+                        key: const ValueKey('manage-roster-references'),
+                        onPressed: _openWorkReferences,
+                        icon: const Icon(Icons.menu_book_outlined),
+                        label: const Text('Set up shift codes'),
                       ),
                     if (legends.isNotEmpty) const SizedBox(height: 8),
                     TextFormField(
@@ -1257,7 +1300,16 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                       maxLength: 2000,
                     ),
                     const SizedBox(height: 8),
-                    if (supervisors.isNotEmpty)
+                    if (supervisorsAsync?.isLoading == true)
+                      _referenceStatus('Loading saved supervisors…')
+                    else if (supervisorsAsync?.hasError == true)
+                      TextButton.icon(
+                        onPressed: () =>
+                            ref.invalidate(supervisorProfilesProvider),
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text('Could not load supervisors · Retry'),
+                      )
+                    else if (supervisors.isNotEmpty)
                       DropdownButtonFormField<String?>(
                         key: const ValueKey('saved-supervisor-selector'),
                         initialValue: selectedSupervisor?.id,
@@ -1293,6 +1345,14 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                             _supervisorPhone.text = profile.phone;
                           });
                         },
+                      ),
+                    if (supervisors.isEmpty &&
+                        supervisorsAsync?.isLoading != true &&
+                        supervisorsAsync?.hasError != true)
+                      TextButton.icon(
+                        onPressed: _openWorkReferences,
+                        icon: const Icon(Icons.people_outline_rounded),
+                        label: const Text('Set up supervisor list'),
                       ),
                     const SizedBox(height: 8),
                     TextFormField(
@@ -1447,11 +1507,14 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
   );
 
   Widget _datePickerButton({
+    required Key key,
+    required Key valueKey,
     required String label,
     required CivilDate date,
     required VoidCallback onPressed,
     required MaterialLocalizations loc,
   }) => OutlinedButton(
+    key: key,
     onPressed: onPressed,
     style: OutlinedButton.styleFrom(
       alignment: Alignment.centerLeft,
@@ -1464,11 +1527,25 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
         Text(label, style: Theme.of(context).textTheme.labelSmall),
         const SizedBox(height: 2),
         Text(
+          key: valueKey,
           loc.formatMediumDate(DateTime(date.year, date.month, date.day)),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
+          maxLines: 2,
           style: Theme.of(context).textTheme.labelLarge,
         ),
+      ],
+    ),
+  );
+
+  Widget _referenceStatus(String message) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Row(
+      children: [
+        const SizedBox.square(
+          dimension: 16,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: Text(message)),
       ],
     ),
   );
