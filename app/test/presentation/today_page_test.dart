@@ -333,12 +333,12 @@ void main() {
       expect(colors, naturalSun, reason: accentTheme.name);
       expect(
         TodayHero.moonColorForAppearance(isDark: false),
-        const Color(0xFFF5F2E9),
+        const Color(0xFFF2CC76),
         reason: accentTheme.name,
       );
       expect(
         TodayHero.moonOutlineColorForAppearance(isDark: false),
-        const Color(0xFF788498),
+        const Color(0xFF786038),
         reason: accentTheme.name,
       );
     }

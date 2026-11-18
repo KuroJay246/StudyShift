@@ -686,7 +686,7 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
               TextFormField(
                 key: const ValueKey('event-title-field'),
                 controller: _title,
-                autofocus: widget.existing == null,
+                autofocus: false,
                 decoration: InputDecoration(
                   labelText: 'Name',
                   hintText: switch (widget.kind) {

@@ -31,6 +31,34 @@ class _TestReminderService extends LocalReminderService {
 }
 
 void main() {
+  testWidgets('new event form does not open the keyboard automatically', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: EventEditorPage(kind: ScheduleKind.work),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.testTextInput.isVisible, isFalse);
+  });
+
   testWidgets('date buttons keep the full date available on a narrow phone', (
     tester,
   ) async {

@@ -85,6 +85,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   int? _selectedRosterRow;
   DateTime? _rosterFirstDate;
   Map<int, DateTime> _rosterDateOverrides = const {};
+  bool _rosterDatesConfirmed = false;
   List<String> _unresolvedRosterCells = const [];
 
   static const _tableFields = <String, String>{
@@ -124,6 +125,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _selectedRosterRow = null;
       _rosterFirstDate = null;
       _rosterDateOverrides = const {};
+      _rosterDatesConfirmed = false;
       _unresolvedRosterCells = const [];
     });
     try {
@@ -369,6 +371,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _selectedRosterRow = null;
       _rosterFirstDate = null;
       _rosterDateOverrides = const {};
+      _rosterDatesConfirmed = false;
       _unresolvedRosterCells = const [];
     });
     try {
@@ -439,6 +442,8 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _selectedRosterTable = 0;
       _selectedRosterRow = null;
       _rosterFirstDate = null;
+      _rosterDateOverrides = const {};
+      _rosterDatesConfirmed = false;
       _unresolvedRosterCells = const [];
     });
     try {
@@ -551,6 +556,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           selected.day,
         );
         _rosterDateOverrides = const {};
+        _rosterDatesConfirmed = false;
       });
     }
   }
@@ -573,6 +579,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         columnIndex: DateTime(selected.year, selected.month, selected.day),
       };
       if (columnIndex == 0) _rosterFirstDate = _rosterDateOverrides[0];
+      _rosterDatesConfirmed = false;
     });
   }
 
@@ -580,7 +587,12 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     final detection = _rosterDetection;
     final firstDate = _rosterFirstDate;
     final selectedRow = _selectedRosterRow;
-    if (detection == null || firstDate == null || selectedRow == null) return;
+    if (detection == null ||
+        firstDate == null ||
+        selectedRow == null ||
+        !_rosterDatesConfirmed) {
+      return;
+    }
     final localizations = MaterialLocalizations.of(context);
     final table = detection.candidates[_selectedRosterTable];
     if (selectedRow < 0 || selectedRow >= table.rows.length) return;
@@ -1300,6 +1312,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 onChanged: (value) => setState(() {
                   _selectedRosterTable = value ?? 0;
                   _rosterDateOverrides = const {};
+                  _rosterDatesConfirmed = false;
                   _rosterFirstDate = _inferredRosterFirstDate(
                     detection.candidates[_selectedRosterTable],
                   );
@@ -1324,7 +1337,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             ] else if (mappedDates.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
-                'Detected dates · review each date before continuing',
+                'Detected dates · tap any date to correct it, then confirm the full sequence',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 4),
@@ -1353,6 +1366,23 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                             ),
                     ),
                 ],
+              ),
+              const SizedBox(height: 8),
+              FilledButton.tonalIcon(
+                key: const ValueKey('confirm-roster-dates'),
+                onPressed: _loading || _saving || _rosterDatesConfirmed
+                    ? null
+                    : () => setState(() => _rosterDatesConfirmed = true),
+                icon: Icon(
+                  _rosterDatesConfirmed
+                      ? Icons.check_circle_outline
+                      : Icons.fact_check_outlined,
+                ),
+                label: Text(
+                  _rosterDatesConfirmed
+                      ? 'Dates confirmed'
+                      : 'Confirm roster dates',
+                ),
               ),
             ],
             const SizedBox(height: 12),
@@ -1395,7 +1425,8 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                         _saving ||
                         _rosterFirstDate == null ||
                         dateMappingError != null ||
-                        _selectedRosterRow == null
+                        _selectedRosterRow == null ||
+                        !_rosterDatesConfirmed
                     ? null
                     : _buildRosterGridDrafts,
                 icon: const Icon(Icons.fact_check_outlined),

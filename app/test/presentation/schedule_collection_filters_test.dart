@@ -9,6 +9,7 @@ import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/platform/device_time_zone.dart';
 import 'package:shift_study/presentation/app_theme.dart';
 import 'package:shift_study/presentation/screens/schedule_pages.dart';
+import 'package:shift_study/presentation/widgets/schedule_event_tile.dart';
 
 class _BarbadosTimeZone implements DeviceTimeZone {
   @override
@@ -168,6 +169,87 @@ void main() {
     expect(find.text('Synthetic 10 to 5 shift'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'a 10:00 shift is active at 10:11 while tomorrow remains upcoming',
+    (tester) async {
+      final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+      final today = CivilDate.fromDateTime(DateTime.now());
+      final tomorrow = today.addDays(1);
+      final repository = ScheduleRepository(database);
+      await repository.save(
+        ScheduleItem(
+          id: 'galaxy-time-window-current-shift',
+          kind: ScheduleKind.work,
+          title: 'Synthetic current 10 to 5 shift',
+          startDate: today,
+          intervals: [
+            EventInterval.sameDay(startMinute: 10 * 60, endMinute: 17 * 60),
+          ],
+          timeZoneId: 'America/Barbados',
+        ),
+      );
+      await repository.save(
+        ScheduleItem(
+          id: 'galaxy-time-window-tomorrow-shift',
+          kind: ScheduleKind.work,
+          title: 'Synthetic tomorrow morning shift',
+          startDate: tomorrow,
+          intervals: [
+            EventInterval.sameDay(startMinute: 6 * 60 + 30, endMinute: 9 * 60 + 30),
+          ],
+          timeZoneId: 'America/Barbados',
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          scheduleDatabaseProvider.overrideWith((ref) {
+            ref.onDispose(database.close);
+            return database;
+          }),
+          deviceTimeZoneProvider.overrideWith((ref) => _BarbadosTimeZone()),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: Scaffold(
+              body: WorkPage(
+                clock: () => DateTime(
+                  today.year,
+                  today.month,
+                  today.day,
+                  10,
+                  11,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final currentShiftTile = find.byWidgetPredicate(
+        (widget) =>
+            widget is ScheduleEventTile &&
+            widget.item.id == 'galaxy-time-window-current-shift',
+      );
+      final tomorrowShiftTile = find.byWidgetPredicate(
+        (widget) =>
+            widget is ScheduleEventTile &&
+            widget.item.id == 'galaxy-time-window-tomorrow-shift',
+      );
+      expect(find.text('HAPPENING NOW'), findsOneWidget);
+      expect(currentShiftTile, findsOneWidget);
+      expect(tomorrowShiftTile, findsOneWidget);
+      expect(find.text('Upcoming shifts'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets(
     'expired shifts are omitted and recurring shifts advance to the next occurrence',

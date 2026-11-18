@@ -59,10 +59,10 @@ class TodayHero extends StatefulWidget {
   /// Celestial bodies retain their natural palette; user themes tint the
   /// surrounding horizon and schedule surfaces, not the sun or moon itself.
   static Color moonColorForAppearance({required bool isDark}) =>
-      isDark ? const Color(0xFFF3F6FF) : const Color(0xFFF5F2E9);
+      isDark ? const Color(0xFFF3F6FF) : const Color(0xFFF2CC76);
 
   static Color moonOutlineColorForAppearance({required bool isDark}) =>
-      isDark ? const Color(0xFF9AA8BF) : const Color(0xFF788498);
+      isDark ? const Color(0xFF9AA8BF) : const Color(0xFF786038);
 
   static bool showsHorizonForTheme({required bool isDark}) => !isDark;
 

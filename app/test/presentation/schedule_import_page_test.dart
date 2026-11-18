@@ -278,15 +278,67 @@ END:VCALENDAR''';
     ).formatMediumDate(DateTime(2026, 11, 30));
     expect(find.text('First roster date · $expectedDate'), findsOneWidget);
     expect(
-      find.text('Detected dates · review each date before continuing'),
+      find.text(
+        'Detected dates · tap any date to correct it, then confirm the full sequence',
+      ),
       findsOneWidget,
     );
-    await tester.tap(find.byKey(const ValueKey('roster-date-column-1')));
+    expect(find.text('Confirm roster dates'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('roster-staff-row-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Person One').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.ancestor(
+              of: find.text('Build shift review'),
+              matching: find.byType(FilledButton),
+            ),
+          )
+          .onPressed,
+      isNull,
+      reason:
+          'Shift drafts stay locked until every displayed date is reviewed.',
+    );
+    await tester.tap(find.byKey(const ValueKey('confirm-roster-dates')));
+    await tester.pumpAndSettle();
+    expect(find.text('Dates confirmed'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.ancestor(
+              of: find.text('Build shift review'),
+              matching: find.byType(FilledButton),
+            ),
+          )
+          .onPressed,
+      isNotNull,
+    );
+
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('roster-date-column-2')),
+    );
+    await tester.tap(find.byKey(const ValueKey('roster-date-column-2')));
     await tester.pumpAndSettle();
     expect(find.byType(DatePickerDialog), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
+    await tester.tap(find.text('3').last);
+    await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('roster-date-column-1')), findsOneWidget);
+    expect(find.text('Confirm roster dates'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.ancestor(
+              of: find.text('Build shift review'),
+              matching: find.byType(FilledButton),
+            ),
+          )
+          .onPressed,
+      isNull,
+      reason: 'Changing any reviewed date must require confirmation again.',
+    );
+    expect(find.byKey(const ValueKey('roster-date-column-2')), findsOneWidget);
     expect(find.text('Build shift review'), findsOneWidget);
   });
 
@@ -390,7 +442,9 @@ END:VCALENDAR''';
     await tester.pumpAndSettle();
     expect(find.textContaining('Choose first date'), findsNothing);
     expect(
-      find.text('Detected dates · review each date before continuing'),
+      find.text(
+        'Detected dates · tap any date to correct it, then confirm the full sequence',
+      ),
       findsOneWidget,
     );
     expect(
@@ -401,6 +455,11 @@ END:VCALENDAR''';
       ),
       findsWidgets,
     );
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('confirm-roster-dates')),
+    );
+    await tester.tap(find.byKey(const ValueKey('confirm-roster-dates')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('roster-staff-row-0')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Person One').last);
