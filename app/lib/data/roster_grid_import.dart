@@ -191,13 +191,20 @@ class RosterGridImportParser {
     return RosterGridDetection(List.unmodifiable(_deduplicate(candidates)));
   }
 
-  List<DateTime> mapDates(RosterGridCandidate table, DateTime firstDate) {
+  List<DateTime> mapDates(
+    RosterGridCandidate table,
+    DateTime firstDate, {
+    Map<int, DateTime> dateOverrides = const {},
+    bool allowWeekdayMismatch = false,
+  }) {
+    final firstOverride = dateOverrides[0];
     if (table.columns.isEmpty ||
-        table.columns.first.dayNumber != firstDate.day ||
-        (table.columns.first.month != null &&
-            table.columns.first.month != firstDate.month) ||
-        (table.columns.first.year != null &&
-            table.columns.first.year != firstDate.year)) {
+        (firstOverride == null &&
+            (table.columns.first.dayNumber != firstDate.day ||
+                (table.columns.first.month != null &&
+                    table.columns.first.month != firstDate.month) ||
+                (table.columns.first.year != null &&
+                    table.columns.first.year != firstDate.year)))) {
       throw const FormatException(
         'Choose a first date that matches the first date column.',
       );
@@ -238,13 +245,33 @@ class RosterGridImportParser {
           date.day != column.dayNumber) {
         throw const FormatException('A roster date is not valid.');
       }
-      if (column.weekday != null && date.weekday != column.weekday) {
+      final override = dateOverrides[index];
+      final mappedDate = override == null
+          ? date
+          : DateTime(override.year, override.month, override.day);
+      if (override != null &&
+          (mappedDate.year != override.year ||
+              mappedDate.month != override.month ||
+              mappedDate.day != override.day)) {
+        throw const FormatException('A reviewed roster date is not valid.');
+      }
+      if (column.weekday != null &&
+          mappedDate.weekday != column.weekday &&
+          override == null &&
+          !allowWeekdayMismatch) {
         throw FormatException(
           'The weekday for date ${column.dayNumber} does not match the selected month and year.',
         );
       }
-      dates.add(date);
+      dates.add(mappedDate);
       previousDay = column.dayNumber;
+    }
+    for (var index = 1; index < dates.length; index++) {
+      if (!dates[index].isAfter(dates[index - 1])) {
+        throw const FormatException(
+          'Reviewed roster dates must be in increasing order without duplicates.',
+        );
+      }
     }
     return List.unmodifiable(dates);
   }

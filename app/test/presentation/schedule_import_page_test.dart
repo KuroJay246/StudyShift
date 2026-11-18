@@ -281,6 +281,12 @@ END:VCALENDAR''';
       find.text('Detected dates · review each date before continuing'),
       findsOneWidget,
     );
+    await tester.tap(find.byKey(const ValueKey('roster-date-column-1')));
+    await tester.pumpAndSettle();
+    expect(find.byType(DatePickerDialog), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('roster-date-column-1')), findsOneWidget);
     expect(find.text('Build shift review'), findsOneWidget);
   });
 

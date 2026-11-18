@@ -84,6 +84,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   int _selectedRosterTable = 0;
   int? _selectedRosterRow;
   DateTime? _rosterFirstDate;
+  Map<int, DateTime> _rosterDateOverrides = const {};
   List<String> _unresolvedRosterCells = const [];
 
   static const _tableFields = <String, String>{
@@ -122,6 +123,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _selectedRosterTable = 0;
       _selectedRosterRow = null;
       _rosterFirstDate = null;
+      _rosterDateOverrides = const {};
       _unresolvedRosterCells = const [];
     });
     try {
@@ -366,6 +368,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _selectedRosterTable = 0;
       _selectedRosterRow = null;
       _rosterFirstDate = null;
+      _rosterDateOverrides = const {};
       _unresolvedRosterCells = const [];
     });
     try {
@@ -541,14 +544,36 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       helpText: 'Confirm the first roster date',
     );
     if (selected != null && mounted) {
-      setState(
-        () => _rosterFirstDate = DateTime(
+      setState(() {
+        _rosterFirstDate = DateTime(
           selected.year,
           selected.month,
           selected.day,
-        ),
-      );
+        );
+        _rosterDateOverrides = const {};
+      });
     }
+  }
+
+  Future<void> _chooseRosterColumnDate(
+    int columnIndex,
+    DateTime current,
+  ) async {
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: current,
+      firstDate: DateTime(current.year - 2),
+      lastDate: DateTime(current.year + 5),
+      helpText: 'Confirm roster date ${columnIndex + 1}',
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      _rosterDateOverrides = {
+        ..._rosterDateOverrides,
+        columnIndex: DateTime(selected.year, selected.month, selected.day),
+      };
+      if (columnIndex == 0) _rosterFirstDate = _rosterDateOverrides[0];
+    });
   }
 
   Future<void> _buildRosterGridDrafts() async {
@@ -560,7 +585,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     final table = detection.candidates[_selectedRosterTable];
     if (selectedRow < 0 || selectedRow >= table.rows.length) return;
     try {
-      final dates = const RosterGridImportParser().mapDates(table, firstDate);
+      final dates = const RosterGridImportParser().mapDates(
+        table,
+        firstDate,
+        dateOverrides: _rosterDateOverrides,
+      );
       final deviceZone = await ref.read(deviceTimeZoneIdProvider.future);
       final legends = await ref
           .read(workCodeLegendRepositoryProvider)
@@ -1222,6 +1251,8 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         mappedDates = const RosterGridImportParser().mapDates(
           selectedTable,
           _rosterFirstDate!,
+          dateOverrides: _rosterDateOverrides,
+          allowWeekdayMismatch: true,
         );
       } on FormatException catch (error) {
         dateMappingError = error.message;
@@ -1268,6 +1299,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 ],
                 onChanged: (value) => setState(() {
                   _selectedRosterTable = value ?? 0;
+                  _rosterDateOverrides = const {};
                   _rosterFirstDate = _inferredRosterFirstDate(
                     detection.candidates[_selectedRosterTable],
                   );
@@ -1300,10 +1332,25 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 spacing: 4,
                 runSpacing: 0,
                 children: [
-                  for (final date in mappedDates)
-                    Chip(
+                  for (var index = 0; index < mappedDates.length; index++)
+                    ActionChip(
+                      key: ValueKey('roster-date-column-$index'),
                       visualDensity: VisualDensity.compact,
-                      label: Text(localizations.formatMediumDate(date)),
+                      avatar: Icon(
+                        _rosterDateOverrides.containsKey(index)
+                            ? Icons.edit_calendar_outlined
+                            : Icons.calendar_today_outlined,
+                        size: 16,
+                      ),
+                      label: Text(
+                        localizations.formatMediumDate(mappedDates[index]),
+                      ),
+                      onPressed: _loading || _saving
+                          ? null
+                          : () => _chooseRosterColumnDate(
+                              index,
+                              mappedDates[index],
+                            ),
                     ),
                 ],
               ),

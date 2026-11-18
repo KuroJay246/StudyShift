@@ -574,6 +574,19 @@ void main() {
     );
   });
 
+  test('allows a reviewed correction for an OCR date column', () {
+    final table = parser.detect(_sampleGrid()).candidates.single;
+
+    expect(
+      parser.mapDates(
+        table,
+        DateTime(2026, 11, 16),
+        dateOverrides: {1: DateTime(2026, 11, 18), 2: DateTime(2026, 11, 19)},
+      ),
+      [DateTime(2026, 11, 16), DateTime(2026, 11, 18), DateTime(2026, 11, 19)],
+    );
+  });
+
   test(
     'rejects a small backwards date jump instead of guessing a new month',
     () {
