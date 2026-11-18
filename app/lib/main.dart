@@ -10,9 +10,9 @@ import 'presentation/app.dart';
 import 'presentation/app_theme.dart';
 import 'presentation/startup_launch_gate.dart';
 
-Future<void> main() async {
+void main(List<String> args) {
   WidgetsFlutterBinding.ensureInitialized();
-  final startupAppearance = await StartupAppearanceBridge.load();
+  final startupAppearance = StartupAppearanceBridge.fromEntrypointArgs(args);
   runApp(ProviderScope(child: MainApp(startupAppearance: startupAppearance)));
 }
 
@@ -37,10 +37,9 @@ class MainApp extends ConsumerWidget {
     if (loadedPreferences != null) {
       unawaited(StartupAppearanceBridge.sync(loadedPreferences));
     }
-    final accentTheme =
-        loadedPreferences == null
-            ? startupAppearance?.accentTheme ?? AccentTheme.studyShiftBlue
-            : loadedPreferences.accentTheme ?? AccentTheme.studyShiftBlue;
+    final accentTheme = loadedPreferences == null
+        ? startupAppearance?.accentTheme ?? AccentTheme.studyShiftBlue
+        : loadedPreferences.accentTheme ?? AccentTheme.studyShiftBlue;
     final themePreference = loadedPreferences == null
         ? startupAppearance?.theme
         : loadedPreferences.theme;

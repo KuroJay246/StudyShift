@@ -708,7 +708,7 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
         .maybeWhen(data: _hasVisibleScheduleEntries, orElse: () => false);
     final addTooltip = switch (_selected) {
       _Destination.work => 'Add shift',
-      _Destination.school => 'Add class',
+      _Destination.school => 'Add a class, assignment, or exam',
       _Destination.plans => 'Add plan',
       _Destination.week => 'Add event',
       _Destination.today => switch (widget.mode) {

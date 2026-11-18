@@ -208,7 +208,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Add class'));
+    await tester.tap(find.byTooltip('Add a class, assignment, or exam'));
     await tester.pumpAndSettle();
     expect(find.text('Class'), findsOneWidget);
     expect(find.text('Assignment'), findsOneWidget);
@@ -254,7 +254,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Add class'));
+    await tester.tap(find.byTooltip('Add a class, assignment, or exam'));
     await tester.pumpAndSettle();
 
     final examination = tester.getRect(find.text('Examination'));

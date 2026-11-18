@@ -790,6 +790,67 @@ void main() {
     expect(find.text('Synthetic finished-second'), findsOneWidget);
   });
 
+  testWidgets('shows the next shift after an all-day day off', (tester) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final today = CivilDate.fromDateTime(DateTime.now());
+    final tomorrow = today.addDays(1);
+    await ScheduleRepository(database).save(
+      ScheduleItem(
+        id: 'synthetic-day-off-today',
+        kind: ScheduleKind.work,
+        title: 'Synthetic day off',
+        startDate: today,
+        workCategory: WorkCategory.dayOff,
+        intervals: const [],
+      ),
+    );
+    await ScheduleRepository(database).save(
+      ScheduleItem(
+        id: 'synthetic-next-morning-shift',
+        kind: ScheduleKind.work,
+        title: 'Synthetic next morning shift',
+        startDate: tomorrow,
+        workCategory: WorkCategory.shift,
+        intervals: [
+          EventInterval.sameDay(startMinute: 9 * 60, endMinute: 17 * 60),
+        ],
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: TodayPage(
+            selectedDay: today,
+            clock: () => DateTime(today.year, today.month, today.day, 20),
+            onSelectedDateChanged: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final dateLabel = MaterialLocalizations.of(
+      tester.element(find.byType(TodayPage)),
+    ).formatMediumDate(DateTime(tomorrow.year, tomorrow.month, tomorrow.day));
+    expect(find.text('Next up · $dateLabel'), findsOneWidget);
+    expect(find.text('Synthetic next morning shift'), findsOneWidget);
+    expect(find.text('9:00 AM – 5:00 PM'), findsOneWidget);
+    expect(find.text('Nothing else scheduled today'), findsNothing);
+  });
+
   testWidgets('Today groups overlapping events in an expandable summary', (
     tester,
   ) async {

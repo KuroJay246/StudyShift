@@ -805,6 +805,49 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('Study Add button describes the available school item choices', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const ScheduleShell(mode: ScheduleMode.workAndSchool),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Study').last);
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Exams'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Exams'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Add exam'), findsOneWidget);
+    expect(find.byTooltip('Add class'), findsNothing);
+    expect(find.byTooltip('Add a class, assignment, or exam'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Today moves Add to the toolbar when event cards are visible', (
     tester,
   ) async {

@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -20,30 +18,20 @@ class StartupAppearanceBridge {
   static const MethodChannel _channel = MethodChannel(
     'app.shiftstudy/launcher_icon',
   );
-  static const Duration _startupReadTimeout = Duration(seconds: 2);
   static StartupAppearance? _lastSynced;
 
-  static Future<StartupAppearance?> load() async {
-    if (defaultTargetPlatform != TargetPlatform.android) return null;
-    try {
-      final values = await _channel.invokeMapMethod<String, Object?>(
-        'loadStartupAppearance',
-      ).timeout(_startupReadTimeout);
-      if (values == null) return null;
-      final appearance = StartupAppearance(
-        theme: _enumValue(ThemePreference.values, values['theme']),
-        accentTheme: _enumValue(AccentTheme.values, values['accentTheme']),
-      );
-      _lastSynced = appearance;
-      return appearance;
-    } on MissingPluginException {
-      return null;
-    } on PlatformException {
-      return null;
-    } on TimeoutException {
-      // The appearance cache is only a startup hint; SQLite remains authoritative.
-      return null;
-    }
+  /// Parses the appearance snapshot passed by Android before Dart starts.
+  /// This keeps the saved theme on the first Flutter frame without a startup
+  /// method-channel round trip.
+  static StartupAppearance? fromEntrypointArgs(List<String> args) {
+    if (args.length < 2) return null;
+    final appearance = StartupAppearance(
+      theme: _enumValue(ThemePreference.values, args[0]),
+      accentTheme: _enumValue(AccentTheme.values, args[1]),
+    );
+    if (appearance.theme == null && appearance.accentTheme == null) return null;
+    _lastSynced = appearance;
+    return appearance;
   }
 
   static Future<void> sync(AppPreferences preferences) async {

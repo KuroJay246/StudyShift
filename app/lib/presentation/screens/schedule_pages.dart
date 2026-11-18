@@ -264,6 +264,7 @@ class _TodayPageState extends ConsumerState<TodayPage>
             active ??
             (next != null &&
                     (occurrences.isEmpty ||
+                        occurrences.every((entry) => entry.item.isDayOff) ||
                         CivilDate.fromDateTime(next.interval.start) == today)
                 ? next
                 : null);

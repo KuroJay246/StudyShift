@@ -43,6 +43,15 @@ class MainActivity : FlutterActivity() {
         publishWidgetPickerPreview()
     }
 
+    /** Seed the first Flutter frame with the appearance already used by Android's splash. */
+    override fun getDartEntrypointArgs(): List<String>? {
+        val preferences = getSharedPreferences("startup_appearance", MODE_PRIVATE)
+        return listOf(
+            preferences.getString("theme", "").orEmpty(),
+            preferences.getString("accentTheme", "").orEmpty(),
+        )
+    }
+
     private fun publishWidgetPickerPreview() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) return
 
@@ -97,15 +106,6 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.shiftstudy/launcher_icon")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
-                    "loadStartupAppearance" -> {
-                        val preferences = getSharedPreferences("startup_appearance", MODE_PRIVATE)
-                        result.success(
-                            mapOf(
-                                "theme" to preferences.getString("theme", null),
-                                "accentTheme" to preferences.getString("accentTheme", null),
-                            ),
-                        )
-                    }
                     "syncStartupAppearance" -> {
                         val preferences = getSharedPreferences("startup_appearance", MODE_PRIVATE)
                         preferences.edit().apply {
