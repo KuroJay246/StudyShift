@@ -81,6 +81,63 @@ void main() {
   tearDown(() async => db.close());
 
   test(
+    'bulk interval lookup returns each event intervals in stable order',
+    () async {
+      await db.saveItem(
+        ScheduleRowsCompanion.insert(
+          id: 'bulk-a',
+          kind: ScheduleKind.work.index,
+          title: 'Synthetic shift A',
+          startDate: '2026-11-13',
+        ),
+        [
+          IntervalRowsCompanion.insert(
+            itemId: 'bulk-a',
+            startDayOffset: 0,
+            startMinute: 780,
+            endDayOffset: 0,
+            endMinute: 960,
+          ),
+          IntervalRowsCompanion.insert(
+            itemId: 'bulk-a',
+            startDayOffset: 0,
+            startMinute: 360,
+            endDayOffset: 0,
+            endMinute: 540,
+          ),
+        ],
+      );
+      await db.saveItem(
+        ScheduleRowsCompanion.insert(
+          id: 'bulk-b',
+          kind: ScheduleKind.classSession.index,
+          title: 'Synthetic class B',
+          startDate: '2026-11-14',
+        ),
+        [
+          IntervalRowsCompanion.insert(
+            itemId: 'bulk-b',
+            startDayOffset: 0,
+            startMinute: 600,
+            endDayOffset: 0,
+            endMinute: 660,
+          ),
+        ],
+      );
+
+      final intervals = await db.getIntervalsForItems(['bulk-b', 'bulk-a']);
+
+      expect(intervals.keys, containsAll(['bulk-a', 'bulk-b']));
+      expect(intervals['bulk-a']!.map((interval) => interval.startMinute), [
+        360,
+        780,
+      ]);
+      expect(intervals['bulk-b']!.single.startMinute, 600);
+      expect(await db.getIntervalsForItems([]), isEmpty);
+    },
+  );
+
+  test(
     'shift wrap-up stores actual intervals while preserving roster times',
     () async {
       final planned = ScheduleItem(

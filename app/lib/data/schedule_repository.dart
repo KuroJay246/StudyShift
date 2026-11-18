@@ -17,9 +17,12 @@ class ScheduleRepository {
       _load(await database.getItems());
 
   Future<List<ScheduleItem>> _load(List<ScheduleRow> rows) async {
+    final intervalsByItem = await database.getIntervalsForItems(
+      rows.map((row) => row.id),
+    );
     final items = <ScheduleItem>[];
     for (final row in rows) {
-      final parts = await database.getIntervals(row.id);
+      final parts = intervalsByItem[row.id] ?? const <IntervalRow>[];
       final kind = ScheduleKind.values[row.kind];
       final categoryIndex =
           row.workCategory ??

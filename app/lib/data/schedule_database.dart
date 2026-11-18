@@ -244,6 +244,28 @@ class ScheduleDatabase extends _$ScheduleDatabase {
             ]))
           .get();
 
+  Future<Map<String, List<IntervalRow>>> getIntervalsForItems(
+    Iterable<String> itemIds,
+  ) async {
+    final ids = itemIds.toSet();
+    if (ids.isEmpty) return const {};
+
+    final rows =
+        await (select(intervalRows)
+              ..where((row) => row.itemId.isIn(ids))
+              ..orderBy([
+                (row) => OrderingTerm.asc(row.itemId),
+                (row) => OrderingTerm.asc(row.startDayOffset),
+                (row) => OrderingTerm.asc(row.startMinute),
+              ]))
+            .get();
+    final intervalsByItem = <String, List<IntervalRow>>{};
+    for (final row in rows) {
+      intervalsByItem.putIfAbsent(row.itemId, () => []).add(row);
+    }
+    return intervalsByItem;
+  }
+
   Future<void> saveItem(
     ScheduleRowsCompanion item,
     List<IntervalRowsCompanion> intervals,
