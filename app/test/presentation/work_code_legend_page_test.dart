@@ -155,6 +155,11 @@ void main() {
   testWidgets('code card shows meaning, split time windows, and flight count', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
     final container = ProviderContainer(
       overrides: [
@@ -228,15 +233,13 @@ void main() {
     expect(find.text('Split shift'), findsOneWidget);
     expect(find.text('From your work roster'), findsOneWidget);
     expect(find.text('3 possible flights'), findsOneWidget);
-    expect(find.textContaining('6:00 AM – 9:00 AM'), findsOneWidget);
-    expect(find.textContaining('12:00 PM – 4:00 PM'), findsOneWidget);
-    final morning = tester.getTopLeft(find.text('6:00 AM – 9:00 AM'));
-    final afternoon = tester.getTopLeft(find.text('12:00 PM – 4:00 PM'));
-    expect(
-      morning.dy < afternoon.dy ||
-          (morning.dy == afternoon.dy && morning.dx < afternoon.dx),
-      isTrue,
-    );
+    expect(find.textContaining('6–9 AM'), findsOneWidget);
+    expect(find.textContaining('12–4 PM'), findsOneWidget);
+    final morning = tester.getTopLeft(find.text('6–9 AM'));
+    final afternoon = tester.getTopLeft(find.text('12–4 PM'));
+    expect(morning.dy, afternoon.dy);
+    expect(find.byType(FloatingActionButton), findsNothing);
+    expect(find.byTooltip('Add shift code'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField), 'ZZSAVED');
     await tester.pumpAndSettle();
@@ -487,8 +490,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('6:00 AM'), findsOneWidget);
-    expect(find.textContaining('12:00 PM'), findsOneWidget);
+    expect(find.textContaining('6–9 AM'), findsOneWidget);
+    expect(find.textContaining('12–4 PM'), findsOneWidget);
     expect(
       find.text('Synthetic morning and evening operations'),
       findsOneWidget,

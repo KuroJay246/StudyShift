@@ -98,13 +98,19 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
     final supervisors = ref.watch(supervisorProfilesProvider);
     final query = _search.text.trim().toLowerCase();
     return Scaffold(
-      appBar: AppBar(title: const Text('Shift legend')),
-      floatingActionButton: FloatingActionButton(
-        tooltip: _section == _LegendSection.codes
-            ? 'Add shift code'
-            : 'Add supervisor',
-        onPressed: _section == _LegendSection.codes ? _edit : _editSupervisor,
-        child: const Icon(Icons.add_rounded),
+      appBar: AppBar(
+        title: const Text('Shift legend'),
+        actions: [
+          IconButton(
+            tooltip: _section == _LegendSection.codes
+                ? 'Add shift code'
+                : 'Add supervisor',
+            onPressed: _section == _LegendSection.codes
+                ? _edit
+                : _editSupervisor,
+            icon: const Icon(Icons.add_rounded),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -228,7 +234,7 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
         ),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 104),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
               Text(
                 '${filtered.length} ${filtered.length == 1 ? 'supervisor' : 'supervisors'}',
@@ -447,7 +453,7 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
         ),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 104),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
             children: [
               if (query.isNotEmpty)
                 Text(
@@ -504,13 +510,31 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
       child: InkWell(
         onTap: () => _showCodeDetails(context, data),
         child: Padding(
-          padding: const EdgeInsets.all(StudyShiftSpacing.cardPadding),
+          padding: const EdgeInsets.all(12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  Chip(label: Text(data.code)),
+                  Container(
+                    constraints: const BoxConstraints(minWidth: 44),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Text(
+                      data.code,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -551,9 +575,37 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                   runSpacing: 0,
                   children: [
                     for (final window in windows)
-                      Chip(
-                        avatar: const Icon(Icons.schedule_rounded, size: 17),
-                        label: Text(window.label),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.secondaryContainer,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.schedule_rounded,
+                              size: 14,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSecondaryContainer,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _compactWindowLabel(window.label),
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSecondaryContainer,
+                                  ),
+                            ),
+                          ],
+                        ),
                       ),
                   ],
                 ),
@@ -571,6 +623,14 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
         ),
       ),
     );
+  }
+
+  static String _compactWindowLabel(String label) {
+    final compact = label.replaceAll(' – ', '–').replaceAll(':00', '');
+    final samePeriod = RegExp(r'^(.*?) (AM|PM)–(.*?) \2$').firstMatch(compact);
+    return samePeriod == null
+        ? compact
+        : '${samePeriod.group(1)}–${samePeriod.group(3)} ${samePeriod.group(2)}';
   }
 
   Future<void> _showCodeDetails(
