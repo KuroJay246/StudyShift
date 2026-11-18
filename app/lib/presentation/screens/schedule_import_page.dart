@@ -186,7 +186,6 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       final localLegends = await ref
           .read(workCodeLegendRepositoryProvider)
           .getItems();
-      final byId = {for (final item in existingItems) item.id: item};
       final reviewedProposals = [
         for (final proposal in preview.proposals)
           _withLocalLegendMeaning(proposal, localLegends),
@@ -195,14 +194,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       setState(() {
         _sourceName = selected.name;
         _sourceType = sourceType;
-        _rows = [
-          for (final proposal in reviewedProposals)
-            _ImportRow(
-              proposal: proposal,
-              existing: byId[proposal.item.id],
-              included: !byId.containsKey(proposal.item.id),
-            ),
-        ];
+        _rows = _matchExistingRows(reviewedProposals, existingItems);
         _notices = preview.notices;
       });
       if (preview.proposals.isEmpty && preview.notices.isEmpty) {
@@ -308,7 +300,6 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     final localLegends = await ref
         .read(workCodeLegendRepositoryProvider)
         .getItems();
-    final byId = {for (final item in existingItems) item.id: item};
     final reviewedProposals = [
       for (final proposal in preview.proposals)
         _withLocalLegendMeaning(proposal, localLegends),
@@ -317,14 +308,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     setState(() {
       _sourceName = sourceName;
       _sourceType = sourceType;
-      _rows = [
-        for (final proposal in reviewedProposals)
-          _ImportRow(
-            proposal: proposal,
-            existing: byId[proposal.item.id],
-            included: !byId.containsKey(proposal.item.id),
-          ),
-      ];
+      _rows = _matchExistingRows(reviewedProposals, existingItems);
       _notices = preview.notices;
       _error = preview.proposals.isEmpty && preview.notices.isEmpty
           ? 'This calendar has no events to review.'
@@ -354,6 +338,88 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       }
     }
     return proposal;
+  }
+
+  List<_ImportRow> _matchExistingRows(
+    List<ScheduleImportProposal> proposals,
+    List<ScheduleItem> existingItems,
+  ) {
+    final byId = {for (final item in existingItems) item.id: item};
+    final matchedIds = <String>{};
+    return [
+      for (final proposal in proposals)
+        _matchExistingRow(proposal, existingItems, byId, matchedIds),
+    ];
+  }
+
+  _ImportRow _matchExistingRow(
+    ScheduleImportProposal proposal,
+    List<ScheduleItem> existingItems,
+    Map<String, ScheduleItem> byId,
+    Set<String> matchedIds,
+  ) {
+    final proposed = proposal.item;
+    final existing =
+        byId[proposed.id] ??
+        _takeMatchingSavedDayMarker(proposed, existingItems, matchedIds);
+    if (existing != null) matchedIds.add(existing.id);
+    final matchedProposal = existing == null || existing.id == proposed.id
+        ? proposal
+        : ScheduleImportProposal(
+            item: _withItemId(proposed, existing.id),
+            sourceText: proposal.sourceText,
+          );
+    return _ImportRow(
+      proposal: matchedProposal,
+      existing: existing,
+      included: existing == null,
+    );
+  }
+
+  ScheduleItem? _takeMatchingSavedDayMarker(
+    ScheduleItem proposed,
+    List<ScheduleItem> candidates,
+    Set<String> matchedIds,
+  ) {
+    if (!_isSavedDayMarker(proposed)) return null;
+    for (final candidate in candidates) {
+      if (!matchedIds.contains(candidate.id) &&
+          _sameSavedDayMarker(candidate, proposed)) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  bool _isSavedDayMarker(ScheduleItem item) =>
+      item.kind == ScheduleKind.work &&
+      (item.isDayOff ||
+          item.workCategory == WorkCategory.dayOff ||
+          item.workCategory == WorkCategory.restDay) &&
+      item.intervals.isEmpty &&
+      (item.code?.trim().isNotEmpty ?? false);
+
+  bool _sameSavedDayMarker(ScheduleItem saved, ScheduleItem proposed) {
+    if (!_isSavedDayMarker(saved) ||
+        saved.startDate != proposed.startDate ||
+        saved.workCategory != proposed.workCategory ||
+        saved.code?.trim().toLowerCase() !=
+            proposed.code?.trim().toLowerCase()) {
+      return false;
+    }
+
+    String normalize(String value) =>
+        value.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+    final savedEmployer = normalize(saved.employerName ?? '');
+    final proposedEmployer = normalize(proposed.employerName ?? '');
+    if (savedEmployer.isNotEmpty &&
+        proposedEmployer.isNotEmpty &&
+        savedEmployer != proposedEmployer) {
+      return false;
+    }
+    final sameTitle = normalize(saved.title) == normalize(proposed.title);
+    return sameTitle ||
+        (savedEmployer.isNotEmpty && savedEmployer == proposedEmployer);
   }
 
   Future<void> _selectOcrFile({bool examTimetable = false}) async {
@@ -1611,6 +1677,7 @@ List<String> _importedScheduleChanges(
   }
   if (saved.timeZoneId != proposed.timeZoneId) changes.add('time zone');
   if (saved.code != proposed.code) changes.add('code');
+  if (saved.employerName != proposed.employerName) changes.add('employer');
   if (saved.location != proposed.location) changes.add('location');
   if (saved.notes != proposed.notes) changes.add('notes');
   if (!_sameRecurrence(saved.recurrence, proposed.recurrence)) {

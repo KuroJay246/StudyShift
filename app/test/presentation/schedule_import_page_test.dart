@@ -753,6 +753,95 @@ END:VCALENDAR''';
     );
   });
 
+  testWidgets(
+    'roster day off with a new source ID is matched to the saved day',
+    (tester) async {
+      var csv = '''source_id,date,title,category,code,employer,notes
+roster-first,2026-11-17,CAH - Day off,day_off,X,,New roster
+''';
+      final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(database.close);
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(fileChannel, (call) async {
+            expect(call.method, 'openCalendar');
+            return {
+              'name': 'roster.csv',
+              'bytes': Uint8List.fromList(utf8.encode(csv)),
+            };
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(fileChannel, null);
+      });
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            scheduleDatabaseProvider.overrideWithValue(database),
+            deviceTimeZoneIdProvider.overrideWith(
+              (ref) async => 'America/Barbados',
+            ),
+          ],
+          child: const MaterialApp(
+            home: SettingsPage(mode: ScheduleMode.workAndSchool),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      Future<void> openAndReviewRoster() async {
+        await tester.tap(find.text('Import calendar'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
+        await tester.pumpAndSettle();
+        await tester.drag(find.byType(ListView), const Offset(0, -800));
+        await tester.pumpAndSettle();
+      }
+
+      await openAndReviewRoster();
+      await tester.ensureVisible(find.text('Add 1 selected'));
+      await tester.tap(find.text('Add 1 selected'));
+      await tester.pumpAndSettle();
+      final original = (await ScheduleRepository(database).getItems()).single;
+      expect(original.employerName, isNull);
+
+      csv = '''source_id,date,title,category,code,employer,notes
+roster-revised,2026-11-17,CAH - Day off,day_off,X,CAH,New roster
+''';
+      await openAndReviewRoster();
+
+      expect(find.text('Proposed events · 0 selected'), findsOneWidget);
+      expect(
+        find.textContaining('Changed since saved: employer'),
+        findsOneWidget,
+      );
+      expect(
+        (await ScheduleRepository(database).getItems()).single.employerName,
+        isNull,
+      );
+
+      await tester.tap(find.byType(CheckboxListTile).last);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byType(SwitchListTile));
+      await tester.drag(find.byType(ListView), const Offset(0, -350));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(SwitchListTile));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(ListView), const Offset(0, 1000));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Add 1 selected'));
+      await tester.tap(find.text('Add 1 selected'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Replace matching'));
+      await tester.pumpAndSettle();
+
+      final replaced = await ScheduleRepository(database).getItems();
+      expect(replaced, hasLength(1));
+      expect(replaced.single.id, original.id);
+      expect(replaced.single.employerName, 'CAH');
+    },
+  );
+
   testWidgets('work CSV details can be corrected before they are saved', (
     tester,
   ) async {
