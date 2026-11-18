@@ -23,6 +23,31 @@ void main() {
     ]);
   });
 
+  test('keeps final date cells when roster columns are unevenly spaced', () {
+    const tokens = [
+      OcrTextToken(text: 'Mon 16', left: .22, top: .10, right: .28, bottom: .12),
+      OcrTextToken(text: 'Tue 17', left: .29, top: .10, right: .35, bottom: .12),
+      OcrTextToken(text: 'Wed 18', left: .36, top: .10, right: .42, bottom: .12),
+      OcrTextToken(text: 'Thu 19', left: .47, top: .10, right: .53, bottom: .12),
+      OcrTextToken(text: 'Person One', left: .02, top: .20, right: .13, bottom: .22),
+      OcrTextToken(text: 'A1', left: .24, top: .20, right: .26, bottom: .22),
+      OcrTextToken(text: 'OFF', left: .31, top: .20, right: .34, bottom: .22),
+      OcrTextToken(text: 'VS', left: .38, top: .20, right: .40, bottom: .22),
+      OcrTextToken(text: 'LO1', left: .53, top: .20, right: .55, bottom: .22),
+    ];
+
+    final table = parser.detect(tokens).candidates.single;
+
+    expect(table.columns.map((column) => column.dayNumber), [16, 17, 18, 19]);
+    expect(table.rows.single.label, 'Person One');
+    expect(table.rows.single.cells.map((cell) => cell.text), [
+      'A1',
+      'OFF',
+      'VS',
+      'LO1',
+    ]);
+  });
+
   test('detects weekdays merged into numbered date header tokens', () {
     const tokens = [
       OcrTextToken(
@@ -584,6 +609,41 @@ void main() {
         dateOverrides: {1: DateTime(2026, 11, 18), 2: DateTime(2026, 11, 19)},
       ),
       [DateTime(2026, 11, 16), DateTime(2026, 11, 18), DateTime(2026, 11, 19)],
+    );
+  });
+
+  test('a corrected OCR date bypasses an invalid recognized day number', () {
+    const table = RosterGridCandidate(
+      page: 0,
+      headerTop: .1,
+      columns: [
+        RosterGridColumn(dayNumber: 16),
+        RosterGridColumn(dayNumber: 32),
+        RosterGridColumn(dayNumber: 18),
+      ],
+      rows: [],
+    );
+
+    expect(
+      parser.mapDates(
+        table,
+        DateTime(2026, 11, 16),
+        dateOverrides: {1: DateTime(2026, 11, 17)},
+      ),
+      [DateTime(2026, 11, 16), DateTime(2026, 11, 17), DateTime(2026, 11, 18)],
+    );
+  });
+
+  test('rejects a correction for a nonexistent roster column', () {
+    final table = parser.detect(_sampleGrid()).candidates.single;
+
+    expect(
+      () => parser.mapDates(
+        table,
+        DateTime(2026, 11, 16),
+        dateOverrides: {3: DateTime(2026, 11, 19)},
+      ),
+      throwsFormatException,
     );
   });
 

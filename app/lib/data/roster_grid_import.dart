@@ -197,6 +197,13 @@ class RosterGridImportParser {
     Map<int, DateTime> dateOverrides = const {},
     bool allowWeekdayMismatch = false,
   }) {
+    if (dateOverrides.keys.any(
+      (index) => index < 0 || index >= table.columns.length,
+    )) {
+      throw const FormatException(
+        'A reviewed date does not match a roster date column.',
+      );
+    }
     final firstOverride = dateOverrides[0];
     if (table.columns.isEmpty ||
         (firstOverride == null &&
@@ -215,6 +222,24 @@ class RosterGridImportParser {
     var previousDay = 0;
     for (var index = 0; index < table.columns.length; index++) {
       final column = table.columns[index];
+      final override = dateOverrides[index];
+      if (override != null) {
+        final mappedDate = DateTime(
+          override.year,
+          override.month,
+          override.day,
+        );
+        if (mappedDate.year != override.year ||
+            mappedDate.month != override.month ||
+            mappedDate.day != override.day) {
+          throw const FormatException('A reviewed roster date is not valid.');
+        }
+        dates.add(mappedDate);
+        year = mappedDate.year;
+        month = mappedDate.month;
+        previousDay = mappedDate.day;
+        continue;
+      }
       if (column.year != null) {
         year = column.year!;
       }
@@ -245,25 +270,14 @@ class RosterGridImportParser {
           date.day != column.dayNumber) {
         throw const FormatException('A roster date is not valid.');
       }
-      final override = dateOverrides[index];
-      final mappedDate = override == null
-          ? date
-          : DateTime(override.year, override.month, override.day);
-      if (override != null &&
-          (mappedDate.year != override.year ||
-              mappedDate.month != override.month ||
-              mappedDate.day != override.day)) {
-        throw const FormatException('A reviewed roster date is not valid.');
-      }
       if (column.weekday != null &&
-          mappedDate.weekday != column.weekday &&
-          override == null &&
+          date.weekday != column.weekday &&
           !allowWeekdayMismatch) {
         throw FormatException(
           'The weekday for date ${column.dayNumber} does not match the selected month and year.',
         );
       }
-      dates.add(mappedDate);
+      dates.add(date);
       previousDay = column.dayNumber;
     }
     for (var index = 1; index < dates.length; index++) {
@@ -303,14 +317,15 @@ class RosterGridImportParser {
     int headerIndex,
     List<double> centers,
   ) {
-    final spacing = centers[1] - centers[0];
-    final firstDateBoundary = centers.first - spacing / 2;
+    final firstGap = centers[1] - centers[0];
+    final lastGap = centers.last - centers[centers.length - 2];
+    final firstDateBoundary = centers.first - firstGap / 2;
     final cells = List.generate(centers.length, (index) {
       final left = index == 0
-          ? centers[index] - spacing / 2
+          ? centers[index] - firstGap / 2
           : (centers[index - 1] + centers[index]) / 2;
       final right = index == centers.length - 1
-          ? centers[index] + spacing / 2
+          ? centers[index] + lastGap / 2
           : (centers[index] + centers[index + 1]) / 2;
       return (left, right);
     });
