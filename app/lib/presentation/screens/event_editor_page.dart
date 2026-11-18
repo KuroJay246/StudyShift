@@ -856,83 +856,78 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                 ),
               ],
               if (!_hasNoTime) ...[
-                for (var i = 0; i < _starts.length; i++)
-                  Card(
-                    margin: const EdgeInsets.only(bottom: 6),
-                    clipBehavior: Clip.antiAlias,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 6,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  _starts.length == 1
-                                      ? 'Time'
-                                      : 'Interval ${i + 1}',
-                                  style: Theme.of(context).textTheme.labelLarge,
+                for (var i = 0; i < _starts.length; i++) ...[
+                  if (i > 0) const Divider(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _starts.length == 1
+                                    ? 'Time'
+                                    : 'Interval ${i + 1}',
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                            ),
+                            if (_starts.length > 1)
+                              IconButton(
+                                tooltip: 'Remove interval',
+                                visualDensity: VisualDensity.compact,
+                                constraints: const BoxConstraints.tightFor(
+                                  width: 32,
+                                  height: 32,
+                                ),
+                                padding: EdgeInsets.zero,
+                                onPressed: () => setState(() {
+                                  _starts.removeAt(i);
+                                  _ends.removeAt(i);
+                                  _endDayOffset =
+                                      _minute(_ends.last) <=
+                                          _minute(_starts.last)
+                                      ? 1
+                                      : 0;
+                                  _endDateManuallyEdited = false;
+                                }),
+                                icon: const Icon(
+                                  Icons.remove_circle_outline,
+                                  size: 18,
                                 ),
                               ),
-                              if (_starts.length > 1)
-                                IconButton(
-                                  tooltip: 'Remove interval',
-                                  visualDensity: VisualDensity.compact,
-                                  constraints: const BoxConstraints.tightFor(
-                                    width: 32,
-                                    height: 32,
-                                  ),
-                                  padding: EdgeInsets.zero,
-                                  onPressed: () => setState(() {
-                                    _starts.removeAt(i);
-                                    _ends.removeAt(i);
-                                    _endDayOffset =
-                                        _minute(_ends.last) <=
-                                            _minute(_starts.last)
-                                        ? 1
-                                        : 0;
-                                    _endDateManuallyEdited = false;
-                                  }),
-                                  icon: const Icon(
-                                    Icons.remove_circle_outline,
-                                    size: 18,
-                                  ),
-                                ),
-                            ],
-                          ),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: _timePickerButton(
-                                  label: 'Starts',
-                                  value: _starts[i].format(context),
-                                  onPressed: () => _pickTime(i, true),
-                                ),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _timePickerButton(
+                                label: 'Starts',
+                                value: _starts[i].format(context),
+                                onPressed: () => _pickTime(i, true),
                               ),
-                              const Padding(
-                                padding: EdgeInsets.symmetric(horizontal: 4),
-                                child: Icon(
-                                  Icons.arrow_forward_rounded,
-                                  size: 16,
-                                ),
+                            ),
+                            const Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 4),
+                              child: Icon(
+                                Icons.arrow_forward_rounded,
+                                size: 16,
                               ),
-                              Expanded(
-                                child: _timePickerButton(
-                                  label: 'Ends',
-                                  value: _ends[i].format(context),
-                                  onPressed: () => _pickTime(i, false),
-                                ),
+                            ),
+                            Expanded(
+                              child: _timePickerButton(
+                                label: 'Ends',
+                                value: _ends[i].format(context),
+                                onPressed: () => _pickTime(i, false),
                               ),
-                            ],
-                          ),
-                        ],
-                      ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
+                ],
                 if (widget.kind == ScheduleKind.work && _starts.length < 2)
                   Align(
                     alignment: Alignment.centerLeft,

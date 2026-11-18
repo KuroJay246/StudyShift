@@ -146,6 +146,10 @@ void main() {
     final ends = tester.getRect(find.text('Ends'));
     expect(starts.left, greaterThanOrEqualTo(0));
     expect(ends.right, lessThanOrEqualTo(320));
+    expect(
+      find.ancestor(of: find.text('Starts'), matching: find.byType(Card)),
+      findsNothing,
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -708,17 +712,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final timeCard = find.ancestor(
-      of: find.text('Time'),
-      matching: find.byType(Card),
-    );
+    final timeHeading = find.text('Time');
     final daylightSavingLabel = find.text('If the clock time repeats');
     await tester.ensureVisible(daylightSavingLabel);
     await tester.pumpAndSettle();
 
     expect(
       tester.getTopLeft(daylightSavingLabel).dy,
-      greaterThan(tester.getBottomRight(timeCard).dy),
+      greaterThan(tester.getBottomRight(timeHeading).dy),
     );
     expect(tester.takeException(), isNull);
   });
