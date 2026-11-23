@@ -32,6 +32,8 @@ import java.time.Instant
 class MainActivity : FlutterActivity() {
     private var backupResult: MethodChannel.Result? = null
     private var backupBytes: ByteArray? = null
+    private var pendingImportOcrUri: Uri? = null
+    private var pendingImportOcrName: String? = null
     private var applyLauncherIconAfterLeaving = false
     private var pendingLocationResult: MethodChannel.Result? = null
     private val locationRequestCode = 7210
@@ -247,6 +249,43 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.shiftstudy/import")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "openImport" -> {
+                        pendingImportOcrUri = null
+                        pendingImportOcrName = null
+                        openDocumentPicker(
+                            result = result,
+                            requestCode = OPEN_UNIFIED_IMPORT_REQUEST,
+                            mimeType = "*/*",
+                            mimeTypes = arrayOf(
+                                "text/calendar",
+                                "text/csv",
+                                "text/comma-separated-values",
+                                "application/csv",
+                                "application/vnd.ms-excel",
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                "application/pdf",
+                                "image/*",
+                                "text/plain",
+                                "application/octet-stream",
+                            ),
+                        )
+                    }
+                    "extractSelectedOcr" -> {
+                        val uri = pendingImportOcrUri
+                        val name = pendingImportOcrName
+                        pendingImportOcrUri = null
+                        pendingImportOcrName = null
+                        if (uri == null || name == null) {
+                            result.error("import_file_missing", "Select the document again to read it.", null)
+                        } else {
+                            extractScheduleInOcrProcess(uri, name, result, rosterTable = true)
+                        }
+                    }
+                    "discardSelectedOcr" -> {
+                        pendingImportOcrUri = null
+                        pendingImportOcrName = null
+                        result.success(null)
+                    }
                     "openCalendar" -> openDocumentPicker(
                         result = result,
                         requestCode = OPEN_CALENDAR_REQUEST,
@@ -653,6 +692,7 @@ class MainActivity : FlutterActivity() {
             requestCode != SAVE_CALENDAR_REQUEST &&
             requestCode != OPEN_BACKUP_REQUEST &&
             requestCode != OPEN_CALENDAR_REQUEST &&
+            requestCode != OPEN_UNIFIED_IMPORT_REQUEST &&
             requestCode != OPEN_OCR_IMPORT_REQUEST &&
             requestCode != OPEN_ROSTER_TABLE_REQUEST) {
             super.onActivityResult(requestCode, resultCode, data)
@@ -667,6 +707,10 @@ class MainActivity : FlutterActivity() {
             return
         }
         if (resultCode != RESULT_OK) {
+            if (requestCode == OPEN_UNIFIED_IMPORT_REQUEST) {
+                pendingImportOcrUri = null
+                pendingImportOcrName = null
+            }
             pending.success(
                 if (requestCode == SAVE_BACKUP_REQUEST || requestCode == SAVE_CALENDAR_REQUEST) false else null,
             )
@@ -685,6 +729,31 @@ class MainActivity : FlutterActivity() {
                     output.flush()
                 } ?: throw IOException("Could not write to the selected location.")
                 pending.success(true)
+            } else if (requestCode == OPEN_UNIFIED_IMPORT_REQUEST) {
+                val name = documentName(uri)
+                val extension = name.substringAfterLast('.', "").lowercase()
+                when (extension) {
+                    "ics", "csv", "xlsx" -> pending.success(
+                        mapOf("name" to name, "bytes" to readDocument(uri, MAX_CALENDAR_BYTES)),
+                    )
+                    "pdf", "png", "jpg", "jpeg", "webp", "bmp" -> {
+                        val descriptor = contentResolver.openFileDescriptor(uri, "r")
+                            ?: throw IOException("Selected document unavailable.")
+                        descriptor.use {
+                            if (it.statSize > MAX_OCR_FILE_BYTES) {
+                                throw IOException("Selected document exceeds the 10 MB import limit.")
+                            }
+                        }
+                        pendingImportOcrUri = uri
+                        pendingImportOcrName = name
+                        pending.success(mapOf("name" to name, "requiresOcr" to true))
+                    }
+                    else -> pending.error(
+                        "unsupported_import_file",
+                        "Choose an ICS, CSV, XLSX, PDF, PNG, JPG, WebP, or BMP file.",
+                        null,
+                    )
+                }
             } else if (requestCode == OPEN_OCR_IMPORT_REQUEST || requestCode == OPEN_ROSTER_TABLE_REQUEST) {
                 val name = documentName(uri)
                 val extension = name.substringAfterLast('.', "").lowercase()
@@ -839,6 +908,7 @@ class MainActivity : FlutterActivity() {
         private const val SAVE_BACKUP_REQUEST = 5311
         private const val OPEN_BACKUP_REQUEST = 5312
         private const val OPEN_CALENDAR_REQUEST = 5313
+        private const val OPEN_UNIFIED_IMPORT_REQUEST = 5317
         private const val SAVE_CALENDAR_REQUEST = 5314
         private const val OPEN_OCR_IMPORT_REQUEST = 5315
         private const val OPEN_ROSTER_TABLE_REQUEST = 5316

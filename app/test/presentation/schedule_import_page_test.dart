@@ -34,14 +34,14 @@ LOCATION:Science 101
 END:VEVENT
 END:VCALENDAR''';
 
-  testWidgets('calendar import previews and saves only reviewed events', (
+  testWidgets('Smart Import previews and saves only reviewed events', (
     tester,
   ) async {
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
     addTearDown(database.close);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openCalendar');
+          expect(call.method, 'openImport');
           return {
             'name': 'classes.ics',
             'bytes': Uint8List.fromList(utf8.encode(source)),
@@ -66,8 +66,20 @@ END:VCALENDAR''';
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
+    expect(find.byTooltip('Import coworkers to saved shifts'), findsNothing);
+    expect(find.text('Import coworkers'), findsNothing);
+    expect(find.text('Choose a file to get started'), findsOneWidget);
+    expect(
+      find.textContaining('Smart Import detects the file type and content'),
+      findsOneWidget,
+    );
+    expect(find.text('Choose a file'), findsOneWidget);
+    expect(find.text('Import coworkers'), findsNothing);
+    expect(find.text('Read a PDF or schedule image offline'), findsNothing);
+    expect(find.text('Read a roster table'), findsNothing);
+    expect(find.text('Read an exam timetable'), findsNothing);
     await tester.tap(find.text('CSV and Excel file format'));
     await tester.pumpAndSettle();
     expect(
@@ -82,12 +94,38 @@ END:VCALENDAR''';
       findsOneWidget,
     );
     expect(find.textContaining('SYNTH-001'), findsOneWidget);
+    final sampleCsv = tester
+        .widget<SelectableText>(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is SelectableText &&
+                widget.data?.contains('SYNTH-001') == true,
+          ),
+        )
+        .data!;
+    final sample = await const CsvScheduleImportParser().parse(
+      sampleCsv,
+      sourceName: 'sample.csv',
+    );
+    expect(sample.proposals.first.item.coworkers, ['Synthetic coworker']);
+    expect(
+      sample.proposals.first.item.reportingInstruction,
+      'Sample reporting text',
+    );
+    expect(sample.proposals.first.item.location, 'Sample location');
     await tester.tap(find.text('CSV and Excel file format'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
-    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose a file'));
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
+    expect(find.text('Document recognized'), findsOneWidget);
+    expect(find.text('Detected type'), findsOneWidget);
+    expect(find.text('Destination'), findsOneWidget);
+    expect(find.text('Action'), findsOneWidget);
+    expect(find.text('ICS calendar'), findsOneWidget);
+    expect(find.text('Calendar'), findsWidgets);
+    expect(find.text('Add reviewed schedule entries'), findsOneWidget);
     expect(find.text('Chemistry lecture'), findsOneWidget);
     expect(find.textContaining('classes.ics'), findsOneWidget);
     await tester.drag(find.byType(ListView), const Offset(0, -900));
@@ -135,7 +173,7 @@ END:VCALENDAR''';
     var selectedFile = 0;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openCalendar');
+          expect(call.method, 'openImport');
           selectedFile++;
           final source = selectedFile == 1 ? first : second;
           return {
@@ -162,21 +200,16 @@ END:VCALENDAR''';
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
-    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose a file'));
+    await tester.pump(const Duration(milliseconds: 500));
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
     expect(find.text('Synthetic roster A'), findsOneWidget);
-    expect(
-      find.text('Add another calendar file to this batch'),
-      findsOneWidget,
-    );
-    await tester.ensureVisible(
-      find.text('Add another calendar file to this batch'),
-    );
-    await tester.tap(find.text('Add another calendar file to this batch'));
+    expect(find.text('Add another file to this import'), findsOneWidget);
+    await tester.ensureVisible(find.text('Add another file to this import'));
+    await tester.tap(find.text('Add another file to this import'));
     await tester.pumpAndSettle();
     expect(find.text('Synthetic roster A'), findsOneWidget);
     expect(find.text('Synthetic roster B'), findsOneWidget);
@@ -246,16 +279,31 @@ END:VCALENDAR''';
           'page': 0,
         },
     ];
+    expect(
+      const RosterGridImportParser().detect([
+        for (final token in tokens)
+          OcrTextToken(
+            text: token['text']! as String,
+            left: token['left']! as double,
+            top: token['top']! as double,
+            right: token['right']! as double,
+            bottom: token['bottom']! as double,
+            page: token['page']! as int,
+          ),
+      ]).candidates,
+      isNotEmpty,
+    );
+    var selectedFile = 0;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          if (call.method == 'openCalendar') {
+          if (call.method == 'openImport' && selectedFile++ == 0) {
             return {
               'name': 'synthetic-first.csv',
               'bytes': Uint8List.fromList(utf8.encode(csv)),
             };
           }
-          expect(call.method, 'openOcrImport');
-          expect(call.arguments, {'rosterTable': true});
+          expect(call.method, 'openImport');
+
           return {
             'name': 'synthetic-second.pdf',
             'text': 'Synthetic scanned roster',
@@ -287,21 +335,17 @@ END:VCALENDAR''';
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
-    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose a file'));
+    await tester.pump(const Duration(milliseconds: 400));
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
     expect(find.text('Synthetic CSV shift'), findsOneWidget);
     await tester.drag(find.byType(ListView), const Offset(0, -700));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(
-      find.text('Read another roster table into this batch'),
-    );
-    await tester.tap(find.text('Read another roster table into this batch'));
-    await tester.pumpAndSettle();
-    await _acceptOcrNotice(tester);
+    await tester.ensureVisible(find.text('Add another file to this import'));
+    await tester.tap(find.text('Add another file to this import'));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(0, -700));
     await tester.pumpAndSettle();
@@ -357,7 +401,7 @@ END:VCALENDAR''';
     await ScheduleRepository(database).save(existingShift);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openOcrImport');
+          expect(call.method, 'openImport');
           return {'name': 'synthetic-exams.pdf', 'text': examOcrText};
         });
     addTearDown(() {
@@ -379,11 +423,10 @@ END:VCALENDAR''';
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Read an exam timetable'));
+    await tester.tap(find.text('Choose a file'));
     await tester.pumpAndSettle();
-    await _acceptOcrNotice(tester);
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
 
@@ -434,7 +477,7 @@ END:VCALENDAR''';
     }
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openOcrImport');
+          expect(call.method, 'openImport');
           return {'name': 'synthetic-current-exams.pdf', 'text': examOcrText};
         });
     addTearDown(() {
@@ -456,11 +499,10 @@ END:VCALENDAR''';
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Read an exam timetable'));
+    await tester.tap(find.text('Choose a file'));
     await tester.pumpAndSettle();
-    await _acceptOcrNotice(tester);
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
 
@@ -500,8 +542,8 @@ END:VCALENDAR''';
     await ScheduleRepository(database).save(existingShift);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openOcrImport');
-          expect(call.arguments, {'rosterTable': false});
+          expect(call.method, 'openImport');
+
           return {
             'name': 'synthetic-general-ocr.pdf',
             'text': '2026-12-04 09:00 11:00 BIOL1100 Different title',
@@ -526,14 +568,11 @@ END:VCALENDAR''';
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(
-      find.text('Read a PDF or schedule image offline'),
-    );
-    await tester.tap(find.text('Read a PDF or schedule image offline'));
+    await tester.ensureVisible(find.text('Choose a file'));
+    await tester.tap(find.text('Choose a file'));
     await tester.pumpAndSettle();
-    await _acceptOcrNotice(tester);
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
 
@@ -562,7 +601,10 @@ END:VCALENDAR''';
     var ocrCalls = 0;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          if (call.method == 'openOcrImport') ocrCalls++;
+          if (call.method == 'extractSelectedOcr') ocrCalls++;
+          if (call.method == 'openImport') {
+            return {'name': 'synthetic.pdf', 'requiresOcr': true};
+          }
           return null;
         });
     addTearDown(() {
@@ -572,22 +614,27 @@ END:VCALENDAR''';
 
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [scheduleDatabaseProvider.overrideWithValue(database)],
+        overrides: [
+          scheduleDatabaseProvider.overrideWithValue(database),
+          deviceTimeZoneIdProvider.overrideWith(
+            (ref) async => 'America/Barbados',
+          ),
+        ],
         child: const MaterialApp(
           home: SettingsPage(mode: ScheduleMode.workAndSchool),
         ),
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Read a PDF or schedule image offline'));
-    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose a file'));
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.text('Before using OCR'), findsOneWidget);
     expect(find.textContaining('technical diagnostics'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 400));
 
     expect(ocrCalls, 0);
     expect(find.text('Before using OCR'), findsNothing);
@@ -632,7 +679,7 @@ END:VCALENDAR''';
     ];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openOcrImport');
+          expect(call.method, 'openImport');
           return {
             'name': 'synthetic-full-date-roster.pdf',
             'text': 'Synthetic roster table',
@@ -646,26 +693,27 @@ END:VCALENDAR''';
 
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [scheduleDatabaseProvider.overrideWithValue(database)],
+        overrides: [
+          scheduleDatabaseProvider.overrideWithValue(database),
+          deviceTimeZoneIdProvider.overrideWith(
+            (ref) async => 'America/Barbados',
+          ),
+        ],
         child: const MaterialApp(
           home: SettingsPage(mode: ScheduleMode.workAndSchool),
         ),
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Read a roster table'));
-    await tester.tap(find.text('Read a roster table'));
-    await tester.pumpAndSettle();
-    await _acceptOcrNotice(tester);
-    await tester.drag(find.byType(ListView), const Offset(0, -700));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
 
-    final expectedDate = MaterialLocalizations.of(
-      tester.element(find.text('Build shift review')),
-    ).formatMediumDate(DateTime(2026, 11, 30));
-    expect(find.text('First roster date · $expectedDate'), findsOneWidget);
+    await tester.tap(find.text('Choose a file'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.drag(find.byType(ListView), const Offset(0, -700));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.textContaining('First roster date ·'), findsOneWidget);
     expect(
       find.text(
         'Detected dates · tap any date to correct it, then confirm the full sequence',
@@ -835,8 +883,8 @@ END:VCALENDAR''';
       );
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(fileChannel, (call) async {
-            expect(call.method, 'openOcrImport');
-            expect(call.arguments, {'rosterTable': true});
+            expect(call.method, 'openImport');
+
             return {
               'name': 'synthetic-roster.pdf',
               'text': 'Synthetic roster table',
@@ -898,12 +946,11 @@ END:VCALENDAR''';
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Import calendar'));
+      await tester.tap(find.text('Smart Import'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Read a roster table'));
-      await tester.tap(find.text('Read a roster table'));
+
+      await tester.tap(find.text('Choose a file'));
       await tester.pumpAndSettle();
-      await _acceptOcrNotice(tester);
       await tester.drag(find.byType(ListView), const Offset(0, -700));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.textContaining('Choose first date'));
@@ -944,6 +991,14 @@ END:VCALENDAR''';
       await tester.ensureVisible(find.text('Build shift review'));
       await tester.tap(find.text('Build shift review'));
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Document recognized'));
+      expect(find.text('Employee roster'), findsOneWidget);
+      expect(find.textContaining('My Work Schedule'), findsOneWidget);
+      expect(find.textContaining('Shift Legend · Coworkers'), findsOneWidget);
+      expect(
+        find.text('Add new entries and update matched coworkers'),
+        findsOneWidget,
+      );
       await tester.scrollUntilVisible(
         find.textContaining('Coworkers to add:'),
         240,
@@ -969,6 +1024,13 @@ END:VCALENDAR''';
       expect(saved.single.title, 'Owner entered ramp duty');
 
       await tester.tap(find.byIcon(Icons.playlist_add_check_rounded));
+      await tester.pump();
+      expect(
+        find.text(
+          'Added 1, replaced 0, skipped 0. Updated coworkers for 1 saved shift entry.',
+        ),
+        findsOneWidget,
+      );
       await tester.pumpAndSettle();
       final applied = await ScheduleRepository(database).getItems();
       final retainedShift = applied.singleWhere(
@@ -1026,8 +1088,8 @@ END:VCALENDAR''';
     ];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openOcrImport');
-          expect(call.arguments, {'rosterTable': true});
+          expect(call.method, 'openImport');
+
           return {
             'name': 'synthetic-ambiguous-roster.pdf',
             'text': 'Synthetic roster table',
@@ -1085,12 +1147,11 @@ END:VCALENDAR''';
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Read a roster table'));
-    await tester.tap(find.text('Read a roster table'));
+
+    await tester.tap(find.text('Choose a file'));
     await tester.pumpAndSettle();
-    await _acceptOcrNotice(tester);
     await tester.drag(find.byType(ListView), const Offset(0, -700));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.textContaining('Choose first date'));
@@ -1138,7 +1199,7 @@ END:VCALENDAR''';
     var openCount = 0;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openOcrImport');
+          expect(call.method, 'openImport');
           openCount++;
           return {
             'name': openCount == 1
@@ -1167,22 +1228,20 @@ END:VCALENDAR''';
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Read an exam timetable'));
+    await tester.tap(find.text('Choose a file'));
     await tester.pumpAndSettle();
-    await _acceptOcrNotice(tester);
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Add 1 selected'));
     await tester.tap(find.text('Add 1 selected'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Read an exam timetable'));
+    await tester.tap(find.text('Choose a file'));
     await tester.pumpAndSettle();
-    await _acceptOcrNotice(tester);
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
 
@@ -1220,7 +1279,7 @@ END:VCALENDAR''';
     );
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openOcrImport');
+          expect(call.method, 'openImport');
           return {'name': 'renamed-exams.pdf', 'text': examOcrText};
         });
     addTearDown(() {
@@ -1242,11 +1301,10 @@ END:VCALENDAR''';
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Read an exam timetable'));
+    await tester.tap(find.text('Choose a file'));
     await tester.pumpAndSettle();
-    await _acceptOcrNotice(tester);
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
 
@@ -1278,7 +1336,7 @@ END:VCALENDAR''';
     addTearDown(database.close);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openCalendar');
+          expect(call.method, 'openImport');
           return {
             'name': 'weekly-review.ics',
             'bytes': Uint8List.fromList(utf8.encode(weekly)),
@@ -1303,9 +1361,9 @@ END:VCALENDAR''';
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
+    await tester.tap(find.text('Choose a file'));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
@@ -1340,7 +1398,7 @@ END:VCALENDAR''';
     addTearDown(database.close);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openCalendar');
+          expect(call.method, 'openImport');
           return {
             'name': 'classes.csv',
             'bytes': Uint8List.fromList(utf8.encode(csv)),
@@ -1365,9 +1423,9 @@ END:VCALENDAR''';
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
+    await tester.tap(find.text('Choose a file'));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
@@ -1390,9 +1448,9 @@ END:VCALENDAR''';
     expect(items.single.importProvenance!.format, 'Shift & Study CSV v1');
     expect(items.single.importProvenance!.sourceName, 'classes.csv');
 
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
+    await tester.tap(find.text('Choose a file'));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(0, -900));
     await tester.pumpAndSettle();
@@ -1417,7 +1475,7 @@ roster-first,2026-11-17,CAH - Day off,day_off,X,,New roster
       addTearDown(database.close);
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(fileChannel, (call) async {
-            expect(call.method, 'openCalendar');
+            expect(call.method, 'openImport');
             return {
               'name': 'roster.csv',
               'bytes': Uint8List.fromList(utf8.encode(csv)),
@@ -1444,9 +1502,9 @@ roster-first,2026-11-17,CAH - Day off,day_off,X,,New roster
       await tester.pumpAndSettle();
 
       Future<void> openAndReviewRoster() async {
-        await tester.tap(find.text('Import calendar'));
+        await tester.tap(find.text('Smart Import'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
+        await tester.tap(find.text('Choose a file'));
         await tester.pumpAndSettle();
         await tester.drag(find.byType(ListView), const Offset(0, -800));
         await tester.pumpAndSettle();
@@ -1514,7 +1572,7 @@ roster-revised,2026-11-17,CAH - Day off,day_off,X,CAH,New roster
     );
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openCalendar');
+          expect(call.method, 'openImport');
           return {
             'name': 'sample-work.csv',
             'bytes': Uint8List.fromList(utf8.encode(csv)),
@@ -1539,9 +1597,9 @@ roster-revised,2026-11-17,CAH - Day off,day_off,X,CAH,New roster
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
+    await tester.tap(find.text('Choose a file'));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
@@ -1629,7 +1687,7 @@ WORK-001,2026-11-11,Sample work shift revised,shift,10:00,18:00,America/Barbados
 
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(fileChannel, (call) async {
-            expect(call.method, 'openCalendar');
+            expect(call.method, 'openImport');
             return {
               'name': 'roster.csv',
               'bytes': Uint8List.fromList(utf8.encode(updatedCsv)),
@@ -1654,9 +1712,9 @@ WORK-001,2026-11-11,Sample work shift revised,shift,10:00,18:00,America/Barbados
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Import calendar'));
+      await tester.tap(find.text('Smart Import'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
+      await tester.tap(find.text('Choose a file'));
       await tester.pumpAndSettle();
       await tester.drag(find.byType(ListView), const Offset(0, -1000));
       await tester.pumpAndSettle();
@@ -1716,7 +1774,7 @@ WORK-SPLIT-7,2026-11-10,Sample work shift,shift,14:00,18:00,America/Barbados
     addTearDown(database.close);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openCalendar');
+          expect(call.method, 'openImport');
           return {
             'name': 'split-roster.csv',
             'bytes': Uint8List.fromList(utf8.encode(csv)),
@@ -1741,9 +1799,9 @@ WORK-SPLIT-7,2026-11-10,Sample work shift,shift,14:00,18:00,America/Barbados
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
+    await tester.tap(find.text('Choose a file'));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(0, -800));
     await tester.pumpAndSettle();
@@ -1777,7 +1835,7 @@ WORK-SPLIT-7,2026-11-10,Sample work shift,shift,14:00,18:00,America/Barbados
     addTearDown(database.close);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
-          expect(call.method, 'openCalendar');
+          expect(call.method, 'openImport');
           return {
             'name': 'synthetic-roster.csv',
             'bytes': Uint8List.fromList(utf8.encode(csv)),
@@ -1802,9 +1860,9 @@ WORK-SPLIT-7,2026-11-10,Sample work shift,shift,14:00,18:00,America/Barbados
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
+    await tester.tap(find.text('Choose a file'));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView).first, const Offset(0, -500));
     await tester.pumpAndSettle();
@@ -1853,10 +1911,4 @@ WORK-SPLIT-7,2026-11-10,Sample work shift,shift,14:00,18:00,America/Barbados
     expect(saved.contactPhone, '+12465550101');
     expect(saved.importProvenance!.sourceName, 'synthetic-roster.csv');
   });
-}
-
-Future<void> _acceptOcrNotice(WidgetTester tester) async {
-  expect(find.text('Before using OCR'), findsOneWidget);
-  await tester.tap(find.text('Continue once'));
-  await tester.pumpAndSettle();
 }

@@ -22,7 +22,6 @@ import '../../platform/schedule_import_file_bridge.dart';
 import '../design/studyshift_spacing.dart';
 import '../schedule_format.dart';
 import 'schedule_import_history_page.dart';
-import 'coworker_roster_import_page.dart';
 
 enum _ImportCategory {
   personal,
@@ -165,14 +164,88 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       }
     });
     try {
-      final selected = await _fileBridge.openCalendar();
+      var selected = await _fileBridge.openImport();
       if (selected == null) {
         if (mounted) setState(() => _appendIncoming = false);
         return;
       }
+      if (selected.requiresOcr) {
+        if (!await _confirmOcrMetrics()) {
+          await _fileBridge.discardSelectedOcr();
+          if (mounted) setState(() => _appendIncoming = false);
+          return;
+        }
+        if (selected.extractedText == null) {
+          selected = await _fileBridge.extractSelectedOcr();
+        }
+      }
       final sourceName = _batchSourceName(selected.name, append: append);
       final zone = await ref.read(deviceTimeZoneIdProvider.future);
       final fileName = selected.name.toLowerCase();
+      if (selected.extractedText case final extractedText?) {
+        final sourceType = _isExamTimetable(selected.name, extractedText)
+            ? ScheduleImportSourceType.examTimetableOcr
+            : fileName.endsWith('.pdf')
+            ? ScheduleImportSourceType.pdfOcr
+            : ScheduleImportSourceType.imageOcr;
+        final detection = const RosterGridImportParser().detect(
+          selected.ocrTokens,
+        );
+        if (detection.candidates.isNotEmpty) {
+          if (!mounted) return;
+          setState(() {
+            _sourceName = sourceName;
+            _sourceType = append ? ScheduleImportSourceType.batch : sourceType;
+            _recognizedText = extractedText;
+            _rosterDetection = detection;
+            _selectedRosterTable = 0;
+            _selectedRosterRow = null;
+            _rosterFirstDate = _inferredRosterFirstDate(
+              detection.candidates.first,
+            );
+            _rosterDateOverrides = const {};
+            _rosterDatesConfirmed = false;
+            _unresolvedRosterCells = const [];
+          });
+          return;
+        }
+        final preview = await _ocrParser.parse(
+          text: extractedText,
+          sourceName: sourceName,
+          timeZoneId: zone,
+          examTimetable:
+              sourceType == ScheduleImportSourceType.examTimetableOcr,
+        );
+        final existingItems = await ref
+            .read(scheduleRepositoryProvider)
+            .getItems();
+        final byId = {for (final item in existingItems) item.id: item};
+        final unusedExistingOcrItems = existingItems
+            .where(_hasOcrProvenance)
+            .toList();
+        final matchedOcrIds = <String>{};
+        final incoming = [
+          for (final proposal in preview.proposals)
+            _ocrReviewRow(
+              proposal,
+              byId: byId,
+              unusedExistingOcrItems: unusedExistingOcrItems,
+              matchedOcrIds: matchedOcrIds,
+            ),
+        ];
+        _mergeBatchRows(incoming, preview.notices);
+        if (mounted) {
+          setState(() {
+            _sourceName = sourceName;
+            _sourceType = append ? ScheduleImportSourceType.batch : sourceType;
+            _recognizedText = extractedText;
+            if (preview.proposals.isEmpty) {
+              _error = 'No clear schedule rows were found. Review the recognized text and correct uncertain entries manually.';
+            }
+          });
+        }
+        return;
+      }
       final ScheduleImportPreview preview;
       final ScheduleImportSourceType sourceType;
       if (fileName.endsWith('.ics')) {
@@ -190,7 +263,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         if (_needsColumnMapping(headers)) {
           if (!mounted) return;
           setState(() {
-            _pendingTableBytes = selected.bytes;
+            _pendingTableBytes = selected?.bytes;
             _pendingTableName = sourceName;
             _pendingTableType = sourceType;
             _tableHeaders = headers;
@@ -205,7 +278,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         if (_needsColumnMapping(headers)) {
           if (!mounted) return;
           setState(() {
-            _pendingTableBytes = selected.bytes;
+            _pendingTableBytes = selected?.bytes;
             _pendingTableName = sourceName;
             _pendingTableType = sourceType;
             _tableHeaders = headers;
@@ -218,7 +291,9 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           sourceName: sourceName,
         );
       } else {
-        throw const FormatException('Choose an .ics, .csv or .xlsx file.');
+        throw const FormatException(
+          'Choose an ICS, CSV, Excel, PDF, or supported image file.',
+        );
       }
       final existingItems = await ref
           .read(scheduleRepositoryProvider)
@@ -528,163 +603,6 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     final sameTitle = normalize(saved.title) == normalize(proposed.title);
     return sameTitle ||
         (savedEmployer.isNotEmpty && savedEmployer == proposedEmployer);
-  }
-
-  Future<void> _selectOcrFile({bool examTimetable = false}) async {
-    if (!await _confirmOcrMetrics()) return;
-    setState(() {
-      _loading = true;
-      _error = null;
-      _rows = const [];
-      _notices = const [];
-      _sourceName = null;
-      _recognizedText = null;
-      _sourceType = null;
-      _rosterDetection = null;
-      _selectedRosterTable = 0;
-      _selectedRosterRow = null;
-      _rosterFirstDate = null;
-      _rosterDateOverrides = const {};
-      _rosterDatesConfirmed = false;
-      _unresolvedRosterCells = const [];
-    });
-    try {
-      final selected = await _fileBridge.openOcrImport();
-      if (selected == null) return;
-      final zone = await ref.read(deviceTimeZoneIdProvider.future);
-      final text = selected.extractedText;
-      if (text == null) {
-        throw const FormatException(
-          'The recognized schedule text is unavailable.',
-        );
-      }
-      final preview = await _ocrParser.parse(
-        text: text,
-        sourceName: selected.name,
-        timeZoneId: zone,
-        examTimetable: examTimetable,
-      );
-      final existingItems = await ref
-          .read(scheduleRepositoryProvider)
-          .getItems();
-      final byId = {for (final item in existingItems) item.id: item};
-      final unusedExistingOcrItems = existingItems
-          .where(_hasOcrProvenance)
-          .toList();
-      final matchedOcrIds = <String>{};
-      if (!mounted) return;
-      setState(() {
-        _sourceName = selected.name;
-        _sourceType = examTimetable
-            ? ScheduleImportSourceType.examTimetableOcr
-            : selected.name.toLowerCase().endsWith('.pdf')
-            ? ScheduleImportSourceType.pdfOcr
-            : ScheduleImportSourceType.imageOcr;
-        _recognizedText = text;
-        _rows = [
-          for (final proposal in preview.proposals)
-            _ocrReviewRow(
-              proposal,
-              byId: byId,
-              unusedExistingOcrItems: unusedExistingOcrItems,
-              matchedOcrIds: matchedOcrIds,
-            ),
-        ];
-        _notices = preview.notices;
-        if (preview.proposals.isEmpty) {
-          _error = 'No clear event rows were found. Review the extracted text and add uncertain entries manually.';
-        }
-      });
-    } on Object catch (error) {
-      if (mounted) setState(() => _error = _friendlyError(error));
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _selectRosterTable({bool appendToBatch = false}) async {
-    if (!await _confirmOcrMetrics()) return;
-    final append = appendToBatch && _rows.isNotEmpty;
-    setState(() {
-      _loading = true;
-      _error = null;
-      _appendIncoming = append;
-      if (!append) {
-        _rows = const [];
-        _notices = const [];
-      }
-      if (!append) {
-        _sourceName = null;
-        _recognizedText = null;
-      }
-      if (!append) _sourceType = null;
-      _rosterDetection = null;
-      _selectedRosterTable = 0;
-      _selectedRosterRow = null;
-      _rosterFirstDate = null;
-      _rosterDateOverrides = const {};
-      _rosterDatesConfirmed = false;
-      _unresolvedRosterCells = const [];
-    });
-    try {
-      final selected = await _fileBridge.openOcrImport(rosterTable: true);
-      if (selected == null) {
-        if (mounted) setState(() => _appendIncoming = false);
-        return;
-      }
-      final sourceName = _batchSourceName(selected.name, append: append);
-      final text = selected.extractedText;
-      if (text == null) {
-        throw const FormatException(
-          'The recognized roster text is unavailable.',
-        );
-      }
-      final detection = const RosterGridImportParser().detect(
-        selected.ocrTokens,
-      );
-      final dateLikeTokenCount = selected.ocrTokens
-          .where(
-            (token) => RegExp(
-              r'^\s*(?:\d{4}[-/.]\d{1,2}[-/.]\d{1,2}|[1-9]|[12]\d|3[01])(?:st|nd|rd|th)?\s*$',
-              caseSensitive: false,
-            ).hasMatch(token.text),
-          )
-          .length;
-      final weekdayTokenCount = selected.ocrTokens
-          .where(
-            (token) => RegExp(
-              r'^(mon|tue|wed|thu|fri|sat|sun)',
-              caseSensitive: false,
-            ).hasMatch(token.text.trim()),
-          )
-          .length;
-      if (!mounted) return;
-      setState(() {
-        _sourceName = sourceName;
-        _sourceType = append
-            ? ScheduleImportSourceType.batch
-            : sourceName.toLowerCase().endsWith('.pdf')
-            ? ScheduleImportSourceType.pdfOcr
-            : ScheduleImportSourceType.imageOcr;
-        _recognizedText = text;
-        _rosterDetection = detection;
-        _rosterFirstDate = detection.candidates.isEmpty
-            ? null
-            : _inferredRosterFirstDate(detection.candidates.first);
-        if (detection.candidates.isEmpty) {
-          _error =
-              'No clear date columns were detected. OCR saw ${selected.ocrTokens.length} layout words, including $dateLikeTokenCount date-like numbers and $weekdayTokenCount weekday labels. Review the recognized text and add uncertain shifts manually.';
-        }
-      });
-    } on Object catch (error) {
-      if (mounted) {
-        setState(() {
-          _error = _friendlyError(error);
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
   }
 
   Future<bool> _confirmOcrMetrics() async {
@@ -1162,6 +1080,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           item.workCategory == WorkCategory.shift &&
           !item.hasNoTime);
 
+  bool _isExamTimetable(String fileName, String text) => RegExp(
+    r'\b(exam(?:ination)?s?|midterms?|finals?|assessment timetable)\b',
+    caseSensitive: false,
+  ).hasMatch('$fileName\n$text');
+
   bool _hasOcrProvenance(ScheduleItem item) =>
       switch (item.importProvenance?.format) {
         'pdf-ocr' || 'image-ocr' || 'exam-timetable-ocr' => true,
@@ -1362,6 +1285,8 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             );
           })
           .toList(growable: false);
+      final coworkerEntriesUpdated =
+          coworkerUpdates.length + occurrenceCoworkerUpdates.length;
       final result = await ref
           .read(scheduleRepositoryProvider)
           .applyRosterImport(
@@ -1389,7 +1314,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Added ${result.inserted}, replaced ${result.replaced}, skipped ${result.skipped}.${coworkerUpdates.isEmpty ? '' : ' Updated coworkers on ${coworkerUpdates.length} ${coworkerUpdates.length == 1 ? 'shift' : 'shifts'}.'}',
+              'Added ${result.inserted}, replaced ${result.replaced}, skipped ${result.skipped}.${coworkerEntriesUpdated == 0 ? '' : ' Updated coworkers for $coworkerEntriesUpdated ${coworkerEntriesUpdated == 1 ? 'saved shift entry' : 'saved shift entries'}.'}',
             ),
           ),
         );
@@ -1399,6 +1324,60 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  String _detectedImportType() {
+    if (_rosterDetection?.candidates.isNotEmpty == true) {
+      return 'Employee roster';
+    }
+    return switch (_sourceType) {
+      ScheduleImportSourceType.ics => 'ICS calendar',
+      ScheduleImportSourceType.csv => 'CSV schedule or roster',
+      ScheduleImportSourceType.xlsx => 'Excel schedule or roster',
+      ScheduleImportSourceType.pdfOcr => 'PDF timetable',
+      ScheduleImportSourceType.imageOcr => 'Schedule image',
+      ScheduleImportSourceType.examTimetableOcr => 'Exam timetable',
+      ScheduleImportSourceType.batch => 'Multiple timetable files',
+      null => 'Timetable information',
+    };
+  }
+
+  String _importDestination() {
+    final destinations = <String>{};
+    for (final row in _rows) {
+      if (row.coworkerOnly) {
+        destinations.add('Shift Legend · Coworkers');
+        continue;
+      }
+      final item = row.proposal.item;
+      destinations.add(
+        switch (item.kind) {
+          ScheduleKind.work => 'My Work Schedule',
+          ScheduleKind.classSession => 'Classes',
+          ScheduleKind.deadline =>
+            item.deadlineType == DeadlineType.examination
+                ? 'Exams'
+                : 'Assignments',
+          ScheduleKind.personal => 'Calendar',
+        },
+      );
+    }
+    return destinations.join(' · ');
+  }
+
+  String _importAction() {
+    final coworkerUpdates = _rows.where((row) => row.coworkerOnly).length;
+    final newEntries = _rows
+        .where((row) => row.existing == null && !row.ambiguousMatch)
+        .length;
+    if (coworkerUpdates > 0 && newEntries > 0) {
+      return 'Add new entries and update matched coworkers';
+    }
+    if (coworkerUpdates > 0) {
+      return 'Update coworkers on matched shifts';
+    }
+    if (newEntries > 0) return 'Add reviewed schedule entries';
+    return 'Review existing and uncertain matches';
   }
 
   @override
@@ -1411,19 +1390,17 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         .length;
     final rosterBatchCount = _batchSourceCount(_rows);
     final hasCoworkerUpdates = _rows.any((row) => row.coworkerOnly);
+    final reviewHeading = _pendingTableName != null
+        ? 'Match your roster columns'
+        : _rosterDetection != null
+        ? 'Review detected roster'
+        : _rows.isEmpty
+        ? 'Choose a file to get started'
+        : 'Review before adding';
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Import calendar'),
+        title: const Text('Smart Import'),
         actions: [
-          IconButton(
-            tooltip: 'Import coworkers to saved shifts',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const CoworkerRosterImportPage(),
-              ),
-            ),
-            icon: const Icon(Icons.groups_outlined),
-          ),
           IconButton(
             tooltip: 'Import history',
             onPressed: () => Navigator.of(context).push(
@@ -1445,18 +1422,18 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           ),
           children: [
             Text(
-              'Review before adding',
+              reviewHeading,
               style: Theme.of(context).textTheme.headlineSmall
                   ?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 6),
             Text(
-              'Choose an .ics calendar, StudyShift CSV or supported Excel file. Nothing is saved until you review and confirm.',
+              'Import schedules, rosters, exams, or other timetable information. Smart Import detects the file type and content, then previews proposed changes here.',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: 8),
             Text(
-              'If your roster uses different headings, match its columns to StudyShift fields. Import stays on this device, and nothing is saved until you review and confirm.',
+              'Choose one supported file. StudyShift reads rows, columns, dates, times, codes, and names where available. Nothing is saved until you review and confirm.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             Card(
@@ -1474,9 +1451,9 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                   const SizedBox(height: 12),
                   SelectableText(
                     'source_id,date,end_date,title,category,start,end,time_zone,employer,department,job_role,code,code_meaning,coworkers,reporting_instruction,location,notes,supervisor_name,supervisor_phone,contact_name,contact_phone\n'
-                    'SYNTH-001,2026-11-07,2026-11-08,Sample overnight shift,shift,21:00,05:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,S1,Confirmed sample meaning,Sample reporting text,Sample location,,,,\n'
-                    'SYNTH-002,2026-11-08,2026-11-08,Sample split shift,shift,06:00,09:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,A1,Sample duties,Sample reporting text,Sample location,,Synthetic supervisor,+1 246 555 0100,Synthetic contact,+1 246 555 0101\n'
-                    'SYNTH-002,2026-11-08,2026-11-08,Sample split shift,shift,12:00,16:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,A1,Sample duties,Sample reporting text,Sample location,,Synthetic supervisor,+1 246 555 0100,Synthetic contact,+1 246 555 0101',
+                     'SYNTH-001,2026-11-07,2026-11-08,Sample overnight shift,shift,21:00,05:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,S1,Confirmed sample meaning,Synthetic coworker,Sample reporting text,Sample location,,,,,\n'
+                     'SYNTH-002,2026-11-08,2026-11-08,Sample split shift,shift,06:00,09:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,A1,Sample duties,Synthetic coworker,Sample reporting text,Sample location,,Synthetic supervisor,+1 246 555 0100,Synthetic contact,+1 246 555 0101\n'
+                     'SYNTH-002,2026-11-08,2026-11-08,Sample split shift,shift,12:00,16:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,A1,Sample duties,Synthetic coworker,Sample reporting text,Sample location,,Synthetic supervisor,+1 246 555 0100,Synthetic contact,+1 246 555 0101',
                     style: Theme.of(context).textTheme.bodySmall
                         ?.copyWith(fontFamily: 'monospace'),
                   ),
@@ -1484,7 +1461,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
               ),
             ),
             const SizedBox(height: 16),
-            OutlinedButton.icon(
+            FilledButton.icon(
               onPressed: _loading || _saving ? null : _selectFile,
               icon: _loading
                   ? const SizedBox.square(
@@ -1492,36 +1469,12 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.file_open_outlined),
-              label: Text(
-                _loading ? 'Reading file…' : 'Choose .ics, .csv or .xlsx file',
-              ),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _loading || _saving ? null : _selectOcrFile,
-              icon: const Icon(Icons.document_scanner_outlined),
-              label: const Text('Read a PDF or schedule image offline'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _loading || _saving
-                  ? null
-                  : () => _selectRosterTable(),
-              icon: const Icon(Icons.grid_on_outlined),
-              label: const Text('Read a roster table'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _loading || _saving
-                  ? null
-                  : () => _selectOcrFile(examTimetable: true),
-              icon: const Icon(Icons.school_outlined),
-              label: const Text('Read an exam timetable'),
+              label: Text(_loading ? 'Reading file…' : 'Choose a file'),
             ),
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                'General OCR drafts only clear ISO date and 24-hour time rows. Exam timetable review can also read a named date, AM/PM start, course code and stated duration. Check every proposal; uncertain roster codes and layouts are never guessed.',
+                'Supported files: ICS, PDF, images, CSV and Excel. Dates or roster layouts that cannot be identified confidently are flagged for review instead of guessed.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
@@ -1534,6 +1487,37 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
               _NoticeCard(
                 icon: Icons.description_outlined,
                 message: 'Source: $_sourceName',
+              ),
+            ],
+            if (_rows.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(StudyShiftSpacing.cardPadding),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Document recognized',
+                        style: Theme.of(context).textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 8),
+                      _ImportSummaryLine(
+                        label: 'Detected type',
+                        value: _detectedImportType(),
+                      ),
+                      _ImportSummaryLine(
+                        label: 'Destination',
+                        value: _importDestination(),
+                      ),
+                      _ImportSummaryLine(
+                        label: 'Action',
+                        value: _importAction(),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ],
             if (_rosterDetection case final detection?
@@ -1602,20 +1586,8 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                     ? null
                     : () => _selectFile(appendToBatch: true),
                 icon: const Icon(Icons.playlist_add_rounded),
-                label: const Text('Add another calendar file to this batch'),
+                label: const Text('Add another file to this import'),
               ),
-              if (_rows.any(_isImportedWorkRow)) ...[
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _loading || _saving
-                      ? null
-                      : () => _selectRosterTable(appendToBatch: true),
-                  icon: const Icon(Icons.grid_on_outlined),
-                  label: const Text(
-                    'Read another roster table into this batch',
-                  ),
-                ),
-              ],
               if (rosterBatchCount > 1)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
@@ -2229,6 +2201,33 @@ class _NoticeCard extends StatelessWidget {
         icon ?? (error ? Icons.warning_amber_rounded : Icons.info_outline),
       ),
       title: Text(message),
+    ),
+  );
+}
+
+class _ImportSummaryLine extends StatelessWidget {
+  const _ImportSummaryLine({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: StudyShiftSpacing.x1),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 104,
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Expanded(child: Text(value)),
+      ],
     ),
   );
 }

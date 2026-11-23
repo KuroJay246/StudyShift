@@ -62,8 +62,8 @@ class SettingsPage extends ConsumerWidget {
           children: [
             ListTile(
               leading: const ShiftIcon('file-input'),
-              title: const Text('Import calendar'),
-              subtitle: const Text('Import ICS or CSV'),
+              title: const Text('Smart Import'),
+              subtitle: const Text('Schedules, rosters, exams and timetables'),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () => Navigator.of(context).push(
                 MaterialPageRoute<void>(

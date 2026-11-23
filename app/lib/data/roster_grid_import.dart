@@ -421,7 +421,7 @@ class RosterGridImportParser {
     final result = <RosterGridRow>[];
     for (final row in rows.skip(headerIndex + 1)) {
       final label = _rowLabel(
-        row.where((token) => token.centerX < firstDateBoundary),
+        row.where((token) => token.centerX <= firstDateBoundary),
       );
       if (label.length < 2) continue;
       // ML Kit groups a whole horizontal line together. A name-like token

@@ -68,7 +68,7 @@ void main() {
     expect(find.text('Search your schedule'), findsOneWidget);
     expect(find.text('Add or configure a widget'), findsOneWidget);
     expect(find.text('Manage reminders'), findsOneWidget);
-    expect(find.text('Import ICS or CSV'), findsOneWidget);
+    expect(find.text('Smart Import'), findsOneWidget);
     expect(find.text('Export as an iCalendar file'), findsOneWidget);
     expect(find.text('Location and Today’s forecast'), findsOneWidget);
   });
@@ -99,7 +99,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Import calendar'));
+    await tester.tap(find.text('Smart Import'));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Import history'));
     await tester.pumpAndSettle();
@@ -268,12 +268,12 @@ void main() {
       findsOneWidget,
     );
     expect(
-      find.descendant(of: planCard, matching: find.text('Import calendar')),
+      find.descendant(of: planCard, matching: find.text('Smart Import')),
       findsNothing,
     );
 
     final calendarCard = find
-        .ancestor(of: find.text('Import calendar'), matching: find.byType(Card))
+        .ancestor(of: find.text('Smart Import'), matching: find.byType(Card))
         .first;
     expect(tester.getSize(calendarCard).height, lessThan(220));
     expect(
