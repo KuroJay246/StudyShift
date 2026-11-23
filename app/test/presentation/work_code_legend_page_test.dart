@@ -7,6 +7,7 @@ import 'package:shift_study/data/schedule_database.dart';
 import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/domain/supervisor_profile.dart';
 import 'package:shift_study/domain/work_code_legend.dart';
+import 'package:shift_study/domain/work_occurrence_coworkers.dart';
 import 'package:shift_study/presentation/screens/work_code_legend_page.dart';
 
 void main() {
@@ -130,6 +131,65 @@ void main() {
     expect(find.textContaining('Synthetic morning shift'), findsOneWidget);
     expect(find.textContaining('Nov 18'), findsOneWidget);
     expect(find.byTooltip('Add coworker'), findsNothing);
+  });
+
+  testWidgets('coworkers section shows roster names for one shift occurrence', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+    const shiftId = 'synthetic-occurrence-coworker-shift';
+    final recurringShift = ScheduleItem(
+      id: shiftId,
+      kind: ScheduleKind.work,
+      workCategory: WorkCategory.shift,
+      title: 'Synthetic recurring ramp shift',
+      startDate: CivilDate(2026, 11, 23),
+      intervals: [EventInterval.sameDay(startMinute: 600, endMinute: 1020)],
+      code: 'A1',
+      recurrence: WeeklyRecurrence(
+        weekdays: {DateTime.monday},
+        until: CivilDate(2026, 12, 31),
+      ),
+    );
+    await container.read(scheduleRepositoryProvider).save(recurringShift);
+    await container.read(workOccurrenceCoworkerRepositoryProvider).restoreItems(
+      [
+        WorkOccurrenceCoworkers(
+          shiftItemId: shiftId,
+          occurrenceDate: CivilDate(2026, 11, 30),
+          rosterCode: 'A1',
+          coworkers: const ['Synthetic roster coworker'],
+        ),
+      ],
+      replaceExisting: false,
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: WorkCodeLegendPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Coworkers'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Synthetic roster coworker'), findsOneWidget);
+    expect(
+      find.textContaining('Synthetic recurring ramp shift'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Nov 30'), findsOneWidget);
+    expect(find.textContaining('A1'), findsOneWidget);
   });
 
   testWidgets('coworker roster cards stay compact with several names', (

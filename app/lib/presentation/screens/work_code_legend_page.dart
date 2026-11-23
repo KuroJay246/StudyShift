@@ -6,6 +6,7 @@ import '../../application/work_code_references.dart';
 import '../../domain/schedule.dart';
 import '../../domain/supervisor_profile.dart';
 import '../../domain/work_code_legend.dart';
+import '../../domain/work_occurrence_coworkers.dart';
 import '../design/studyshift_spacing.dart';
 
 class WorkCodeLegendPage extends ConsumerStatefulWidget {
@@ -16,6 +17,18 @@ class WorkCodeLegendPage extends ConsumerStatefulWidget {
 }
 
 enum _LegendSection { codes, supervisors, coworkers }
+
+class _CoworkerShiftData {
+  const _CoworkerShiftData({
+    required this.shift,
+    required this.date,
+    required this.coworkers,
+  });
+
+  final ScheduleItem shift;
+  final CivilDate date;
+  final List<String> coworkers;
+}
 
 class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
   final _search = TextEditingController();
@@ -188,7 +201,19 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                       'Roster coworker details could not be loaded.',
                       () => ref.invalidate(scheduleItemsProvider),
                     ),
-                    data: (items) => _buildCoworkerContent(items, query),
+                    data: (items) => ref
+                        .watch(workOccurrenceCoworkersProvider)
+                        .when(
+                          loading: () =>
+                              const Center(child: CircularProgressIndicator()),
+                          error: (error, _) => _loadFailure(
+                            'Occurrence coworker details could not be loaded.',
+                            () =>
+                                ref.invalidate(workOccurrenceCoworkersProvider),
+                          ),
+                          data: (assignments) =>
+                              _buildCoworkerContent(items, assignments, query),
+                        ),
                   ),
           ),
         ],
@@ -249,33 +274,83 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
     ),
   );
 
-  Widget _buildCoworkerContent(List<ScheduleItem> items, String query) {
+  Widget _buildCoworkerContent(
+    List<ScheduleItem> items,
+    List<WorkOccurrenceCoworkers> occurrenceAssignments,
+    String query,
+  ) {
+    final shiftsById = {
+      for (final item in items)
+        if (item.kind == ScheduleKind.work) item.id: item,
+    };
+    final coworkersByShiftDate = <String, List<String>>{};
+    final shiftDates = <String, (ScheduleItem, CivilDate)>{};
+    void addOccurrenceCoworkers(
+      ScheduleItem shift,
+      CivilDate date,
+      Iterable<String> names,
+    ) {
+      final key = '${shift.id}|$date';
+      shiftDates[key] = (shift, date);
+      final savedNames = coworkersByShiftDate.putIfAbsent(key, () => []);
+      for (final name in names) {
+        if (!savedNames.any(
+          (saved) => saved.trim().toLowerCase() == name.trim().toLowerCase(),
+        )) {
+          savedNames.add(name);
+        }
+      }
+    }
+
+    for (final shift in shiftsById.values) {
+      if (shift.coworkers.isNotEmpty) {
+        final key = '${shift.id}|${shift.startDate}';
+        shiftDates[key] = (shift, shift.startDate);
+        coworkersByShiftDate[key] = [...shift.coworkers];
+      }
+    }
+    for (final assignment in occurrenceAssignments) {
+      final shift = shiftsById[assignment.shiftItemId];
+      if (shift == null || assignment.coworkers.isEmpty) continue;
+      addOccurrenceCoworkers(
+        shift,
+        assignment.occurrenceDate,
+        assignment.coworkers,
+      );
+    }
+
     final shifts =
-        items
-            .where(
-              (item) =>
-                  item.kind == ScheduleKind.work && item.coworkers.isNotEmpty,
-            )
-            .where((item) {
+        shiftDates.entries
+            .map((entry) {
+              final (shift, date) = entry.value;
+              final coworkers = coworkersByShiftDate[entry.key]!..sort();
+              return _CoworkerShiftData(
+                shift: shift,
+                date: date,
+                coworkers: coworkers,
+              );
+            })
+            .where((entry) {
               if (query.isEmpty) return true;
               return [
-                item.title,
-                item.code ?? '',
-                item.startDate.toString(),
-                ...item.coworkers,
+                entry.shift.title,
+                entry.shift.code ?? '',
+                entry.date.toString(),
+                ...entry.coworkers,
               ].join(' ').toLowerCase().contains(query);
             })
             .toList()
           ..sort((a, b) {
-            final byDate = a.startDate.compareTo(b.startDate);
+            final byDate = a.date.compareTo(b.date);
             if (byDate != 0) return byDate;
-            final aStart = a.intervals.isEmpty
+            final aStart = a.shift.intervals.isEmpty
                 ? 0
-                : a.intervals.first.startMinute;
-            final bStart = b.intervals.isEmpty
+                : a.shift.intervals.first.startMinute;
+            final bStart = b.shift.intervals.isEmpty
                 ? 0
-                : b.intervals.first.startMinute;
-            return aStart.compareTo(bStart);
+                : b.shift.intervals.first.startMinute;
+            if (aStart != bStart) return aStart.compareTo(bStart);
+            return a.shift.title.compareTo(b.shift.title);
           });
     return Column(
       children: [
@@ -344,20 +419,27 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                   itemCount: shifts.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
-                    final shift = shifts[index];
+                    final entry = shifts[index];
+                    final shift = entry.shift;
                     final date = MaterialLocalizations.of(context)
                         .formatMediumDate(
                           DateTime(
-                            shift.startDate.year,
-                            shift.startDate.month,
-                            shift.startDate.day,
+                            entry.date.year,
+                            entry.date.month,
+                            entry.date.day,
                           ),
                         );
                     final time = shift.intervals
                         .map((interval) => _formatInterval(context, interval))
                         .join(' · ');
+                    final shiftDetails = [
+                      date,
+                      if (shift.code?.trim().isNotEmpty == true)
+                        shift.code!.trim(),
+                      if (time.isNotEmpty) time,
+                    ].join(' · ');
                     final coworkerCounts = <String, int>{};
-                    for (final coworker in shift.coworkers) {
+                    for (final coworker in entry.coworkers) {
                       coworkerCounts.update(
                         coworker,
                         (count) => count + 1,
@@ -393,7 +475,7 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                               ],
                             ),
                             const SizedBox(height: 4),
-                            Text('$date${time.isEmpty ? '' : ' · $time'}'),
+                            Text(shiftDetails),
                             const SizedBox(height: 8),
                             Semantics(
                               label:
