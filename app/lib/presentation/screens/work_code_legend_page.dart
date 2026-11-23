@@ -281,10 +281,37 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
-                    child: Text(
-                      query.isEmpty
-                          ? 'Coworkers appear here when a roster import matches their shift code and date, or when you add names to a shift.'
-                          : 'No matching coworkers.',
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 440),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            query.isEmpty
+                                ? Icons.groups_outlined
+                                : Icons.search_off_rounded,
+                            size: 44,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            query.isEmpty
+                                ? 'No coworker assignments yet'
+                                : 'No matching coworkers',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            query.isEmpty
+                                ? 'Coworkers appear here when a roster import matches names to a shift code and date, or when you add names to a shift.'
+                                : 'Try another name, shift code, or date.',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 )

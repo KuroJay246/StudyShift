@@ -38,6 +38,12 @@ void main() {
     expect(find.text('Coworkers'), findsOneWidget);
     expect(find.text('Search code or description'), findsOneWidget);
     expect(find.text('No work references saved'), findsOneWidget);
+
+    await tester.tap(find.text('Coworkers'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No coworker assignments yet'), findsOneWidget);
+    expect(find.text('Search coworkers or shifts'), findsOneWidget);
   });
 
   testWidgets('supervisor section adds a local contact profile', (
