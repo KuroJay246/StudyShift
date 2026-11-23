@@ -34,6 +34,30 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
     );
   }
 
+  Future<void> _editCodeFromDetails(
+    BuildContext sheetContext,
+    _CodeCardData data,
+    String summary,
+    List<String> flights,
+  ) async {
+    Navigator.pop(sheetContext);
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) return;
+    if (data.definitions.isEmpty) {
+      await _define(
+        WorkCodeLegend(
+          id: 'legend-observed-${(data.employerName ?? 'general').toLowerCase().replaceAll(RegExp(r'[^a-z0-9-]'), '-')}-${data.code.toLowerCase().replaceAll(RegExp(r'[^a-z0-9-]'), '-')}',
+          code: data.code,
+          employer: data.employerName ?? '',
+          assignmentDetails: summary,
+          flightIds: flights,
+        ),
+      );
+    } else {
+      await _edit(data.definitions.first);
+    }
+  }
+
   Future<void> _define(WorkCodeLegend suggestion) async {
     await showDialog<void>(
       context: context,
@@ -774,52 +798,7 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  if (data.definitions.isNotEmpty || data.hasRosterObservation)
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Tooltip(
-                          message: data.definitions.isEmpty
-                              ? 'Define ${data.code}'
-                              : 'Edit ${data.code}',
-                          child: TextButton.icon(
-                            onPressed: () => data.definitions.isEmpty
-                                ? _define(
-                                    WorkCodeLegend(
-                                      id: 'legend-observed-${(data.employerName ?? 'general').toLowerCase().replaceAll(RegExp(r'[^a-z0-9-]'), '-')}-${data.code.toLowerCase().replaceAll(RegExp(r'[^a-z0-9-]'), '-')}',
-                                      code: data.code,
-                                      employer: data.employerName ?? '',
-                                      assignmentDetails: summary,
-                                      flightIds: flights,
-                                    ),
-                                  )
-                                : _edit(data.definitions.first),
-                            icon: Icon(
-                              data.definitions.isEmpty
-                                  ? Icons.add_rounded
-                                  : Icons.edit_outlined,
-                              size: 18,
-                            ),
-                            label: Text(
-                              data.definitions.isEmpty ? 'Define' : 'Edit',
-                            ),
-                          ),
-                        ),
-                        if (data.definitions.isNotEmpty)
-                          PopupMenuButton<String>(
-                            tooltip: 'Actions for ${data.code}',
-                            onSelected: (_) => _delete(data.definitions.first),
-                            itemBuilder: (_) => const [
-                              PopupMenuItem(
-                                value: 'delete',
-                                child: Text('Remove definition'),
-                              ),
-                            ],
-                          ),
-                      ],
-                    )
-                  else
-                    const Icon(Icons.chevron_right_rounded),
+                  const Icon(Icons.chevron_right_rounded),
                 ],
               ),
               if (showEmployer && data.employerName != null)
@@ -960,6 +939,47 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                 Text(
                   'Typical roster details · not live flight assignments',
                   style: Theme.of(sheetContext).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _editCodeFromDetails(
+                          sheetContext,
+                          data,
+                          _groupSummary(details),
+                          flights,
+                        ),
+                        icon: Icon(
+                          data.definitions.isEmpty
+                              ? Icons.add_rounded
+                              : Icons.edit_outlined,
+                        ),
+                        label: Text(
+                          data.definitions.isEmpty
+                              ? 'Define shift code'
+                              : 'Edit shift code',
+                        ),
+                      ),
+                    ),
+                    if (data.definitions.isNotEmpty)
+                      PopupMenuButton<String>(
+                        tooltip: 'Actions for ${data.code}',
+                        onSelected: (_) {
+                          Navigator.pop(sheetContext);
+                          Future<void>.delayed(Duration.zero, () {
+                            if (mounted) _delete(data.definitions.first);
+                          });
+                        },
+                        itemBuilder: (_) => const [
+                          PopupMenuItem(
+                            value: 'delete',
+                            child: Text('Remove definition'),
+                          ),
+                        ],
+                      ),
+                  ],
                 ),
                 Align(
                   alignment: Alignment.center,

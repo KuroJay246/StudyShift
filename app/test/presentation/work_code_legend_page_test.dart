@@ -712,7 +712,7 @@ void main() {
     expect(find.text('SYN200'), findsOneWidget);
   });
 
-  testWidgets('saved code card exposes editing and preserves its flight list', (
+  testWidgets('saved code details expose editing and preserve flight list', (
     tester,
   ) async {
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
@@ -742,8 +742,10 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Edit QX'), findsOneWidget);
-    await tester.tap(find.byTooltip('Edit QX'));
+    expect(find.byTooltip('Edit QX'), findsNothing);
+    await tester.tap(find.text('Synthetic ramp reference'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit shift code'));
     await tester.pumpAndSettle();
     expect(find.text('Save shift code'), findsOneWidget);
     expect(
@@ -764,7 +766,9 @@ void main() {
     );
   });
 
-  testWidgets('roster-only code exposes a clear define action', (tester) async {
+  testWidgets('roster-only code defines from its details sheet', (
+    tester,
+  ) async {
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
     final container = ProviderContainer(
       overrides: [
@@ -800,9 +804,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byTooltip('Define QX'), findsOneWidget);
-    expect(find.byTooltip('Actions for QX'), findsNothing);
-    await tester.tap(find.byTooltip('Define QX'));
+    expect(find.byTooltip('Define QX'), findsNothing);
+    expect(find.text('Define shift code'), findsNothing);
+    await tester.tap(find.text('Synthetic ramp handling'));
+    await tester.pumpAndSettle();
+    expect(find.text('Possible flights'), findsOneWidget);
+    expect(find.text('Define shift code'), findsOneWidget);
+    await tester.tap(find.text('Define shift code'));
     await tester.pumpAndSettle();
     expect(find.text('Add shift code'), findsOneWidget);
   });
