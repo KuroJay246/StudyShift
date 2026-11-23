@@ -93,6 +93,18 @@ class WorkOvertimeRows extends Table {
   Set<Column<Object>> get primaryKey => {shiftItemId, occurrenceDate};
 }
 
+class WorkOccurrenceCoworkerRows extends Table {
+  TextColumn get shiftItemId =>
+      text().references(ScheduleRows, #id, onDelete: KeyAction.cascade)();
+  TextColumn get occurrenceDate => text()();
+  TextColumn get rosterCode => text()();
+  TextColumn get employerName => text().nullable()();
+  TextColumn get coworkersJson => text()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {shiftItemId, occurrenceDate};
+}
+
 class WorkCodeLegendRows extends Table {
   TextColumn get id => text()();
   TextColumn get employer => text()();
@@ -135,6 +147,7 @@ class PreferenceRows extends Table {
     ScheduleImportHistoryRows,
     SupervisorProfileRows,
     WorkOvertimeRows,
+    WorkOccurrenceCoworkerRows,
   ],
 )
 class ScheduleDatabase extends _$ScheduleDatabase {
@@ -142,7 +155,7 @@ class ScheduleDatabase extends _$ScheduleDatabase {
   ScheduleDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 24;
+  int get schemaVersion => 25;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -245,6 +258,7 @@ class ScheduleDatabase extends _$ScheduleDatabase {
       if (from >= 23 && from < 24) {
         await m.addColumn(workOvertimeRows, workOvertimeRows.isCompleted);
       }
+      if (from < 25) await m.createTable(workOccurrenceCoworkerRows);
     },
     beforeOpen: (details) async {
       await customStatement('PRAGMA foreign_keys = ON');

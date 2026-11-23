@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 
 import '../domain/academic_term.dart';
 import '../domain/schedule.dart';
+import '../domain/work_occurrence_coworkers.dart';
 import 'schedule_database.dart';
 import 'schedule_import_history_repository.dart';
 
@@ -200,13 +201,25 @@ class ScheduleRepository {
   /// Rows are reloaded and validated inside the transaction so a removed or
   /// changed shift cannot leave a partially applied roster update.
   Future<void> updateCoworkersAtomically(
-    List<ScheduleItem> reviewedItems,
-  ) async {
-    if (reviewedItems.isEmpty) return;
+    List<ScheduleItem> reviewedItems, {
+    List<WorkOccurrenceCoworkers> occurrenceUpdates = const [],
+  }) async {
+    if (reviewedItems.isEmpty && occurrenceUpdates.isEmpty) return;
     final ids = reviewedItems.map((item) => item.id).toSet();
     if (ids.length != reviewedItems.length) {
       throw const FormatException(
         'The coworker roster contains a duplicate shift match.',
+      );
+    }
+    final occurrenceKeys = occurrenceUpdates
+        .map((update) => '${update.shiftItemId}|${update.occurrenceDate}')
+        .toSet();
+    if (occurrenceKeys.length != occurrenceUpdates.length ||
+        ids.any(
+          (id) => occurrenceUpdates.any((update) => update.shiftItemId == id),
+        )) {
+      throw const FormatException(
+        'The coworker roster contains a duplicate shift occurrence match.',
       );
     }
     await database.transaction(() async {
@@ -225,7 +238,44 @@ class ScheduleRepository {
       for (final updated in updates) {
         await save(updated);
       }
+      for (final update in occurrenceUpdates) {
+        final current = byId[update.shiftItemId];
+        final currentEmployer = current?.employerName?.trim().toLowerCase();
+        final reviewedEmployer = update.employerName?.trim().toLowerCase();
+        if (current == null ||
+            current.kind != ScheduleKind.work ||
+            current.workCategory != WorkCategory.shift ||
+            current.hasNoTime ||
+            !_isOccurrence(current, update.occurrenceDate) ||
+            current.code?.trim().toUpperCase() !=
+                update.rosterCode.trim().toUpperCase() ||
+            currentEmployer != reviewedEmployer) {
+          throw const FormatException(
+            'A matched shift occurrence changed after review. Reopen the roster preview and try again.',
+          );
+        }
+        await database
+            .into(database.workOccurrenceCoworkerRows)
+            .insertOnConflictUpdate(
+              WorkOccurrenceCoworkerRowsCompanion.insert(
+                shiftItemId: update.shiftItemId,
+                occurrenceDate: update.occurrenceDate.toString(),
+                rosterCode: update.rosterCode,
+                employerName: Value(update.employerName),
+                coworkersJson: jsonEncode(update.coworkers),
+              ),
+            );
+      }
     });
+  }
+
+  bool _isOccurrence(ScheduleItem item, CivilDate date) {
+    final recurrence = item.recurrence;
+    if (recurrence == null) return date == item.startDate;
+    return date.compareTo(item.startDate) >= 0 &&
+        (recurrence.until == null || date.compareTo(recurrence.until!) <= 0) &&
+        recurrence.weekdays.contains(date.weekday) &&
+        !recurrence.exceptionDates.contains(date);
   }
 
   Future<ScheduleRestoreResult> restoreItems(

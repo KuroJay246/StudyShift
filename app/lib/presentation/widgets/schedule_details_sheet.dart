@@ -6,6 +6,7 @@ import '../../application/dependencies.dart';
 import '../../domain/schedule.dart';
 import '../../domain/schedule_engine.dart';
 import '../../domain/work_overtime.dart';
+import '../../domain/work_occurrence_coworkers.dart';
 import '../../platform/clock_alarm_bridge.dart';
 import '../../platform/local_reminders.dart';
 import '../schedule_format.dart';
@@ -287,9 +288,11 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
             .undoOccurrenceCompletion(sourceItem, occurrenceDate);
         ref.invalidate(workOvertimeAdjustmentsProvider);
       } else {
-        await ref.read(scheduleRepositoryProvider).save(
-          sourceItem.copyWith(isCompleted: false, actualIntervals: null),
-        );
+        await ref
+            .read(scheduleRepositoryProvider)
+            .save(
+              sourceItem.copyWith(isCompleted: false, actualIntervals: null),
+            );
       }
       ref.invalidate(scheduleItemsProvider);
       if (!context.mounted) return;
@@ -378,6 +381,24 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
     final detailDate = recurrence == null
         ? detailItem.startDate
         : occurrenceDate ?? detailItem.startDate;
+    final occurrenceCoworkerRows =
+        ref.watch(workOccurrenceCoworkersProvider).asData?.value ??
+        const <WorkOccurrenceCoworkers>[];
+    final occurrenceCoworkers = occurrenceCoworkerRows
+        .where(
+          (entry) =>
+              entry.shiftItemId == detailItem.id &&
+              entry.occurrenceDate == detailDate,
+        )
+        .expand((entry) => entry.coworkers);
+    final displayedCoworkers = <String>[
+      ...detailItem.coworkers,
+      for (final name in occurrenceCoworkers)
+        if (!detailItem.coworkers.any(
+          (saved) => saved.trim().toLowerCase() == name.trim().toLowerCase(),
+        ))
+          name,
+    ];
     final overtimeAdjustments =
         ref.watch(workOvertimeAdjustmentsProvider).asData?.value ??
         const <WorkOvertimeAdjustment>[];
@@ -880,10 +901,10 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
                   icon: Icons.phone_outlined,
                   text: 'Contact phone: ${detailItem.contactPhone}',
                 ),
-              if (detailItem.coworkers.isNotEmpty)
+              if (displayedCoworkers.isNotEmpty)
                 _DetailRow(
                   icon: Icons.groups_outlined,
-                  text: 'Working with: ${detailItem.coworkers.join(', ')}',
+                  text: 'Working with: ${displayedCoworkers.join(', ')}',
                 ),
               if (detailItem.importProvenance case final provenance?) ...[
                 const SizedBox(height: 12),

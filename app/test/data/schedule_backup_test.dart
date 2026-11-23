@@ -11,6 +11,7 @@ import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/domain/supervisor_profile.dart';
 import 'package:shift_study/domain/work_code_legend.dart';
 import 'package:shift_study/domain/work_overtime.dart';
+import 'package:shift_study/domain/work_occurrence_coworkers.dart';
 
 void main() {
   const codec = ScheduleBackupCodec();
@@ -164,6 +165,15 @@ void main() {
             isCompleted: true,
           ),
         ],
+        occurrenceCoworkers: [
+          WorkOccurrenceCoworkers(
+            shiftItemId: 'synthetic-overnight',
+            occurrenceDate: CivilDate(2026, 11, 6),
+            rosterCode: 'QX',
+            employerName: 'Synthetic Air',
+            coworkers: const ['Synthetic Ramp Team'],
+          ),
+        ],
       );
 
       expect(utf8.decode(bytes), isNot(contains('Synthetic recurring class')));
@@ -217,6 +227,9 @@ void main() {
           isCompleted: true,
         ),
       ]);
+      expect(decoded.occurrenceCoworkers.single.coworkers, [
+        'Synthetic Ramp Team',
+      ]);
       expect(decoded.items[1].academicTermId, 'synthetic-term-1');
       expect(
         decoded.items.first.reportingInstruction,
@@ -261,11 +274,46 @@ void main() {
     },
   );
 
-  test('new backup envelope uses version 2 for multi-window data', () async {
+  test('new backup envelope uses version 3 for occurrence coworkers', () async {
     final bytes = await codec.encode(const [], passphrase: passphrase);
     final envelope = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
-    expect(envelope['version'], 2);
+    expect(envelope['version'], 3);
   });
+
+  test(
+    'backup rejects occurrence coworkers on an invalid shift date',
+    () async {
+      await expectLater(
+        codec.encode(
+          [
+            ScheduleItem(
+              id: 'synthetic-once-shift',
+              kind: ScheduleKind.work,
+              workCategory: WorkCategory.shift,
+              title: 'Synthetic one-time shift',
+              startDate: CivilDate(2026, 11, 24),
+              intervals: [
+                EventInterval.sameDay(startMinute: 600, endMinute: 1020),
+              ],
+              code: 'A1',
+              employerName: 'Synthetic employer',
+            ),
+          ],
+          passphrase: passphrase,
+          occurrenceCoworkers: [
+            WorkOccurrenceCoworkers(
+              shiftItemId: 'synthetic-once-shift',
+              occurrenceDate: CivilDate(2026, 11, 25),
+              rosterCode: 'A1',
+              employerName: 'Synthetic employer',
+              coworkers: const ['Synthetic Sam'],
+            ),
+          ],
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    },
+  );
 
   test('backup rejects overtime references to missing shifts', () async {
     await expectLater(

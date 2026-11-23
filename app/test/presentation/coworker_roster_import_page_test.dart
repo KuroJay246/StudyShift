@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shift_study/application/dependencies.dart';
 import 'package:shift_study/data/schedule_database.dart';
 import 'package:shift_study/data/schedule_repository.dart';
+import 'package:shift_study/data/work_occurrence_coworker_repository.dart';
 import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/presentation/screens/coworker_roster_import_page.dart';
 
@@ -158,6 +159,78 @@ void main() {
     expect(updated.code, original.code);
     expect(updated.notes, original.notes);
     expect(updated.coworkers, ['Synthetic Lee', 'Synthetic Sam']);
+  });
+
+  testWidgets('imports coworkers onto one recurring shift date only', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    final repository = ScheduleRepository(database);
+    final original = ScheduleItem(
+      id: 'existing-weekly-shift',
+      kind: ScheduleKind.work,
+      title: 'Synthetic weekly shift',
+      startDate: const CivilDate(2026, 11, 17),
+      intervals: const [
+        EventInterval(
+          startDayOffset: 0,
+          startMinute: 600,
+          endDayOffset: 0,
+          endMinute: 1020,
+        ),
+      ],
+      timeZoneId: 'America/Barbados',
+      code: 'A1',
+      employerName: 'Synthetic employer',
+      workCategory: WorkCategory.shift,
+      recurrence: WeeklyRecurrence(
+        weekdays: {DateTime.tuesday},
+        until: const CivilDate(2026, 12, 31),
+      ),
+    );
+    await repository.save(original);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          return {
+            'name': 'synthetic-weekly-coworkers.csv',
+            'bytes': Uint8List.fromList(utf8.encode(csv)),
+          };
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [scheduleDatabaseProvider.overrideWithValue(database)],
+        child: const MaterialApp(home: CoworkerRosterImportPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose coworker roster file'));
+    await tester.pumpAndSettle();
+    expect(find.text('1 matched · 1 unmatched · 0 ambiguous'), findsOneWidget);
+    await tester.drag(find.byType(ListView), const Offset(0, -600));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Update coworkers on 1 shift'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Update coworkers'));
+    await tester.pumpAndSettle();
+
+    final saved = (await repository.getItems()).single;
+    expect(saved.id, original.id);
+    expect(saved.startDate, original.startDate);
+    expect(saved.coworkers, isEmpty);
+    final occurrence = await WorkOccurrenceCoworkerRepository(database)
+        .getForOccurrence(saved.id, const CivilDate(2026, 11, 24));
+    expect(occurrence?.coworkers, ['Synthetic Lee', 'Synthetic Sam']);
+    expect(
+      await WorkOccurrenceCoworkerRepository(database)
+          .getForOccurrence(saved.id, const CivilDate(2026, 12, 1)),
+      isNull,
+    );
   });
 }
 

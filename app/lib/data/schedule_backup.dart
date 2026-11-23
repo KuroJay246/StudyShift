@@ -9,6 +9,7 @@ import '../domain/schedule.dart';
 import '../domain/supervisor_profile.dart';
 import '../domain/work_code_legend.dart';
 import '../domain/work_overtime.dart';
+import '../domain/work_occurrence_coworkers.dart';
 
 class ScheduleBackup {
   const ScheduleBackup({
@@ -18,6 +19,7 @@ class ScheduleBackup {
     this.academicTerms = const [],
     this.supervisors = const [],
     this.overtimeAdjustments = const [],
+    this.occurrenceCoworkers = const [],
   });
 
   final DateTime createdAt;
@@ -26,6 +28,7 @@ class ScheduleBackup {
   final List<AcademicTerm> academicTerms;
   final List<SupervisorProfile> supervisors;
   final List<WorkOvertimeAdjustment> overtimeAdjustments;
+  final List<WorkOccurrenceCoworkers> occurrenceCoworkers;
 }
 
 /// A portable, authenticated, passphrase-encrypted schedule backup.
@@ -38,8 +41,8 @@ class ScheduleBackupCodec {
   static const _saltBytes = 16;
   static const _format = 'shift-study-encrypted-backup';
   static const _payloadFormat = 'shift-study-schedule';
-  static const _currentVersion = 2;
-  static const _supportedVersions = {1, _currentVersion};
+  static const _currentVersion = 3;
+  static const _supportedVersions = {1, 2, _currentVersion};
 
   static String _aadFor(int version) => 'ShiftStudy.ScheduleBackup.v$version';
 
@@ -51,6 +54,7 @@ class ScheduleBackupCodec {
     List<AcademicTerm> academicTerms = const [],
     List<SupervisorProfile> supervisors = const [],
     List<WorkOvertimeAdjustment> overtimeAdjustments = const [],
+    List<WorkOccurrenceCoworkers> occurrenceCoworkers = const [],
   }) async {
     _validatePassphrase(passphrase);
     if (items.length > maxItems) {
@@ -59,6 +63,7 @@ class ScheduleBackupCodec {
     _checkUniqueIds(items);
     _checkTermReferences(items, academicTerms);
     _checkOvertimeReferences(items, overtimeAdjustments);
+    _checkOccurrenceCoworkerReferences(items, occurrenceCoworkers);
     if (supervisors.length > 1000) {
       throw const FormatException(
         'This schedule contains too many supervisors.',
@@ -105,6 +110,16 @@ class ScheduleBackupCodec {
               'occurrenceDate': adjustment.occurrenceDate.toString(),
               'minutes': adjustment.minutes,
               'isCompleted': adjustment.isCompleted,
+            },
+        ],
+        'workOccurrenceCoworkers': [
+          for (final entry in occurrenceCoworkers)
+            {
+              'shiftItemId': entry.shiftItemId,
+              'occurrenceDate': entry.occurrenceDate.toString(),
+              'rosterCode': entry.rosterCode,
+              'employerName': entry.employerName,
+              'coworkers': entry.coworkers,
             },
         ],
         'academicTerms': [for (final term in academicTerms) _encodeTerm(term)],
@@ -257,7 +272,9 @@ class ScheduleBackupCodec {
             payload['workCodeLegends'] is! List) ||
         (payload['academicTerms'] != null &&
             payload['academicTerms'] is! List) ||
-        (payload['supervisors'] != null && payload['supervisors'] is! List)) {
+        (payload['supervisors'] != null && payload['supervisors'] is! List) ||
+        (payload['workOccurrenceCoworkers'] != null &&
+            payload['workOccurrenceCoworkers'] is! List)) {
       throw const FormatException('Backup contents are not supported.');
     }
     final createdAt = DateTime.tryParse(payload['createdAt']! as String);
@@ -330,6 +347,37 @@ class ScheduleBackupCodec {
       rethrow;
     } on Object {
       throw const FormatException('Backup overtime entries are invalid.');
+    }
+    final occurrenceCoworkers = <WorkOccurrenceCoworkers>[];
+    final rawOccurrenceCoworkers =
+        payload['workOccurrenceCoworkers'] as List? ?? const [];
+    if (rawOccurrenceCoworkers.length > maxItems) {
+      throw const FormatException(
+        'This backup contains too many shift coworker lists.',
+      );
+    }
+    try {
+      for (final raw in rawOccurrenceCoworkers) {
+        final value = _readObject(raw, 'Backup shift coworkers are invalid.');
+        final names = value['coworkers'];
+        if (names is! List || names.any((name) => name is! String)) {
+          throw const FormatException('Backup shift coworkers are invalid.');
+        }
+        occurrenceCoworkers.add(
+          WorkOccurrenceCoworkers(
+            shiftItemId: _requiredString(value, 'shiftItemId', 256),
+            occurrenceDate: _readDateValue(value['occurrenceDate']),
+            rosterCode: _requiredString(value, 'rosterCode', 128),
+            employerName: value['employerName'] as String?,
+            coworkers: names.cast<String>(),
+          ),
+        );
+      }
+      _checkOccurrenceCoworkerReferences(items, occurrenceCoworkers);
+    } on FormatException {
+      rethrow;
+    } on Object {
+      throw const FormatException('Backup shift coworkers are invalid.');
     }
     final legends = <WorkCodeLegend>[];
     final rawLegends = payload['workCodeLegends'] as List? ?? const [];
@@ -411,6 +459,7 @@ class ScheduleBackupCodec {
       academicTerms: terms,
       supervisors: supervisors,
       overtimeAdjustments: overtimeAdjustments,
+      occurrenceCoworkers: occurrenceCoworkers,
     );
   }
 
@@ -472,6 +521,46 @@ class ScheduleBackupCodec {
           shift.intervals.isEmpty ||
           !seen.add(key)) {
         throw const FormatException('Backup overtime entries are invalid.');
+      }
+    }
+  }
+
+  static void _checkOccurrenceCoworkerReferences(
+    List<ScheduleItem> items,
+    List<WorkOccurrenceCoworkers> assignments,
+  ) {
+    if (assignments.length > maxItems) {
+      throw const FormatException(
+        'This schedule contains too many shift coworker lists.',
+      );
+    }
+    final byId = {for (final item in items) item.id: item};
+    final seen = <String>{};
+    for (final assignment in assignments) {
+      final shift = byId[assignment.shiftItemId];
+      final recurrence = shift?.recurrence;
+      final date = assignment.occurrenceDate;
+      final validOccurrence =
+          shift != null &&
+          (recurrence == null
+              ? date == shift.startDate
+              : date.compareTo(shift.startDate) >= 0 &&
+                    (recurrence.until == null ||
+                        date.compareTo(recurrence.until!) <= 0) &&
+                    recurrence.weekdays.contains(date.weekday) &&
+                    !recurrence.exceptionDates.contains(date));
+      final key = '${assignment.shiftItemId}|$date';
+      if (!validOccurrence ||
+          shift.kind != ScheduleKind.work ||
+          shift.workCategory != WorkCategory.shift ||
+          shift.hasNoTime ||
+          shift.intervals.isEmpty ||
+          shift.code?.trim().toUpperCase() !=
+              assignment.rosterCode.trim().toUpperCase() ||
+          shift.employerName?.trim().toLowerCase() !=
+              assignment.employerName?.trim().toLowerCase() ||
+          !seen.add(key)) {
+        throw const FormatException('Backup shift coworkers are invalid.');
       }
     }
   }

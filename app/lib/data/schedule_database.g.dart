@@ -4835,6 +4835,413 @@ class WorkOvertimeRowsCompanion extends UpdateCompanion<WorkOvertimeRow> {
   }
 }
 
+class $WorkOccurrenceCoworkerRowsTable extends WorkOccurrenceCoworkerRows
+    with
+        TableInfo<$WorkOccurrenceCoworkerRowsTable, WorkOccurrenceCoworkerRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $WorkOccurrenceCoworkerRowsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _shiftItemIdMeta = const VerificationMeta(
+    'shiftItemId',
+  );
+  @override
+  late final GeneratedColumn<String> shiftItemId = GeneratedColumn<String>(
+    'shift_item_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES schedule_rows (id) ON DELETE CASCADE',
+    ),
+  );
+  static const VerificationMeta _occurrenceDateMeta = const VerificationMeta(
+    'occurrenceDate',
+  );
+  @override
+  late final GeneratedColumn<String> occurrenceDate = GeneratedColumn<String>(
+    'occurrence_date',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _rosterCodeMeta = const VerificationMeta(
+    'rosterCode',
+  );
+  @override
+  late final GeneratedColumn<String> rosterCode = GeneratedColumn<String>(
+    'roster_code',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _employerNameMeta = const VerificationMeta(
+    'employerName',
+  );
+  @override
+  late final GeneratedColumn<String> employerName = GeneratedColumn<String>(
+    'employer_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _coworkersJsonMeta = const VerificationMeta(
+    'coworkersJson',
+  );
+  @override
+  late final GeneratedColumn<String> coworkersJson = GeneratedColumn<String>(
+    'coworkers_json',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    shiftItemId,
+    occurrenceDate,
+    rosterCode,
+    employerName,
+    coworkersJson,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'work_occurrence_coworker_rows';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<WorkOccurrenceCoworkerRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('shift_item_id')) {
+      context.handle(
+        _shiftItemIdMeta,
+        shiftItemId.isAcceptableOrUnknown(
+          data['shift_item_id']!,
+          _shiftItemIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_shiftItemIdMeta);
+    }
+    if (data.containsKey('occurrence_date')) {
+      context.handle(
+        _occurrenceDateMeta,
+        occurrenceDate.isAcceptableOrUnknown(
+          data['occurrence_date']!,
+          _occurrenceDateMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_occurrenceDateMeta);
+    }
+    if (data.containsKey('roster_code')) {
+      context.handle(
+        _rosterCodeMeta,
+        rosterCode.isAcceptableOrUnknown(data['roster_code']!, _rosterCodeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_rosterCodeMeta);
+    }
+    if (data.containsKey('employer_name')) {
+      context.handle(
+        _employerNameMeta,
+        employerName.isAcceptableOrUnknown(
+          data['employer_name']!,
+          _employerNameMeta,
+        ),
+      );
+    }
+    if (data.containsKey('coworkers_json')) {
+      context.handle(
+        _coworkersJsonMeta,
+        coworkersJson.isAcceptableOrUnknown(
+          data['coworkers_json']!,
+          _coworkersJsonMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_coworkersJsonMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {shiftItemId, occurrenceDate};
+  @override
+  WorkOccurrenceCoworkerRow map(
+    Map<String, dynamic> data, {
+    String? tablePrefix,
+  }) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return WorkOccurrenceCoworkerRow(
+      shiftItemId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}shift_item_id'],
+      )!,
+      occurrenceDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}occurrence_date'],
+      )!,
+      rosterCode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}roster_code'],
+      )!,
+      employerName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}employer_name'],
+      ),
+      coworkersJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}coworkers_json'],
+      )!,
+    );
+  }
+
+  @override
+  $WorkOccurrenceCoworkerRowsTable createAlias(String alias) {
+    return $WorkOccurrenceCoworkerRowsTable(attachedDatabase, alias);
+  }
+}
+
+class WorkOccurrenceCoworkerRow extends DataClass
+    implements Insertable<WorkOccurrenceCoworkerRow> {
+  final String shiftItemId;
+  final String occurrenceDate;
+  final String rosterCode;
+  final String? employerName;
+  final String coworkersJson;
+  const WorkOccurrenceCoworkerRow({
+    required this.shiftItemId,
+    required this.occurrenceDate,
+    required this.rosterCode,
+    this.employerName,
+    required this.coworkersJson,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['shift_item_id'] = Variable<String>(shiftItemId);
+    map['occurrence_date'] = Variable<String>(occurrenceDate);
+    map['roster_code'] = Variable<String>(rosterCode);
+    if (!nullToAbsent || employerName != null) {
+      map['employer_name'] = Variable<String>(employerName);
+    }
+    map['coworkers_json'] = Variable<String>(coworkersJson);
+    return map;
+  }
+
+  WorkOccurrenceCoworkerRowsCompanion toCompanion(bool nullToAbsent) {
+    return WorkOccurrenceCoworkerRowsCompanion(
+      shiftItemId: Value(shiftItemId),
+      occurrenceDate: Value(occurrenceDate),
+      rosterCode: Value(rosterCode),
+      employerName: employerName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(employerName),
+      coworkersJson: Value(coworkersJson),
+    );
+  }
+
+  factory WorkOccurrenceCoworkerRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return WorkOccurrenceCoworkerRow(
+      shiftItemId: serializer.fromJson<String>(json['shiftItemId']),
+      occurrenceDate: serializer.fromJson<String>(json['occurrenceDate']),
+      rosterCode: serializer.fromJson<String>(json['rosterCode']),
+      employerName: serializer.fromJson<String?>(json['employerName']),
+      coworkersJson: serializer.fromJson<String>(json['coworkersJson']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'shiftItemId': serializer.toJson<String>(shiftItemId),
+      'occurrenceDate': serializer.toJson<String>(occurrenceDate),
+      'rosterCode': serializer.toJson<String>(rosterCode),
+      'employerName': serializer.toJson<String?>(employerName),
+      'coworkersJson': serializer.toJson<String>(coworkersJson),
+    };
+  }
+
+  WorkOccurrenceCoworkerRow copyWith({
+    String? shiftItemId,
+    String? occurrenceDate,
+    String? rosterCode,
+    Value<String?> employerName = const Value.absent(),
+    String? coworkersJson,
+  }) => WorkOccurrenceCoworkerRow(
+    shiftItemId: shiftItemId ?? this.shiftItemId,
+    occurrenceDate: occurrenceDate ?? this.occurrenceDate,
+    rosterCode: rosterCode ?? this.rosterCode,
+    employerName: employerName.present ? employerName.value : this.employerName,
+    coworkersJson: coworkersJson ?? this.coworkersJson,
+  );
+  WorkOccurrenceCoworkerRow copyWithCompanion(
+    WorkOccurrenceCoworkerRowsCompanion data,
+  ) {
+    return WorkOccurrenceCoworkerRow(
+      shiftItemId: data.shiftItemId.present
+          ? data.shiftItemId.value
+          : this.shiftItemId,
+      occurrenceDate: data.occurrenceDate.present
+          ? data.occurrenceDate.value
+          : this.occurrenceDate,
+      rosterCode: data.rosterCode.present
+          ? data.rosterCode.value
+          : this.rosterCode,
+      employerName: data.employerName.present
+          ? data.employerName.value
+          : this.employerName,
+      coworkersJson: data.coworkersJson.present
+          ? data.coworkersJson.value
+          : this.coworkersJson,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WorkOccurrenceCoworkerRow(')
+          ..write('shiftItemId: $shiftItemId, ')
+          ..write('occurrenceDate: $occurrenceDate, ')
+          ..write('rosterCode: $rosterCode, ')
+          ..write('employerName: $employerName, ')
+          ..write('coworkersJson: $coworkersJson')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    shiftItemId,
+    occurrenceDate,
+    rosterCode,
+    employerName,
+    coworkersJson,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is WorkOccurrenceCoworkerRow &&
+          other.shiftItemId == this.shiftItemId &&
+          other.occurrenceDate == this.occurrenceDate &&
+          other.rosterCode == this.rosterCode &&
+          other.employerName == this.employerName &&
+          other.coworkersJson == this.coworkersJson);
+}
+
+class WorkOccurrenceCoworkerRowsCompanion
+    extends UpdateCompanion<WorkOccurrenceCoworkerRow> {
+  final Value<String> shiftItemId;
+  final Value<String> occurrenceDate;
+  final Value<String> rosterCode;
+  final Value<String?> employerName;
+  final Value<String> coworkersJson;
+  final Value<int> rowid;
+  const WorkOccurrenceCoworkerRowsCompanion({
+    this.shiftItemId = const Value.absent(),
+    this.occurrenceDate = const Value.absent(),
+    this.rosterCode = const Value.absent(),
+    this.employerName = const Value.absent(),
+    this.coworkersJson = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  WorkOccurrenceCoworkerRowsCompanion.insert({
+    required String shiftItemId,
+    required String occurrenceDate,
+    required String rosterCode,
+    this.employerName = const Value.absent(),
+    required String coworkersJson,
+    this.rowid = const Value.absent(),
+  }) : shiftItemId = Value(shiftItemId),
+       occurrenceDate = Value(occurrenceDate),
+       rosterCode = Value(rosterCode),
+       coworkersJson = Value(coworkersJson);
+  static Insertable<WorkOccurrenceCoworkerRow> custom({
+    Expression<String>? shiftItemId,
+    Expression<String>? occurrenceDate,
+    Expression<String>? rosterCode,
+    Expression<String>? employerName,
+    Expression<String>? coworkersJson,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (shiftItemId != null) 'shift_item_id': shiftItemId,
+      if (occurrenceDate != null) 'occurrence_date': occurrenceDate,
+      if (rosterCode != null) 'roster_code': rosterCode,
+      if (employerName != null) 'employer_name': employerName,
+      if (coworkersJson != null) 'coworkers_json': coworkersJson,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  WorkOccurrenceCoworkerRowsCompanion copyWith({
+    Value<String>? shiftItemId,
+    Value<String>? occurrenceDate,
+    Value<String>? rosterCode,
+    Value<String?>? employerName,
+    Value<String>? coworkersJson,
+    Value<int>? rowid,
+  }) {
+    return WorkOccurrenceCoworkerRowsCompanion(
+      shiftItemId: shiftItemId ?? this.shiftItemId,
+      occurrenceDate: occurrenceDate ?? this.occurrenceDate,
+      rosterCode: rosterCode ?? this.rosterCode,
+      employerName: employerName ?? this.employerName,
+      coworkersJson: coworkersJson ?? this.coworkersJson,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (shiftItemId.present) {
+      map['shift_item_id'] = Variable<String>(shiftItemId.value);
+    }
+    if (occurrenceDate.present) {
+      map['occurrence_date'] = Variable<String>(occurrenceDate.value);
+    }
+    if (rosterCode.present) {
+      map['roster_code'] = Variable<String>(rosterCode.value);
+    }
+    if (employerName.present) {
+      map['employer_name'] = Variable<String>(employerName.value);
+    }
+    if (coworkersJson.present) {
+      map['coworkers_json'] = Variable<String>(coworkersJson.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('WorkOccurrenceCoworkerRowsCompanion(')
+          ..write('shiftItemId: $shiftItemId, ')
+          ..write('occurrenceDate: $occurrenceDate, ')
+          ..write('rosterCode: $rosterCode, ')
+          ..write('employerName: $employerName, ')
+          ..write('coworkersJson: $coworkersJson, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$ScheduleDatabase extends GeneratedDatabase {
   _$ScheduleDatabase(QueryExecutor e) : super(e);
   $ScheduleDatabaseManager get managers => $ScheduleDatabaseManager(this);
@@ -4853,6 +5260,8 @@ abstract class _$ScheduleDatabase extends GeneratedDatabase {
   late final $WorkOvertimeRowsTable workOvertimeRows = $WorkOvertimeRowsTable(
     this,
   );
+  late final $WorkOccurrenceCoworkerRowsTable workOccurrenceCoworkerRows =
+      $WorkOccurrenceCoworkerRowsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -4866,6 +5275,7 @@ abstract class _$ScheduleDatabase extends GeneratedDatabase {
     scheduleImportHistoryRows,
     supervisorProfileRows,
     workOvertimeRows,
+    workOccurrenceCoworkerRows,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -4889,6 +5299,15 @@ abstract class _$ScheduleDatabase extends GeneratedDatabase {
         limitUpdateKind: UpdateKind.delete,
       ),
       result: [TableUpdate('work_overtime_rows', kind: UpdateKind.delete)],
+    ),
+    WritePropagation(
+      on: TableUpdateQuery.onTableName(
+        'schedule_rows',
+        limitUpdateKind: UpdateKind.delete,
+      ),
+      result: [
+        TableUpdate('work_occurrence_coworker_rows', kind: UpdateKind.delete),
+      ],
     ),
   ]);
 }
@@ -5349,6 +5768,32 @@ final class $$ScheduleRowsTableReferences
       manager.$state.copyWith(prefetchedData: cache),
     );
   }
+
+  static MultiTypedResultKey<
+    $WorkOccurrenceCoworkerRowsTable,
+    List<WorkOccurrenceCoworkerRow>
+  >
+  _workOccurrenceCoworkerRowsRefsTable(_$ScheduleDatabase db) =>
+      MultiTypedResultKey.fromTable(
+        db.workOccurrenceCoworkerRows,
+        aliasName:
+            'schedule_rows__id__work_occurrence_coworker_rows__shift_item_id',
+      );
+
+  $$WorkOccurrenceCoworkerRowsTableProcessedTableManager
+  get workOccurrenceCoworkerRowsRefs {
+    final manager = $$WorkOccurrenceCoworkerRowsTableTableManager(
+      $_db,
+      $_db.workOccurrenceCoworkerRows,
+    ).filter((f) => f.shiftItemId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _workOccurrenceCoworkerRowsRefsTable($_db),
+    );
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
 }
 
 class $$ScheduleRowsTableFilterComposer
@@ -5595,6 +6040,33 @@ class $$ScheduleRowsTableFilterComposer
                 $removeJoinBuilderFromRootComposer,
           ),
     );
+    return f(composer);
+  }
+
+  Expression<bool> workOccurrenceCoworkerRowsRefs(
+    Expression<bool> Function($$WorkOccurrenceCoworkerRowsTableFilterComposer f)
+    f,
+  ) {
+    final $$WorkOccurrenceCoworkerRowsTableFilterComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.id,
+          referencedTable: $db.workOccurrenceCoworkerRows,
+          getReferencedColumn: (t) => t.shiftItemId,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$WorkOccurrenceCoworkerRowsTableFilterComposer(
+                $db: $db,
+                $table: $db.workOccurrenceCoworkerRows,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
     return f(composer);
   }
 }
@@ -6017,6 +6489,35 @@ class $$ScheduleRowsTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> workOccurrenceCoworkerRowsRefs<T extends Object>(
+    Expression<T> Function(
+      $$WorkOccurrenceCoworkerRowsTableAnnotationComposer a,
+    )
+    f,
+  ) {
+    final $$WorkOccurrenceCoworkerRowsTableAnnotationComposer composer =
+        $composerBuilder(
+          composer: this,
+          getCurrentColumn: (t) => t.id,
+          referencedTable: $db.workOccurrenceCoworkerRows,
+          getReferencedColumn: (t) => t.shiftItemId,
+          builder:
+              (
+                joinBuilder, {
+                $addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer,
+              }) => $$WorkOccurrenceCoworkerRowsTableAnnotationComposer(
+                $db: $db,
+                $table: $db.workOccurrenceCoworkerRows,
+                $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+                joinBuilder: joinBuilder,
+                $removeJoinBuilderFromRootComposer:
+                    $removeJoinBuilderFromRootComposer,
+              ),
+        );
+    return f(composer);
+  }
 }
 
 class $$ScheduleRowsTableTableManager
@@ -6036,6 +6537,7 @@ class $$ScheduleRowsTableTableManager
             bool academicTermId,
             bool intervalRowsRefs,
             bool workOvertimeRowsRefs,
+            bool workOccurrenceCoworkerRowsRefs,
           })
         > {
   $$ScheduleRowsTableTableManager(
@@ -6212,12 +6714,15 @@ class $$ScheduleRowsTableTableManager
                 academicTermId = false,
                 intervalRowsRefs = false,
                 workOvertimeRowsRefs = false,
+                workOccurrenceCoworkerRowsRefs = false,
               }) {
                 return PrefetchHooks(
                   db: db,
                   explicitlyWatchedTables: [
                     if (intervalRowsRefs) db.intervalRows,
                     if (workOvertimeRowsRefs) db.workOvertimeRows,
+                    if (workOccurrenceCoworkerRowsRefs)
+                      db.workOccurrenceCoworkerRows,
                   ],
                   addJoins:
                       <
@@ -6291,6 +6796,26 @@ class $$ScheduleRowsTableTableManager
                           referencedColumn: 'shift_item_id',
                           typedResults: items,
                         ),
+                      if (workOccurrenceCoworkerRowsRefs)
+                        await $_getPrefetchedDataByColumns<
+                          ScheduleRow,
+                          $ScheduleRowsTable,
+                          WorkOccurrenceCoworkerRow,
+                          $WorkOccurrenceCoworkerRowsTable
+                        >(
+                          currentTable: table,
+                          referencedTable: $$ScheduleRowsTableReferences
+                              ._workOccurrenceCoworkerRowsRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$ScheduleRowsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).workOccurrenceCoworkerRowsRefs,
+                          currentColumn: 'id',
+                          referencedColumn: 'shift_item_id',
+                          typedResults: items,
+                        ),
                     ];
                   },
                 );
@@ -6315,6 +6840,7 @@ typedef $$ScheduleRowsTableProcessedTableManager =
         bool academicTermId,
         bool intervalRowsRefs,
         bool workOvertimeRowsRefs,
+        bool workOccurrenceCoworkerRowsRefs,
       })
     >;
 typedef $$IntervalRowsTableCreateCompanionBuilder =
@@ -7996,6 +8522,359 @@ typedef $$WorkOvertimeRowsTableProcessedTableManager =
       WorkOvertimeRow,
       PrefetchHooks Function({bool shiftItemId})
     >;
+typedef $$WorkOccurrenceCoworkerRowsTableCreateCompanionBuilder =
+    WorkOccurrenceCoworkerRowsCompanion Function({
+      required String shiftItemId,
+      required String occurrenceDate,
+      required String rosterCode,
+      Value<String?> employerName,
+      required String coworkersJson,
+      Value<int> rowid,
+    });
+typedef $$WorkOccurrenceCoworkerRowsTableUpdateCompanionBuilder =
+    WorkOccurrenceCoworkerRowsCompanion Function({
+      Value<String> shiftItemId,
+      Value<String> occurrenceDate,
+      Value<String> rosterCode,
+      Value<String?> employerName,
+      Value<String> coworkersJson,
+      Value<int> rowid,
+    });
+
+final class $$WorkOccurrenceCoworkerRowsTableReferences
+    extends
+        BaseReferences<
+          _$ScheduleDatabase,
+          $WorkOccurrenceCoworkerRowsTable,
+          WorkOccurrenceCoworkerRow
+        > {
+  $$WorkOccurrenceCoworkerRowsTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $ScheduleRowsTable _shiftItemIdTable(_$ScheduleDatabase db) =>
+      db.scheduleRows.createAlias(
+        'work_occurrence_coworker_rows__shift_item_id__schedule_rows__id',
+      );
+
+  $$ScheduleRowsTableProcessedTableManager get shiftItemId {
+    final $_column = $_itemColumn<String>('shift_item_id')!;
+
+    final manager = $$ScheduleRowsTableTableManager(
+      $_db,
+      $_db.scheduleRows,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_shiftItemIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$WorkOccurrenceCoworkerRowsTableFilterComposer
+    extends Composer<_$ScheduleDatabase, $WorkOccurrenceCoworkerRowsTable> {
+  $$WorkOccurrenceCoworkerRowsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get occurrenceDate => $composableBuilder(
+    column: $table.occurrenceDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get rosterCode => $composableBuilder(
+    column: $table.rosterCode,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get employerName => $composableBuilder(
+    column: $table.employerName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get coworkersJson => $composableBuilder(
+    column: $table.coworkersJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$ScheduleRowsTableFilterComposer get shiftItemId {
+    final $$ScheduleRowsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.shiftItemId,
+      referencedTable: $db.scheduleRows,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ScheduleRowsTableFilterComposer(
+            $db: $db,
+            $table: $db.scheduleRows,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$WorkOccurrenceCoworkerRowsTableOrderingComposer
+    extends Composer<_$ScheduleDatabase, $WorkOccurrenceCoworkerRowsTable> {
+  $$WorkOccurrenceCoworkerRowsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get occurrenceDate => $composableBuilder(
+    column: $table.occurrenceDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get rosterCode => $composableBuilder(
+    column: $table.rosterCode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get employerName => $composableBuilder(
+    column: $table.employerName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get coworkersJson => $composableBuilder(
+    column: $table.coworkersJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$ScheduleRowsTableOrderingComposer get shiftItemId {
+    final $$ScheduleRowsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.shiftItemId,
+      referencedTable: $db.scheduleRows,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ScheduleRowsTableOrderingComposer(
+            $db: $db,
+            $table: $db.scheduleRows,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$WorkOccurrenceCoworkerRowsTableAnnotationComposer
+    extends Composer<_$ScheduleDatabase, $WorkOccurrenceCoworkerRowsTable> {
+  $$WorkOccurrenceCoworkerRowsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get occurrenceDate => $composableBuilder(
+    column: $table.occurrenceDate,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get rosterCode => $composableBuilder(
+    column: $table.rosterCode,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get employerName => $composableBuilder(
+    column: $table.employerName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get coworkersJson => $composableBuilder(
+    column: $table.coworkersJson,
+    builder: (column) => column,
+  );
+
+  $$ScheduleRowsTableAnnotationComposer get shiftItemId {
+    final $$ScheduleRowsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.shiftItemId,
+      referencedTable: $db.scheduleRows,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ScheduleRowsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.scheduleRows,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$WorkOccurrenceCoworkerRowsTableTableManager
+    extends
+        RootTableManager<
+          _$ScheduleDatabase,
+          $WorkOccurrenceCoworkerRowsTable,
+          WorkOccurrenceCoworkerRow,
+          $$WorkOccurrenceCoworkerRowsTableFilterComposer,
+          $$WorkOccurrenceCoworkerRowsTableOrderingComposer,
+          $$WorkOccurrenceCoworkerRowsTableAnnotationComposer,
+          $$WorkOccurrenceCoworkerRowsTableCreateCompanionBuilder,
+          $$WorkOccurrenceCoworkerRowsTableUpdateCompanionBuilder,
+          (
+            WorkOccurrenceCoworkerRow,
+            $$WorkOccurrenceCoworkerRowsTableReferences,
+          ),
+          WorkOccurrenceCoworkerRow,
+          PrefetchHooks Function({bool shiftItemId})
+        > {
+  $$WorkOccurrenceCoworkerRowsTableTableManager(
+    _$ScheduleDatabase db,
+    $WorkOccurrenceCoworkerRowsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$WorkOccurrenceCoworkerRowsTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$WorkOccurrenceCoworkerRowsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$WorkOccurrenceCoworkerRowsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> shiftItemId = const Value.absent(),
+                Value<String> occurrenceDate = const Value.absent(),
+                Value<String> rosterCode = const Value.absent(),
+                Value<String?> employerName = const Value.absent(),
+                Value<String> coworkersJson = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => WorkOccurrenceCoworkerRowsCompanion(
+                shiftItemId: shiftItemId,
+                occurrenceDate: occurrenceDate,
+                rosterCode: rosterCode,
+                employerName: employerName,
+                coworkersJson: coworkersJson,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String shiftItemId,
+                required String occurrenceDate,
+                required String rosterCode,
+                Value<String?> employerName = const Value.absent(),
+                required String coworkersJson,
+                Value<int> rowid = const Value.absent(),
+              }) => WorkOccurrenceCoworkerRowsCompanion.insert(
+                shiftItemId: shiftItemId,
+                occurrenceDate: occurrenceDate,
+                rosterCode: rosterCode,
+                employerName: employerName,
+                coworkersJson: coworkersJson,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<
+                    $WorkOccurrenceCoworkerRowsTable,
+                    WorkOccurrenceCoworkerRow
+                  >(table),
+                  $$WorkOccurrenceCoworkerRowsTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: ({shiftItemId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins:
+                  <
+                    T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic
+                    >
+                  >(state) {
+                    if (shiftItemId) {
+                      state = state.withJoin(
+                        currentTable: table,
+                        currentColumn: table.shiftItemId,
+                        referencedTable:
+                            $$WorkOccurrenceCoworkerRowsTableReferences
+                                ._shiftItemIdTable(db),
+                        referencedColumn:
+                            $$WorkOccurrenceCoworkerRowsTableReferences
+                                ._shiftItemIdTable(db)
+                                .id,
+                      ) as T;
+                    }
+
+                    return state;
+                  },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ),
+      );
+}
+
+typedef $$WorkOccurrenceCoworkerRowsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$ScheduleDatabase,
+      $WorkOccurrenceCoworkerRowsTable,
+      WorkOccurrenceCoworkerRow,
+      $$WorkOccurrenceCoworkerRowsTableFilterComposer,
+      $$WorkOccurrenceCoworkerRowsTableOrderingComposer,
+      $$WorkOccurrenceCoworkerRowsTableAnnotationComposer,
+      $$WorkOccurrenceCoworkerRowsTableCreateCompanionBuilder,
+      $$WorkOccurrenceCoworkerRowsTableUpdateCompanionBuilder,
+      (WorkOccurrenceCoworkerRow, $$WorkOccurrenceCoworkerRowsTableReferences),
+      WorkOccurrenceCoworkerRow,
+      PrefetchHooks Function({bool shiftItemId})
+    >;
 
 class $ScheduleDatabaseManager {
   final _$ScheduleDatabase _db;
@@ -8019,4 +8898,10 @@ class $ScheduleDatabaseManager {
       $$SupervisorProfileRowsTableTableManager(_db, _db.supervisorProfileRows);
   $$WorkOvertimeRowsTableTableManager get workOvertimeRows =>
       $$WorkOvertimeRowsTableTableManager(_db, _db.workOvertimeRows);
+  $$WorkOccurrenceCoworkerRowsTableTableManager
+  get workOccurrenceCoworkerRows =>
+      $$WorkOccurrenceCoworkerRowsTableTableManager(
+        _db,
+        _db.workOccurrenceCoworkerRows,
+      );
 }

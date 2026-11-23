@@ -136,10 +136,14 @@ void main() {
       final history = await database
           .customSelect('SELECT * FROM schedule_import_history_rows')
           .get();
+      final occurrenceCoworkers = await database
+          .customSelect('SELECT * FROM work_occurrence_coworker_rows')
+          .get();
 
-      expect(version.read<int>('user_version'), 24);
+      expect(version.read<int>('user_version'), 25);
       expect(preserved.read<String>('title'), 'Existing record');
       expect(history, isEmpty);
+      expect(occurrenceCoworkers, isEmpty);
     },
   );
 }

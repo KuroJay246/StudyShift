@@ -7,9 +7,89 @@ import 'package:shift_study/data/schedule_database.dart';
 import 'package:shift_study/data/schedule_repository.dart';
 import 'package:shift_study/data/work_overtime_repository.dart';
 import 'package:shift_study/domain/schedule.dart';
+import 'package:shift_study/domain/work_occurrence_coworkers.dart';
 import 'package:shift_study/presentation/widgets/schedule_details_sheet.dart';
 
 void main() {
+  testWidgets('shift details show coworkers for the selected occurrence', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final shift = ScheduleItem(
+      id: 'synthetic-weekly-shift',
+      kind: ScheduleKind.work,
+      title: 'Synthetic weekly shift',
+      startDate: const CivilDate(2026, 11, 17),
+      intervals: const [
+        EventInterval(
+          startDayOffset: 0,
+          startMinute: 600,
+          endDayOffset: 0,
+          endMinute: 1020,
+        ),
+      ],
+      workCategory: WorkCategory.shift,
+      code: 'A1',
+      employerName: 'Synthetic employer',
+      recurrence: WeeklyRecurrence(
+        weekdays: {DateTime.tuesday},
+        until: const CivilDate(2026, 12, 31),
+      ),
+    );
+    final repository = ScheduleRepository(database);
+    await repository.save(shift);
+    await repository.updateCoworkersAtomically(
+      const [],
+      occurrenceUpdates: [
+        WorkOccurrenceCoworkers(
+          shiftItemId: shift.id,
+          occurrenceDate: const CivilDate(2026, 11, 24),
+          rosterCode: 'A1',
+          employerName: 'Synthetic employer',
+          coworkers: const ['Synthetic teammate for Nov 24'],
+        ),
+      ],
+    );
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: Consumer(
+            builder: (context, ref, _) => Scaffold(
+              body: TextButton(
+                onPressed: () => showScheduleDetails(
+                  context,
+                  ref,
+                  shift,
+                  occurrenceDate: const CivilDate(2026, 11, 24),
+                ),
+                child: const Text('Open occurrence details'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open occurrence details'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Working with: Synthetic teammate for Nov 24'),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'event detail actions fit narrow phone width with clear spacing',
     (tester) async {

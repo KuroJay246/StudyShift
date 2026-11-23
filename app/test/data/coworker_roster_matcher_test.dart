@@ -47,12 +47,50 @@ void main() {
     expect(result.existingShift, isNull);
     expect(result.updatedShift, isNull);
   });
+
+  test('matches a recurring shift occurrence without changing its series', () {
+    final recurring = _shift(
+      id: 'weekly-shift',
+      title: 'Weekly shift',
+      recurrence: WeeklyRecurrence(
+        weekdays: {DateTime.tuesday},
+        until: const CivilDate(2026, 12, 31),
+      ),
+    );
+
+    final result = matcher.match(assignment, [recurring]);
+
+    expect(result.status, CoworkerRosterMatchStatus.matched);
+    expect(result.existingShift?.id, 'weekly-shift');
+    expect(result.occurrenceDate, assignment.date);
+    expect(result.updatedCoworkers, ['Synthetic Sam', 'Synthetic Lee']);
+    expect(result.updatedShift, isNull);
+    expect(recurring.coworkers, isEmpty);
+  });
+
+  test('does not match a cancelled recurring occurrence', () {
+    final recurring = _shift(
+      id: 'weekly-shift',
+      title: 'Weekly shift',
+      recurrence: WeeklyRecurrence(
+        weekdays: {DateTime.tuesday},
+        until: const CivilDate(2026, 12, 31),
+        exceptionDates: {assignment.date},
+      ),
+    );
+
+    final result = matcher.match(assignment, [recurring]);
+
+    expect(result.status, CoworkerRosterMatchStatus.unmatched);
+    expect(recurring.coworkers, isEmpty);
+  });
 }
 
 ScheduleItem _shift({
   required String id,
   required String title,
   List<String> coworkers = const [],
+  WeeklyRecurrence? recurrence,
 }) => ScheduleItem(
   id: id,
   kind: ScheduleKind.work,
@@ -70,5 +108,6 @@ ScheduleItem _shift({
   code: 'A1',
   employerName: 'Synthetic employer',
   coworkers: coworkers,
+  recurrence: recurrence,
   workCategory: WorkCategory.shift,
 );

@@ -9,18 +9,22 @@ class CoworkerRosterMatch {
     required this.status,
     this.existingShift,
     this.updatedShift,
+    this.occurrenceDate,
+    this.updatedCoworkersForOccurrence = const [],
   });
 
   final CoworkerRosterAssignment assignment;
   final CoworkerRosterMatchStatus status;
   final ScheduleItem? existingShift;
+  final CivilDate? occurrenceDate;
   final ScheduleItem? updatedShift;
+  final List<String> updatedCoworkersForOccurrence;
 
   List<String> get updatedCoworkers =>
-      updatedShift?.coworkers ?? const <String>[];
+      updatedShift?.coworkers ?? updatedCoworkersForOccurrence;
 }
 
-/// Matches coworker rows to saved timed work by start date and roster code.
+/// Matches coworker rows to a saved timed work occurrence by date and code.
 /// It never creates an event; ambiguous rows are intentionally left untouched.
 class CoworkerRosterMatcher {
   const CoworkerRosterMatcher();
@@ -37,7 +41,7 @@ class CoworkerRosterMatcher {
               item.workCategory == WorkCategory.restDay ||
               item.workCategory == WorkCategory.leave ||
               item.hasNoTime ||
-              item.startDate != assignment.date ||
+              !_isOccurrence(item, assignment.date) ||
               _normalizeCode(item.code ?? '') != code) {
             return false;
           }
@@ -71,8 +75,21 @@ class CoworkerRosterMatcher {
       assignment: assignment,
       status: CoworkerRosterMatchStatus.matched,
       existingShift: existing,
-      updatedShift: existing.copyWith(coworkers: names),
+      occurrenceDate: assignment.date,
+      updatedShift: existing.recurrence == null
+          ? existing.copyWith(coworkers: names)
+          : null,
+      updatedCoworkersForOccurrence: List.unmodifiable(names),
     );
+  }
+
+  bool _isOccurrence(ScheduleItem item, CivilDate date) {
+    final recurrence = item.recurrence;
+    if (recurrence == null) return date == item.startDate;
+    return date.compareTo(item.startDate) >= 0 &&
+        (recurrence.until == null || date.compareTo(recurrence.until!) <= 0) &&
+        recurrence.weekdays.contains(date.weekday) &&
+        !recurrence.exceptionDates.contains(date);
   }
 
   static String _normalizeCode(String code) =>

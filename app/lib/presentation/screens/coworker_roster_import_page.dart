@@ -7,6 +7,8 @@ import '../../application/dependencies.dart';
 import '../../data/csv_schedule_import.dart';
 import '../../data/coworker_roster_matcher.dart';
 import '../../data/xlsx_schedule_import.dart';
+import '../../domain/schedule.dart';
+import '../../domain/work_occurrence_coworkers.dart';
 import '../../platform/schedule_import_file_bridge.dart';
 
 class CoworkerRosterImportPage extends ConsumerStatefulWidget {
@@ -96,10 +98,34 @@ class _CoworkerRosterImportPageState
     setState(() => _saving = true);
     try {
       final repository = ref.read(scheduleRepositoryProvider);
-      await repository.updateCoworkersAtomically([
-        for (final match in eligible) match.updatedShift!,
-      ]);
+      final occurrenceUpdates = <WorkOccurrenceCoworkers>[];
+      final eventUpdates = <ScheduleItem>[];
+      for (final match in eligible) {
+        final updatedShift = match.updatedShift;
+        if (updatedShift != null) {
+          eventUpdates.add(updatedShift);
+          continue;
+        }
+        final shift = match.existingShift;
+        final date = match.occurrenceDate;
+        final code = shift?.code;
+        if (shift == null || date == null || code == null) continue;
+        occurrenceUpdates.add(
+          WorkOccurrenceCoworkers(
+            shiftItemId: shift.id,
+            occurrenceDate: date,
+            rosterCode: code,
+            employerName: shift.employerName,
+            coworkers: match.updatedCoworkers,
+          ),
+        );
+      }
+      await repository.updateCoworkersAtomically(
+        eventUpdates,
+        occurrenceUpdates: occurrenceUpdates,
+      );
       ref.invalidate(scheduleItemsProvider);
+      ref.invalidate(workOccurrenceCoworkersProvider);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

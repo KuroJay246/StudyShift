@@ -43,6 +43,9 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
       final overtimeAdjustments = await ref
           .read(workOvertimeRepositoryProvider)
           .getAll();
+      final occurrenceCoworkers = await ref
+          .read(workOccurrenceCoworkerRepositoryProvider)
+          .getAll();
       final bytes = await _codec.encode(
         items,
         passphrase: passphrase,
@@ -50,6 +53,7 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
         academicTerms: terms,
         supervisors: supervisors,
         overtimeAdjustments: overtimeAdjustments,
+        occurrenceCoworkers: occurrenceCoworkers,
       );
       final now = DateTime.now();
       final saved = await _files.save(
@@ -98,6 +102,7 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
         backup.academicTerms.length,
         backup.supervisors.length,
         backup.overtimeAdjustments.length,
+        backup.occurrenceCoworkers.length,
         backup.createdAt,
       );
       if (choice == null || !mounted) return;
@@ -141,12 +146,19 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
               backup.overtimeAdjustments,
               replaceExisting: choice == _RestoreChoice.replace,
             );
+        await ref
+            .read(workOccurrenceCoworkerRepositoryProvider)
+            .restoreItems(
+              backup.occurrenceCoworkers,
+              replaceExisting: choice == _RestoreChoice.replace,
+            );
       });
       ref.invalidate(scheduleItemsProvider);
       ref.invalidate(workCodeLegendsProvider);
       ref.invalidate(academicTermsProvider);
       ref.invalidate(supervisorProfilesProvider);
       ref.invalidate(workOvertimeAdjustmentsProvider);
+      ref.invalidate(workOccurrenceCoworkersProvider);
       if (mounted) {
         _showMessage(_restoreSummary(result, choice));
       }
@@ -234,6 +246,7 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
     int termCount,
     int supervisorCount,
     int overtimeCount,
+    int coworkerCount,
     DateTime createdAt,
   ) => showDialog<_RestoreChoice>(
     context: context,
@@ -243,7 +256,7 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
       return AlertDialog(
         title: const Text('Review this backup'),
         content: Text(
-          'Created $date · $count ${count == 1 ? 'event' : 'events'} · $termCount ${termCount == 1 ? 'academic term' : 'academic terms'} · $legendCount ${legendCount == 1 ? 'roster code' : 'roster codes'} · $supervisorCount ${supervisorCount == 1 ? 'supervisor' : 'supervisors'} · $overtimeCount ${overtimeCount == 1 ? 'overtime entry' : 'overtime entries'}. Nothing changes until you choose.\n\nMerge adds new IDs and keeps anything already saved. Replace deletes every event, academic term, roster code and supervisor contact on this device, then installs the backup. This cannot be undone in the app.',
+          'Created $date · $count ${count == 1 ? 'event' : 'events'} · $termCount ${termCount == 1 ? 'academic term' : 'academic terms'} · $legendCount ${legendCount == 1 ? 'roster code' : 'roster codes'} · $supervisorCount ${supervisorCount == 1 ? 'supervisor' : 'supervisors'} · $overtimeCount ${overtimeCount == 1 ? 'overtime entry' : 'overtime entries'} · $coworkerCount ${coworkerCount == 1 ? 'shift coworker list' : 'shift coworker lists'}. Nothing changes until you choose.\n\nMerge adds new IDs and keeps anything already saved. Replace deletes every event, academic term, roster code, supervisor contact, shift coworker list and overtime entry on this device, then installs the backup. This cannot be undone in the app.',
         ),
         actions: [
           TextButton(
