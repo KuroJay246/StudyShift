@@ -367,6 +367,7 @@ class ScheduleRepository {
   Future<ScheduleImportResult> applyRosterImport({
     required List<ScheduleItem> eventItems,
     required List<ScheduleItem> coworkerUpdates,
+    List<WorkOccurrenceCoworkers> occurrenceCoworkerUpdates = const [],
     required bool replaceExisting,
     ScheduleImportHistoryDraft? historyDraft,
   }) async {
@@ -383,6 +384,17 @@ class ScheduleRepository {
         coworkerIds.any(eventIds.contains)) {
       throw const FormatException(
         'The roster import contains a duplicate or conflicting shift update.',
+      );
+    }
+    final occurrenceKeys = occurrenceCoworkerUpdates
+        .map((item) => '${item.shiftItemId}|${item.occurrenceDate}')
+        .toSet();
+    if (occurrenceKeys.length != occurrenceCoworkerUpdates.length ||
+        occurrenceCoworkerUpdates.any(
+          (item) => eventIds.contains(item.shiftItemId),
+        )) {
+      throw const FormatException(
+        'The roster import contains a duplicate or conflicting shift occurrence update.',
       );
     }
 
@@ -419,10 +431,42 @@ class ScheduleRepository {
       for (final updated in coworkerTargets) {
         await save(updated);
       }
+      for (final update in occurrenceCoworkerUpdates) {
+        final current = byId[update.shiftItemId];
+        final currentEmployer = current?.employerName?.trim().toLowerCase();
+        final reviewedEmployer = update.employerName?.trim().toLowerCase();
+        if (current == null ||
+            current.kind != ScheduleKind.work ||
+            current.workCategory != WorkCategory.shift ||
+            current.hasNoTime ||
+            !_isOccurrence(current, update.occurrenceDate) ||
+            _normalizeRosterCode(current.code) !=
+                _normalizeRosterCode(update.rosterCode) ||
+            currentEmployer != reviewedEmployer) {
+          throw const FormatException(
+            'A matched shift occurrence changed after review. Reopen the roster preview and try again.',
+          );
+        }
+        await database
+            .into(database.workOccurrenceCoworkerRows)
+            .insertOnConflictUpdate(
+              WorkOccurrenceCoworkerRowsCompanion.insert(
+                shiftItemId: update.shiftItemId,
+                occurrenceDate: update.occurrenceDate.toString(),
+                rosterCode: update.rosterCode,
+                employerName: Value(update.employerName),
+                coworkersJson: jsonEncode(update.coworkers),
+              ),
+            );
+      }
       if (historyDraft != null) {
         await ScheduleImportHistoryRepository(database).recordWithinTransaction(
           historyDraft,
-          acceptedCount: inserted + replaced + coworkerTargets.length,
+          acceptedCount:
+              inserted +
+              replaced +
+              coworkerTargets.length +
+              occurrenceCoworkerUpdates.length,
           additionalSkippedCount: skipped,
         );
       }

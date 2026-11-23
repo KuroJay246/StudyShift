@@ -16,6 +16,7 @@ import '../../data/schedule_import_models.dart';
 import '../../data/schedule_import_history_repository.dart';
 import '../../domain/civil_time_resolver.dart';
 import '../../domain/schedule.dart';
+import '../../domain/work_occurrence_coworkers.dart';
 import '../../domain/work_code_legend.dart';
 import '../../platform/schedule_import_file_bridge.dart';
 import '../design/studyshift_spacing.dart';
@@ -50,6 +51,7 @@ class _ImportRow {
     this.existing,
     this.ambiguousMatch = false,
     this.coworkerOnly = false,
+    this.rosterOccurrenceDate,
     this.sourceName,
   });
 
@@ -58,6 +60,7 @@ class _ImportRow {
   final ScheduleItem? existing;
   final bool ambiguousMatch;
   final bool coworkerOnly;
+  final CivilDate? rosterOccurrenceDate;
   final String? sourceName;
 
   String? get effectiveSourceName =>
@@ -67,6 +70,7 @@ class _ImportRow {
     ScheduleImportProposal? proposal,
     bool? included,
     bool? coworkerOnly,
+    CivilDate? rosterOccurrenceDate,
     String? sourceName,
   }) => _ImportRow(
     proposal: proposal ?? this.proposal,
@@ -74,6 +78,7 @@ class _ImportRow {
     existing: existing,
     ambiguousMatch: ambiguousMatch,
     coworkerOnly: coworkerOnly ?? this.coworkerOnly,
+    rosterOccurrenceDate: rosterOccurrenceDate ?? this.rosterOccurrenceDate,
     sourceName: sourceName ?? this.sourceName,
   );
 }
@@ -800,6 +805,13 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       final existingItems = await ref
           .read(scheduleRepositoryProvider)
           .getItems();
+      final existingOccurrenceCoworkers = await ref
+          .read(workOccurrenceCoworkerRepositoryProvider)
+          .getAll();
+      final occurrenceCoworkersByKey = {
+        for (final assignment in existingOccurrenceCoworkers)
+          '${assignment.shiftItemId}|${assignment.occurrenceDate}': assignment,
+      };
       final byId = {for (final item in existingItems) item.id: item};
       final existingOcrItems = existingItems
           .where(_canMatchOcrProposal)
@@ -948,6 +960,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           unusedExistingOcrItems: existingOcrItems,
           matchedOcrIds: matchedIds,
           rosterProposal: true,
+          occurrenceCoworkersByKey: occurrenceCoworkersByKey,
         );
         proposals.add(
           reviewRow.copyWith(
@@ -1061,6 +1074,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     required List<ScheduleItem> unusedExistingOcrItems,
     required Set<String> matchedOcrIds,
     bool rosterProposal = false,
+    Map<String, WorkOccurrenceCoworkers> occurrenceCoworkersByKey = const {},
   }) {
     final exactIdMatch = byId[proposal.item.id];
     final match = exactIdMatch == null
@@ -1080,8 +1094,16 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             sourceText: proposal.sourceText,
           );
     var coworkerOnly = false;
+    CivilDate? rosterOccurrenceDate;
     if (existing != null && rosterProposal && !match.ambiguous) {
-      final mergedCoworkers = [...existing.coworkers];
+      final isRecurring = existing.recurrence != null;
+      final occurrenceDate = proposal.item.startDate;
+      final priorCoworkers = isRecurring
+          ? occurrenceCoworkersByKey['${existing.id}|$occurrenceDate']
+                    ?.coworkers ??
+                const <String>[]
+          : existing.coworkers;
+      final mergedCoworkers = [...priorCoworkers];
       for (final name in proposal.item.coworkers) {
         if (!mergedCoworkers.any(
           (saved) => saved.trim().toLowerCase() == name.trim().toLowerCase(),
@@ -1090,6 +1112,10 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         }
       }
       coworkerOnly = mergedCoworkers.length != existing.coworkers.length;
+      if (isRecurring) {
+        coworkerOnly = mergedCoworkers.length != priorCoworkers.length;
+        rosterOccurrenceDate = occurrenceDate;
+      }
       if (coworkerOnly) {
         matchedProposal = ScheduleImportProposal(
           item: existing.copyWith(coworkers: mergedCoworkers),
@@ -1103,6 +1129,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       included: (existing == null || coworkerOnly) && !match.ambiguous,
       ambiguousMatch: match.ambiguous,
       coworkerOnly: coworkerOnly,
+      rosterOccurrenceDate: rosterOccurrenceDate,
       sourceName: proposal.item.importProvenance?.sourceName,
     );
   }
@@ -1114,7 +1141,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     required bool rosterProposal,
   }) {
     final matches = candidates
-        .where((candidate) => !matchedIds.contains(candidate.id))
+        .where(
+          (candidate) =>
+              !matchedIds.contains(candidate.id) ||
+              (rosterProposal && candidate.recurrence != null),
+        )
         .where(
           (candidate) =>
               _sameOcrEvent(candidate, proposed) ||
@@ -1154,6 +1185,15 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         ).every((matches) => matches);
   }
 
+  bool _occursOn(ScheduleItem item, CivilDate date) {
+    final recurrence = item.recurrence;
+    if (recurrence == null) return item.startDate == date;
+    return date.compareTo(item.startDate) >= 0 &&
+        (recurrence.until == null || date.compareTo(recurrence.until!) <= 0) &&
+        recurrence.weekdays.contains(date.weekday) &&
+        !recurrence.exceptionDates.contains(date);
+  }
+
   bool _sameRosterShift(ScheduleItem saved, ScheduleItem proposed) {
     String normalize(String? value) =>
         value?.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase() ?? '';
@@ -1164,7 +1204,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         proposed.kind == ScheduleKind.work &&
         saved.workCategory == WorkCategory.shift &&
         proposed.workCategory == WorkCategory.shift &&
-        saved.startDate == proposed.startDate &&
+        _occursOn(saved, proposed.startDate) &&
         normalize(saved.code).isNotEmpty &&
         normalize(saved.code) == normalize(proposed.code) &&
         (savedEmployer.isEmpty ||
@@ -1306,8 +1346,21 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     });
     try {
       final coworkerUpdates = selected
-          .where((row) => row.coworkerOnly)
+          .where((row) => row.coworkerOnly && row.rosterOccurrenceDate == null)
           .map((row) => row.proposal.item)
+          .toList(growable: false);
+      final occurrenceCoworkerUpdates = selected
+          .where((row) => row.coworkerOnly && row.rosterOccurrenceDate != null)
+          .map((row) {
+            final item = row.proposal.item;
+            return WorkOccurrenceCoworkers(
+              shiftItemId: item.id,
+              occurrenceDate: row.rosterOccurrenceDate!,
+              rosterCode: item.code!,
+              employerName: item.employerName,
+              coworkers: item.coworkers,
+            );
+          })
           .toList(growable: false);
       final result = await ref
           .read(scheduleRepositoryProvider)
@@ -1317,6 +1370,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 if (!row.coworkerOnly) row.proposal.item,
             ],
             coworkerUpdates: coworkerUpdates,
+            occurrenceCoworkerUpdates: occurrenceCoworkerUpdates,
             replaceExisting: _replaceMatches,
             historyDraft: ScheduleImportHistoryDraft(
               sourceType: sourceType,
@@ -1329,6 +1383,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             ),
           );
       ref.invalidate(scheduleItemsProvider);
+      ref.invalidate(workOccurrenceCoworkersProvider);
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(

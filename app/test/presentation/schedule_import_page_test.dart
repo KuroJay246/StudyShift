@@ -10,6 +10,7 @@ import 'package:shift_study/data/schedule_database.dart';
 import 'package:shift_study/data/schedule_repository.dart';
 import 'package:shift_study/data/schedule_import_history_repository.dart';
 import 'package:shift_study/data/work_code_legend_repository.dart';
+import 'package:shift_study/data/work_occurrence_coworker_repository.dart';
 import 'package:shift_study/data/csv_schedule_import.dart';
 import 'package:shift_study/data/preferences_repository.dart';
 import 'package:shift_study/data/roster_grid_import.dart';
@@ -860,11 +861,26 @@ END:VCALENDAR''';
         kind: ScheduleKind.work,
         workCategory: WorkCategory.shift,
         title: 'Owner entered ramp duty',
-        startDate: CivilDate(today.year, today.month, today.day),
+        startDate: () {
+          final previousWeek = DateTime(
+            today.year,
+            today.month,
+            today.day,
+          ).subtract(const Duration(days: 7));
+          return CivilDate(
+            previousWeek.year,
+            previousWeek.month,
+            previousWeek.day,
+          );
+        }(),
         timeZoneId: 'America/Barbados',
         code: 'A1',
         employerName: 'Synthetic employer',
         intervals: [EventInterval.sameDay(startMinute: 360, endMinute: 540)],
+        recurrence: WeeklyRecurrence(
+          weekdays: {today.weekday},
+          until: CivilDate(today.year, today.month, today.day).addDays(30),
+        ),
       );
       await ScheduleRepository(database).save(existingShift);
 
@@ -961,7 +977,13 @@ END:VCALENDAR''';
       expect(applied, hasLength(2));
       expect(retainedShift.title, existingShift.title);
       expect(retainedShift.intervals, existingShift.intervals);
-      expect(retainedShift.coworkers, ['Synthetic Coworker']);
+      expect(retainedShift.coworkers, isEmpty);
+      final occurrenceCoworkers =
+          await WorkOccurrenceCoworkerRepository(database).getForOccurrence(
+            retainedShift.id,
+            CivilDate(today.year, today.month, today.day),
+          );
+      expect(occurrenceCoworkers?.coworkers, ['Synthetic Coworker']);
     },
   );
 

@@ -6,8 +6,59 @@ import 'package:shift_study/data/schedule_database.dart';
 import 'package:shift_study/data/schedule_repository.dart';
 import 'package:shift_study/data/schedule_import_history_repository.dart';
 import 'package:shift_study/domain/schedule.dart';
+import 'package:shift_study/domain/work_occurrence_coworkers.dart';
 
 void main() {
+  test(
+    'roster import saves coworkers to one recurring occurrence only',
+    () async {
+      final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(database.close);
+      final repository = ScheduleRepository(database);
+      final recurring = ScheduleItem(
+        id: 'synthetic-recurring-roster-shift',
+        kind: ScheduleKind.work,
+        workCategory: WorkCategory.shift,
+        title: 'Synthetic recurring shift',
+        startDate: CivilDate(2026, 11, 23),
+        intervals: [EventInterval.sameDay(startMinute: 600, endMinute: 1020)],
+        timeZoneId: 'America/Barbados',
+        code: 'A1',
+        employerName: 'Synthetic employer',
+        recurrence: WeeklyRecurrence(
+          weekdays: {DateTime.monday},
+          until: CivilDate(2026, 12, 31),
+        ),
+      );
+      await repository.save(recurring);
+
+      await repository.applyRosterImport(
+        eventItems: const [],
+        coworkerUpdates: const [],
+        occurrenceCoworkerUpdates: [
+          WorkOccurrenceCoworkers(
+            shiftItemId: recurring.id,
+            occurrenceDate: CivilDate(2026, 11, 30),
+            rosterCode: 'A1',
+            employerName: 'Synthetic employer',
+            coworkers: const ['Synthetic Coworker'],
+          ),
+        ],
+        replaceExisting: false,
+      );
+
+      final saved = await repository.getItems();
+      expect(saved, hasLength(1));
+      expect(saved.single.coworkers, isEmpty);
+      final rows = await database
+          .select(database.workOccurrenceCoworkerRows)
+          .get();
+      expect(rows, hasLength(1));
+      expect(rows.single.occurrenceDate, '2026-11-30');
+      expect(rows.single.coworkersJson, '["Synthetic Coworker"]');
+    },
+  );
+
   test(
     'import provenance persists and matching event replacement is explicit',
     () async {
