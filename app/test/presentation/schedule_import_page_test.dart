@@ -342,6 +342,17 @@ END:VCALENDAR''';
   ) async {
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
     addTearDown(database.close);
+    final existingShift = ScheduleItem(
+      id: 'synthetic-shift-similar-to-exam-ocr',
+      kind: ScheduleKind.work,
+      workCategory: WorkCategory.shift,
+      title: 'Ramp shift with overlapping details',
+      startDate: const CivilDate(2026, 12, 4),
+      intervals: [EventInterval.sameDay(startMinute: 540, endMinute: 660)],
+      timeZoneId: 'America/Barbados',
+      code: 'BIOL1100',
+    );
+    await ScheduleRepository(database).save(existingShift);
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
           expect(call.method, 'openOcrImport');
@@ -377,17 +388,168 @@ END:VCALENDAR''';
     expect(find.text('Introductory Biology'), findsOneWidget);
     expect(find.textContaining(' · Examination'), findsOneWidget);
     expect(find.text('Course code: BIOL1100'), findsOneWidget);
-    expect(await ScheduleRepository(database).getItems(), isEmpty);
+    final beforeImport = await ScheduleRepository(database).getItems();
+    expect(beforeImport, hasLength(1));
+    expect(beforeImport.single.id, existingShift.id);
     await tester.ensureVisible(find.text('Add 1 selected'));
     await tester.tap(find.text('Add 1 selected'));
     await tester.pumpAndSettle();
 
     final imported = await ScheduleRepository(database).getItems();
-    expect(imported, hasLength(1));
-    expect(imported.single.kind, ScheduleKind.deadline);
-    expect(imported.single.deadlineType, DeadlineType.examination);
-    expect(imported.single.code, 'BIOL1100');
-    expect(imported.single.importProvenance!.sourceName, 'synthetic-exams.pdf');
+    expect(imported, hasLength(2));
+    expect(imported.first.id, existingShift.id);
+    expect(imported.last.kind, ScheduleKind.deadline);
+    expect(imported.last.deadlineType, DeadlineType.examination);
+    expect(imported.last.code, 'BIOL1100');
+    expect(imported.last.importProvenance!.sourceName, 'synthetic-exams.pdf');
+  });
+
+  testWidgets('duplicate exact exam OCR matches remain ambiguous', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    for (final suffix in ['one', 'two']) {
+      await ScheduleRepository(database).save(
+        ScheduleItem(
+          id: 'synthetic-existing-exam-$suffix',
+          kind: ScheduleKind.deadline,
+          deadlineType: DeadlineType.examination,
+          title: 'Introductory Biology',
+          code: 'BIOL1100',
+          startDate: const CivilDate(2026, 12, 4),
+          intervals: [EventInterval.sameDay(startMinute: 540, endMinute: 660)],
+          timeZoneId: 'America/Barbados',
+          importProvenance: ScheduleImportProvenance(
+            format: 'exam-timetable-ocr',
+            uid: 'synthetic-existing-exam-$suffix',
+            sourceName: 'synthetic-previous-exams.pdf',
+            sourceText: examOcrText,
+            importedAt: DateTime.utc(2026, 11, 20),
+          ),
+        ),
+      );
+    }
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(fileChannel, (call) async {
+          expect(call.method, 'openOcrImport');
+          return {'name': 'synthetic-current-exams.pdf', 'text': examOcrText};
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(fileChannel, null);
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          scheduleDatabaseProvider.overrideWithValue(database),
+          deviceTimeZoneIdProvider.overrideWith(
+            (ref) async => 'America/Barbados',
+          ),
+        ],
+        child: const MaterialApp(
+          home: SettingsPage(mode: ScheduleMode.workAndSchool),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import calendar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Read an exam timetable'));
+    await tester.pumpAndSettle();
+    await _acceptOcrNotice(tester);
+    await tester.drag(find.byType(ListView), const Offset(0, -800));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'Ambiguous match: multiple saved events match this import. Review before adding.',
+      ),
+      findsOneWidget,
+    );
+    final row = tester.widget<CheckboxListTile>(
+      find.byType(CheckboxListTile).first,
+    );
+    expect(row.value, isFalse);
+    expect(row.onChanged, isNull);
+    expect(find.text('Add 0 selected'), findsOneWidget);
+    await tester.ensureVisible(find.text('Add 0 selected'));
+    await tester.tap(find.text('Add 0 selected'));
+    await tester.pumpAndSettle();
+    expect(await ScheduleRepository(database).getItems(), hasLength(2));
+  });
+
+  testWidgets('general OCR does not match a saved shift by roster identity', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    final existingShift = ScheduleItem(
+      id: 'synthetic-shift-similar-to-general-ocr',
+      kind: ScheduleKind.work,
+      workCategory: WorkCategory.shift,
+      title: 'BIOL1100 Different title',
+      startDate: const CivilDate(2026, 12, 4),
+      intervals: [EventInterval.sameDay(startMinute: 540, endMinute: 660)],
+      timeZoneId: 'America/Barbados',
+      code: 'BIOL1100',
+    );
+    await ScheduleRepository(database).save(existingShift);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(fileChannel, (call) async {
+          expect(call.method, 'openOcrImport');
+          expect(call.arguments, {'rosterTable': false});
+          return {
+            'name': 'synthetic-general-ocr.pdf',
+            'text': '2026-12-04 09:00 11:00 BIOL1100 Different title',
+          };
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(fileChannel, null);
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          scheduleDatabaseProvider.overrideWithValue(database),
+          deviceTimeZoneIdProvider.overrideWith(
+            (ref) async => 'America/Barbados',
+          ),
+        ],
+        child: const MaterialApp(
+          home: SettingsPage(mode: ScheduleMode.workAndSchool),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import calendar'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.text('Read a PDF or schedule image offline'),
+    );
+    await tester.tap(find.text('Read a PDF or schedule image offline'));
+    await tester.pumpAndSettle();
+    await _acceptOcrNotice(tester);
+    await tester.drag(find.byType(ListView), const Offset(0, -800));
+    await tester.pumpAndSettle();
+
+    expect(find.text('BIOL1100 Different title'), findsOneWidget);
+    expect(
+      find.textContaining('Already saved with no schedule changes'),
+      findsNothing,
+    );
+    expect(find.text('Add 1 selected'), findsOneWidget);
+    expect(await ScheduleRepository(database).getItems(), hasLength(1));
+    await tester.tap(find.text('Add 1 selected'));
+    await tester.pumpAndSettle();
+
+    final imported = await ScheduleRepository(database).getItems();
+    expect(imported, hasLength(2));
+    expect(imported.first.id, existingShift.id);
+    expect(imported.last.kind, ScheduleKind.personal);
+    expect(imported.last.title, 'BIOL1100 Different title');
   });
 
   testWidgets('canceling OCR privacy notice never opens the file picker', (
@@ -567,9 +729,172 @@ END:VCALENDAR''';
     expect(find.text('Build shift review'), findsOneWidget);
   });
 
-  testWidgets('roster table keeps unknown codes out of saved shift drafts', (
-    tester,
-  ) async {
+  testWidgets(
+    'roster OCR matches an existing shift despite a title difference',
+    (tester) async {
+      final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(database.close);
+      final today = DateTime.now();
+      final nextDay = DateTime(today.year, today.month, today.day + 1);
+      final followingDay = DateTime(today.year, today.month, today.day + 2);
+      final tokens = [
+        for (final entry in [
+          (today.day, .20),
+          (nextDay.day, .40),
+          (followingDay.day, .60),
+        ])
+          {
+            'text': '${entry.$1}',
+            'left': entry.$2 - .02,
+            'top': .10,
+            'right': entry.$2 + .02,
+            'bottom': .12,
+            'page': 0,
+          },
+        {
+          'text': 'Person One',
+          'left': .02,
+          'top': .20,
+          'right': .12,
+          'bottom': .22,
+          'page': 0,
+        },
+        {
+          'text': 'A1',
+          'left': .18,
+          'top': .20,
+          'right': .22,
+          'bottom': .22,
+          'page': 0,
+        },
+        {
+          'text': 'UNMAPPED',
+          'left': .38,
+          'top': .20,
+          'right': .42,
+          'bottom': .22,
+          'page': 0,
+        },
+        {
+          'text': 'OFF',
+          'left': .58,
+          'top': .20,
+          'right': .62,
+          'bottom': .22,
+          'page': 0,
+        },
+      ];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(fileChannel, (call) async {
+            expect(call.method, 'openOcrImport');
+            expect(call.arguments, {'rosterTable': true});
+            return {
+              'name': 'synthetic-roster.pdf',
+              'text': 'Synthetic roster table',
+              'tokens': jsonEncode(tokens),
+            };
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(fileChannel, null);
+      });
+      await WorkCodeLegendRepository(database).save(
+        const WorkCodeLegend(
+          id: 'a1',
+          code: 'A1',
+          employer: 'Synthetic employer',
+          startMinute: 360,
+          endMinute: 540,
+        ),
+      );
+      final existingShift = ScheduleItem(
+        id: 'synthetic-owner-shift-before-roster-import',
+        kind: ScheduleKind.work,
+        workCategory: WorkCategory.shift,
+        title: 'Owner entered ramp duty',
+        startDate: CivilDate(today.year, today.month, today.day),
+        timeZoneId: 'America/Barbados',
+        code: 'A1',
+        employerName: 'Synthetic employer',
+        intervals: [EventInterval.sameDay(startMinute: 360, endMinute: 540)],
+      );
+      await ScheduleRepository(database).save(existingShift);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            scheduleDatabaseProvider.overrideWithValue(database),
+            deviceTimeZoneIdProvider.overrideWith(
+              (ref) async => 'America/Barbados',
+            ),
+          ],
+          child: const MaterialApp(
+            home: SettingsPage(mode: ScheduleMode.workAndSchool),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Import calendar'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Read a roster table'));
+      await tester.tap(find.text('Read a roster table'));
+      await tester.pumpAndSettle();
+      await _acceptOcrNotice(tester);
+      await tester.drag(find.byType(ListView), const Offset(0, -700));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.textContaining('Choose first date'));
+      await tester.tap(find.textContaining('Choose first date'));
+      await tester.pumpAndSettle();
+      expect(find.byType(DatePickerDialog), findsOneWidget);
+      await tester.tap(find.text('OK'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Choose first date'), findsNothing);
+      expect(
+        find.text(
+          'Detected dates · tap any date to correct it, then confirm the full sequence',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining(
+          MaterialLocalizations.of(
+            tester.element(find.text('Build shift review')),
+          ).formatMediumDate(today),
+        ),
+        findsWidgets,
+      );
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('confirm-roster-dates')),
+      );
+      await tester.tap(find.byKey(const ValueKey('confirm-roster-dates')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('roster-staff-row-0')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Person One').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Person One'), findsOneWidget);
+      final staffRowField = tester.widget<DropdownButtonFormField<int>>(
+        find.byKey(const ValueKey('roster-staff-row-0')),
+      );
+      expect(staffRowField.decoration.helperMaxLines, 2);
+      await tester.ensureVisible(find.text('Build shift review'));
+      await tester.tap(find.text('Build shift review'));
+      await tester.pumpAndSettle();
+      await tester.drag(find.byType(ListView), const Offset(0, -700));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Shift code: A1'), findsOneWidget);
+      expect(find.text('Day off'), findsOneWidget);
+      expect(find.textContaining('Changed since saved:'), findsOneWidget);
+      expect(find.text('Codes to review · 1'), findsOneWidget);
+      expect(find.textContaining('UNMAPPED'), findsOneWidget);
+      final saved = await ScheduleRepository(database).getItems();
+      expect(saved, hasLength(1));
+      expect(saved.single.id, existingShift.id);
+      expect(saved.single.title, 'Owner entered ramp duty');
+    },
+  );
+
+  testWidgets('ambiguous roster shift matches stay unselected', (tester) async {
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
     addTearDown(database.close);
     final today = DateTime.now();
@@ -605,29 +930,13 @@ END:VCALENDAR''';
         'bottom': .22,
         'page': 0,
       },
-      {
-        'text': 'UNMAPPED',
-        'left': .38,
-        'top': .20,
-        'right': .42,
-        'bottom': .22,
-        'page': 0,
-      },
-      {
-        'text': 'OFF',
-        'left': .58,
-        'top': .20,
-        'right': .62,
-        'bottom': .22,
-        'page': 0,
-      },
     ];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
           expect(call.method, 'openOcrImport');
           expect(call.arguments, {'rosterTable': true});
           return {
-            'name': 'synthetic-roster.pdf',
+            'name': 'synthetic-ambiguous-roster.pdf',
             'text': 'Synthetic roster table',
             'tokens': jsonEncode(tokens),
           };
@@ -640,10 +949,34 @@ END:VCALENDAR''';
       const WorkCodeLegend(
         id: 'a1',
         code: 'A1',
+        employer: 'Synthetic employer',
         startMinute: 360,
         endMinute: 540,
       ),
     );
+    for (final date in [
+      CivilDate(today.year, today.month, today.day),
+      CivilDate(nextDay.year, nextDay.month, nextDay.day),
+      CivilDate(followingDay.year, followingDay.month, followingDay.day),
+    ]) {
+      for (final suffix in ['one', 'two']) {
+        await ScheduleRepository(database).save(
+          ScheduleItem(
+            id: 'synthetic-duplicate-shift-$date-$suffix',
+            kind: ScheduleKind.work,
+            workCategory: WorkCategory.shift,
+            title: 'Saved shift $suffix',
+            startDate: date,
+            timeZoneId: 'America/Barbados',
+            code: 'A1',
+            employerName: 'Synthetic employer',
+            intervals: [
+              EventInterval.sameDay(startMinute: 360, endMinute: 540),
+            ],
+          ),
+        );
+      }
+    }
 
     await tester.pumpWidget(
       ProviderScope(
@@ -670,24 +1003,8 @@ END:VCALENDAR''';
     await tester.ensureVisible(find.textContaining('Choose first date'));
     await tester.tap(find.textContaining('Choose first date'));
     await tester.pumpAndSettle();
-    expect(find.byType(DatePickerDialog), findsOneWidget);
     await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Choose first date'), findsNothing);
-    expect(
-      find.text(
-        'Detected dates · tap any date to correct it, then confirm the full sequence',
-      ),
-      findsOneWidget,
-    );
-    expect(
-      find.textContaining(
-        MaterialLocalizations.of(
-          tester.element(find.text('Build shift review')),
-        ).formatMediumDate(today),
-      ),
-      findsWidgets,
-    );
     await tester.ensureVisible(
       find.byKey(const ValueKey('confirm-roster-dates')),
     );
@@ -697,21 +1014,27 @@ END:VCALENDAR''';
     await tester.pumpAndSettle();
     await tester.tap(find.text('Person One').last);
     await tester.pumpAndSettle();
-    expect(find.text('Person One'), findsOneWidget);
-    final staffRowField = tester.widget<DropdownButtonFormField<int>>(
-      find.byKey(const ValueKey('roster-staff-row-0')),
-    );
-    expect(staffRowField.decoration.helperMaxLines, 2);
     await tester.ensureVisible(find.text('Build shift review'));
     await tester.tap(find.text('Build shift review'));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(0, -700));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Shift code: A1'), findsOneWidget);
-    expect(find.text('Day off'), findsOneWidget);
-    expect(find.text('Codes to review · 1'), findsOneWidget);
-    expect(find.textContaining('UNMAPPED'), findsOneWidget);
-    expect(await ScheduleRepository(database).getItems(), isEmpty);
+
+    expect(
+      find.text(
+        'Ambiguous match: multiple saved events match this import. Review before adding.',
+      ),
+      findsOneWidget,
+    );
+    final row = tester.widget<CheckboxListTile>(
+      find.byType(CheckboxListTile).first,
+    );
+    expect(row.value, isFalse);
+    expect(row.onChanged, isNull);
+    row.onChanged?.call(true);
+    await tester.pumpAndSettle();
+    expect(find.text('Add 0 selected'), findsOneWidget);
+    expect(await ScheduleRepository(database).getItems(), hasLength(6));
   });
 
   testWidgets('OCR reimport under a new filename is flagged and unchecked', (

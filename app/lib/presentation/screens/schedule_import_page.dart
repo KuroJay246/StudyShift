@@ -48,18 +48,28 @@ class _ImportRow {
     required this.proposal,
     required this.included,
     this.existing,
+    this.ambiguousMatch = false,
   });
 
   final ScheduleImportProposal proposal;
   final bool included;
   final ScheduleItem? existing;
+  final bool ambiguousMatch;
 
   _ImportRow copyWith({ScheduleImportProposal? proposal, bool? included}) =>
       _ImportRow(
         proposal: proposal ?? this.proposal,
         included: included ?? this.included,
         existing: existing,
+        ambiguousMatch: ambiguousMatch,
       );
+}
+
+class _OcrMatchResult {
+  const _OcrMatchResult({this.item, this.ambiguous = false});
+
+  final ScheduleItem? item;
+  final bool ambiguous;
 }
 
 class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
@@ -541,7 +551,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           .getItems();
       final byId = {for (final item in existingItems) item.id: item};
       final unusedExistingOcrItems = existingItems
-          .where((item) => _hasOcrProvenance(item))
+          .where(_hasOcrProvenance)
           .toList();
       final matchedOcrIds = <String>{};
       if (!mounted) return;
@@ -778,7 +788,9 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           .read(scheduleRepositoryProvider)
           .getItems();
       final byId = {for (final item in existingItems) item.id: item};
-      final existingOcrItems = existingItems.where(_hasOcrProvenance).toList();
+      final existingOcrItems = existingItems
+          .where(_canMatchOcrProposal)
+          .toList();
       final matchedIds = <String>{};
       final proposals = <_ImportRow>[];
       final unresolved = <String>[];
@@ -835,9 +847,12 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             byId: byId,
             unusedExistingOcrItems: existingOcrItems,
             matchedOcrIds: matchedIds,
+            rosterProposal: true,
           );
           proposals.add(
-            reviewRow.copyWith(included: reviewRow.existing == null),
+            reviewRow.copyWith(
+              included: reviewRow.existing == null && !reviewRow.ambiguousMatch,
+            ),
           );
           continue;
         }
@@ -917,8 +932,13 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           byId: byId,
           unusedExistingOcrItems: existingOcrItems,
           matchedOcrIds: matchedIds,
+          rosterProposal: true,
         );
-        proposals.add(reviewRow.copyWith(included: reviewRow.existing == null));
+        proposals.add(
+          reviewRow.copyWith(
+            included: reviewRow.existing == null && !reviewRow.ambiguousMatch,
+          ),
+        );
       }
       if (!mounted) return;
       setState(() {
@@ -1028,15 +1048,18 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     required Map<String, ScheduleItem> byId,
     required List<ScheduleItem> unusedExistingOcrItems,
     required Set<String> matchedOcrIds,
+    bool rosterProposal = false,
   }) {
     final exactIdMatch = byId[proposal.item.id];
-    final existing =
-        exactIdMatch ??
-        _takeMatchingOcrEvent(
-          proposal.item,
-          unusedExistingOcrItems,
-          matchedOcrIds,
-        );
+    final match = exactIdMatch == null
+        ? _takeMatchingOcrEvent(
+            proposal.item,
+            unusedExistingOcrItems,
+            matchedOcrIds,
+            rosterProposal: rosterProposal,
+          )
+        : _OcrMatchResult(item: exactIdMatch);
+    final existing = match.item;
     if (existing != null) matchedOcrIds.add(existing.id);
     final matchedProposal = existing == null || existing.id == proposal.item.id
         ? proposal
@@ -1047,23 +1070,34 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     return _ImportRow(
       proposal: matchedProposal,
       existing: existing,
-      included: existing == null,
+      included: existing == null && !match.ambiguous,
+      ambiguousMatch: match.ambiguous,
     );
   }
 
-  ScheduleItem? _takeMatchingOcrEvent(
+  _OcrMatchResult _takeMatchingOcrEvent(
     ScheduleItem proposed,
     List<ScheduleItem> candidates,
-    Set<String> matchedIds,
-  ) {
-    for (final candidate in candidates) {
-      if (!matchedIds.contains(candidate.id) &&
-          _sameOcrEvent(candidate, proposed)) {
-        return candidate;
-      }
-    }
-    return null;
+    Set<String> matchedIds, {
+    required bool rosterProposal,
+  }) {
+    final matches = candidates
+        .where((candidate) => !matchedIds.contains(candidate.id))
+        .where(
+          (candidate) =>
+              _sameOcrEvent(candidate, proposed) ||
+              (rosterProposal && _sameRosterShift(candidate, proposed)),
+        )
+        .toList(growable: false);
+    if (matches.length == 1) return _OcrMatchResult(item: matches.single);
+    return _OcrMatchResult(ambiguous: matches.length > 1);
   }
+
+  bool _canMatchOcrProposal(ScheduleItem item) =>
+      _hasOcrProvenance(item) ||
+      (item.kind == ScheduleKind.work &&
+          item.workCategory == WorkCategory.shift &&
+          !item.hasNoTime);
 
   bool _hasOcrProvenance(ScheduleItem item) =>
       switch (item.importProvenance?.format) {
@@ -1080,6 +1114,30 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         normalize(saved.title) == normalize(proposed.title) &&
         normalize(saved.code ?? '') == normalize(proposed.code ?? '') &&
         saved.startDate == proposed.startDate &&
+        saved.timeZoneId == proposed.timeZoneId &&
+        saved.intervals.length == proposed.intervals.length &&
+        List.generate(
+          saved.intervals.length,
+          (index) => saved.intervals[index] == proposed.intervals[index],
+        ).every((matches) => matches);
+  }
+
+  bool _sameRosterShift(ScheduleItem saved, ScheduleItem proposed) {
+    String normalize(String? value) =>
+        value?.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase() ?? '';
+
+    final savedEmployer = normalize(saved.employerName);
+    final proposedEmployer = normalize(proposed.employerName);
+    return saved.kind == ScheduleKind.work &&
+        proposed.kind == ScheduleKind.work &&
+        saved.workCategory == WorkCategory.shift &&
+        proposed.workCategory == WorkCategory.shift &&
+        saved.startDate == proposed.startDate &&
+        normalize(saved.code).isNotEmpty &&
+        normalize(saved.code) == normalize(proposed.code) &&
+        (savedEmployer.isEmpty ||
+            proposedEmployer.isEmpty ||
+            savedEmployer == proposedEmployer) &&
         saved.timeZoneId == proposed.timeZoneId &&
         saved.intervals.length == proposed.intervals.length &&
         List.generate(
@@ -1149,7 +1207,9 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   }
 
   Future<void> _importSelected() async {
-    final selected = _rows.where((row) => row.included).toList();
+    final selected = _rows
+        .where((row) => row.included && !row.ambiguousMatch)
+        .toList();
     if (selected.isEmpty) {
       setState(() => _error = 'Select at least one event to add.');
       return;
@@ -1161,7 +1221,14 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     }
     final duplicateGroups = _duplicateBatchGroups(_rows);
     final selectedDuplicate = duplicateGroups.values.any(
-      (indexes) => indexes.where((index) => _rows[index].included).length > 1,
+      (indexes) =>
+          indexes
+              .where(
+                (index) =>
+                    _rows[index].included && !_rows[index].ambiguousMatch,
+              )
+              .length >
+          1,
     );
     if (selectedDuplicate) {
       setState(
@@ -1242,7 +1309,9 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     final duplicateCount = _rows
         .where((row) => row.included && row.existing != null)
         .length;
-    final selectedCount = _rows.where((row) => row.included).length;
+    final selectedCount = _rows
+        .where((row) => row.included && !row.ambiguousMatch)
+        .length;
     final rosterBatchCount = _batchSourceCount(_rows);
     return Scaffold(
       appBar: AppBar(
@@ -1415,15 +1484,18 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
               for (var i = 0; i < _rows.length; i++)
                 _ProposalCard(
                   row: _rows[i],
-                  onSelected: (selected) => setState(() {
-                    _rows = [
-                      for (var j = 0; j < _rows.length; j++)
-                        if (j == i)
-                          _rows[j].copyWith(included: selected)
-                        else
-                          _rows[j],
-                    ];
-                  }),
+                  onSelected: (selected) {
+                    if (_rows[i].ambiguousMatch) return;
+                    setState(() {
+                      _rows = [
+                        for (var j = 0; j < _rows.length; j++)
+                          if (j == i)
+                            _rows[j].copyWith(included: selected)
+                          else
+                            _rows[j],
+                      ];
+                    });
+                  },
                   onEdit: () => _editRow(i),
                 ),
               const SizedBox(height: 8),
@@ -1876,10 +1948,36 @@ class _ProposalCard extends StatelessWidget {
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
               value: row.included,
-              onChanged: (value) => onSelected(value ?? false),
+              onChanged: row.ambiguousMatch
+                  ? null
+                  : (value) => onSelected(value ?? false),
               title: Text(item.title),
               subtitle: Text('$date · $time · $category'),
             ),
+            if (row.ambiguousMatch)
+              Padding(
+                padding: const EdgeInsets.only(left: 44, bottom: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.warning_amber_rounded,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.error,
+                      semanticLabel: 'Ambiguous saved match',
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Ambiguous match: multiple saved events match this import. Review before adding.',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             if (item.code != null)
               Padding(
                 padding: const EdgeInsets.only(left: 44, bottom: 4),
