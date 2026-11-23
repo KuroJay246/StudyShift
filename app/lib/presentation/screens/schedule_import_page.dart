@@ -21,6 +21,7 @@ import '../../platform/schedule_import_file_bridge.dart';
 import '../design/studyshift_spacing.dart';
 import '../schedule_format.dart';
 import 'schedule_import_history_page.dart';
+import 'coworker_roster_import_page.dart';
 
 enum _ImportCategory {
   personal,
@@ -1165,6 +1166,15 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       appBar: AppBar(
         title: const Text('Import calendar'),
         actions: [
+          IconButton(
+            tooltip: 'Import coworkers to saved shifts',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const CoworkerRosterImportPage(),
+              ),
+            ),
+            icon: const Icon(Icons.groups_outlined),
+          ),
           IconButton(
             tooltip: 'Import history',
             onPressed: () => Navigator.of(context).push(

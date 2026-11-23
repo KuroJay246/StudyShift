@@ -17,6 +17,93 @@ class CsvScheduleImportParser {
   static final _sha256 = Sha256();
   static bool _timeZonesInitialized = false;
 
+  /// Reads a coworker-only roster CSV. Unlike [parse], this input never
+  /// proposes new schedule events; rows are grouped for matching to saved
+  /// work shifts by civil date and roster code.
+  CoworkerRosterPreview parseCoworkerRoster(String source) {
+    if (utf8.encode(source).length > maxBytes) {
+      throw const FormatException('This CSV file is too large.');
+    }
+    if (source.trim().isEmpty) {
+      throw const FormatException('The selected CSV file is empty.');
+    }
+    final records = _parseRecords(source);
+    if (records.isEmpty) {
+      throw const FormatException('This CSV file has no header row.');
+    }
+    final headers = records.first.fields
+        .map((field) => field.trim().toLowerCase().replaceAll(' ', '_'))
+        .toList();
+    if (headers.isNotEmpty && headers.first.startsWith('\uFEFF')) {
+      headers[0] = headers[0].replaceFirst('\uFEFF', '');
+    }
+    const dateAliases = {'date', 'shift_date', 'work_date'};
+    const codeAliases = {'code', 'shift_code', 'roster_code'};
+    const coworkerAliases = {'coworkers', 'coworker', 'colleagues'};
+    final dateIndex = headers.indexWhere(dateAliases.contains);
+    final codeIndex = headers.indexWhere(codeAliases.contains);
+    final coworkerIndex = headers.indexWhere(coworkerAliases.contains);
+    final employerIndex = headers.indexOf('employer');
+    if (headers.toSet().length != headers.length ||
+        headers.any((header) => header.isEmpty)) {
+      throw const FormatException(
+        'The CSV header contains a blank or repeated column name.',
+      );
+    }
+    if (dateIndex < 0 || codeIndex < 0 || coworkerIndex < 0) {
+      throw const FormatException(
+        'A coworker roster needs date, code, and coworkers columns.',
+      );
+    }
+    if (records.length - 1 > maxRows) {
+      throw const FormatException(
+        'This CSV file has too many rows to review at once.',
+      );
+    }
+    final grouped = <String, _CoworkerRosterBuilder>{};
+    final notices = <String>[];
+    for (final record in records.skip(1)) {
+      if (record.fields.every((field) => field.trim().isEmpty)) continue;
+      if (record.fields.length != headers.length) {
+        notices.add(
+          'Row ${record.line} has a different number of fields than the header.',
+        );
+        continue;
+      }
+      try {
+        final date = _date(record.fields[dateIndex], 'date');
+        final code = record.fields[codeIndex].trim();
+        if (code.isEmpty) throw const FormatException('The code is blank.');
+        final employer = employerIndex < 0
+            ? null
+            : _optional(record.fields[employerIndex]);
+        final names = _coworkerNames(record.fields[coworkerIndex]);
+        if (names.isEmpty) {
+          throw const FormatException('No coworker names were supplied.');
+        }
+        final key =
+            '${date.toString()}|${_normalizeCode(code)}|${employer?.toLowerCase() ?? ''}';
+        final builder = grouped.putIfAbsent(
+          key,
+          () => _CoworkerRosterBuilder(
+            date: date,
+            code: code,
+            employer: employer,
+          ),
+        );
+        builder.add(names, record.line);
+      } on FormatException catch (error) {
+        notices.add('Row ${record.line}: ${error.message}');
+      }
+    }
+    return CoworkerRosterPreview(
+      assignments: grouped.values
+          .map((row) => row.build())
+          .toList(growable: false),
+      notices: List.unmodifiable(notices),
+    );
+  }
+
   Future<ScheduleImportPreview> parse(
     String source, {
     required String sourceName,
@@ -740,8 +827,17 @@ class CsvScheduleImportParser {
             .split(';')
             .map((name) => name.trim())
             .where((name) => name.isNotEmpty)
-            .toSet()
-            .toList(growable: false);
+            .fold(<String>[], (names, name) {
+              if (!names.any(
+                (existing) => existing.toLowerCase() == name.toLowerCase(),
+              )) {
+                names.add(name);
+              }
+              return names;
+            });
+
+  static String _normalizeCode(String code) =>
+      code.trim().replaceAll(RegExp(r'\s+'), '').toUpperCase();
 
   static void _requireNoTimes(Map<String, String> values) {
     if ((values['start']?.trim().isNotEmpty ?? false) ||
@@ -892,4 +988,60 @@ class _CsvRecord {
   final List<String> fields;
   final int line;
   final String source;
+}
+
+class CoworkerRosterPreview {
+  const CoworkerRosterPreview({
+    required this.assignments,
+    required this.notices,
+  });
+
+  final List<CoworkerRosterAssignment> assignments;
+  final List<String> notices;
+}
+
+class CoworkerRosterAssignment {
+  const CoworkerRosterAssignment({
+    required this.date,
+    required this.code,
+    required this.coworkers,
+    required this.sourceRows,
+    this.employer,
+  });
+
+  final CivilDate date;
+  final String code;
+  final String? employer;
+  final List<String> coworkers;
+  final List<int> sourceRows;
+}
+
+class _CoworkerRosterBuilder {
+  _CoworkerRosterBuilder({
+    required this.date,
+    required this.code,
+    this.employer,
+  });
+
+  final CivilDate date;
+  final String code;
+  final String? employer;
+  final List<String> coworkers = [];
+  final Set<String> _normalized = {};
+  final List<int> sourceRows = [];
+
+  void add(List<String> names, int sourceRow) {
+    sourceRows.add(sourceRow);
+    for (final name in names) {
+      if (_normalized.add(name.toLowerCase())) coworkers.add(name);
+    }
+  }
+
+  CoworkerRosterAssignment build() => CoworkerRosterAssignment(
+    date: date,
+    code: code,
+    employer: employer,
+    coworkers: List.unmodifiable(coworkers),
+    sourceRows: List.unmodifiable(sourceRows),
+  );
 }

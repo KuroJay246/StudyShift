@@ -5,6 +5,23 @@ import 'package:shift_study/domain/schedule.dart';
 void main() {
   const parser = CsvScheduleImportParser();
 
+  test('groups coworker roster rows by date and code without duplicates', () {
+    final preview = parser.parseCoworkerRoster(
+      'date,code,coworkers\n'
+      '2026-11-24,A1,"Synthetic Sam;Synthetic Lee"\n'
+      '2026-11-24,a1,Synthetic Sam\n',
+    );
+
+    expect(preview.assignments, hasLength(1));
+    expect(preview.assignments.single.date, const CivilDate(2026, 11, 24));
+    expect(preview.assignments.single.code, 'A1');
+    expect(preview.assignments.single.coworkers, [
+      'Synthetic Sam',
+      'Synthetic Lee',
+    ]);
+    expect(preview.assignments.single.sourceRows, [2, 3]);
+  });
+
   test(
     'reads quoted CSV fields and keeps overnight work on the next day',
     () async {
