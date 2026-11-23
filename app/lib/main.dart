@@ -43,10 +43,10 @@ class MainApp extends ConsumerWidget {
     final themePreference = loadedPreferences == null
         ? startupAppearance?.theme
         : loadedPreferences.theme;
-    final ready =
-        loadedPreferences != null &&
-        scheduleItems.hasValue &&
-        widgetLaunchDestination.hasValue;
+    // Schedule pages render their own loading and retry states. Keep their
+    // first frame responsive instead of making the splash wait for the entire
+    // local schedule stream to emit.
+    final ready = loadedPreferences != null && widgetLaunchDestination.hasValue;
     final destination = startupError != null
         ? StartupFailureScreen(
             message: startupError.toString(),
