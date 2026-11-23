@@ -1,7 +1,7 @@
 name: shift_study
 description: "Private, offline-first personal scheduling for work, study and everyday life."
 publish_to: 'none'
-version: 0.1.0+24389
+version: 0.1.0+24391
 
 environment:
   sdk: ^3.13.7

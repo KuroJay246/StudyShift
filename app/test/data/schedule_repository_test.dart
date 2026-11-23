@@ -619,4 +619,113 @@ void main() {
     expect(saved.last.coworkers, ['Before']);
     expect(saved.last.code, 'UPDATED');
   });
+
+  test(
+    'roster apply commits new entries and coworker updates together',
+    () async {
+      final existing = ScheduleItem(
+        id: 'roster-existing-shift',
+        kind: ScheduleKind.work,
+        title: 'Owner entered ramp duty',
+        startDate: CivilDate(2026, 11, 24),
+        timeZoneId: 'America/Barbados',
+        intervals: [EventInterval.sameDay(startMinute: 360, endMinute: 540)],
+        code: 'A1',
+        employerName: 'Synthetic employer',
+        notes: 'Keep current details',
+      );
+      final dayOff = ScheduleItem(
+        id: 'roster-day-off',
+        kind: ScheduleKind.work,
+        title: 'Day off',
+        startDate: CivilDate(2026, 11, 25),
+        intervals: const [],
+        workCategory: WorkCategory.dayOff,
+        importProvenance: ScheduleImportProvenance(
+          format: 'pdf-ocr',
+          uid: 'roster-cell-day-off',
+          sourceName: 'synthetic-roster.pdf',
+          sourceText: 'Roster cell OFF',
+          importedAt: DateTime.utc(2026, 11, 23),
+        ),
+      );
+      await repository.save(existing);
+
+      final result = await repository.applyRosterImport(
+        eventItems: [dayOff],
+        coworkerUpdates: [
+          existing.copyWith(coworkers: const ['Synthetic Coworker']),
+        ],
+        replaceExisting: false,
+        historyDraft: ScheduleImportHistoryDraft(
+          sourceType: ScheduleImportSourceType.pdfOcr,
+          parserVersion: '1',
+          proposedCount: 2,
+          rejectedCount: 0,
+          skippedCount: 0,
+          warningsCount: 0,
+          importedAt: DateTime.utc(2026, 11, 23),
+        ),
+      );
+
+      final saved = await repository.getItems();
+      expect(result.inserted, 1);
+      expect(saved, hasLength(2));
+      final updated = saved.singleWhere((item) => item.id == existing.id);
+      expect(updated.title, existing.title);
+      expect(updated.intervals, existing.intervals);
+      expect(updated.notes, existing.notes);
+      expect(updated.coworkers, ['Synthetic Coworker']);
+      final history = await ScheduleImportHistoryRepository(db).getEntries();
+      expect(history.single.acceptedCount, 2);
+    },
+  );
+
+  test(
+    'stale roster match rolls back new entries and coworker updates',
+    () async {
+      final existing = ScheduleItem(
+        id: 'roster-stale-existing-shift',
+        kind: ScheduleKind.work,
+        title: 'Owner entered ramp duty',
+        startDate: CivilDate(2026, 11, 24),
+        intervals: [EventInterval.sameDay(startMinute: 360, endMinute: 540)],
+        code: 'A1',
+        coworkers: const ['Before'],
+      );
+      final imported = ScheduleItem(
+        id: 'roster-stale-day-off',
+        kind: ScheduleKind.work,
+        title: 'Day off',
+        startDate: CivilDate(2026, 11, 25),
+        intervals: const [],
+        workCategory: WorkCategory.dayOff,
+        importProvenance: ScheduleImportProvenance(
+          format: 'pdf-ocr',
+          uid: 'roster-cell-stale-day-off',
+          sourceName: 'synthetic-roster.pdf',
+          sourceText: 'Roster cell OFF',
+          importedAt: DateTime.utc(2026, 11, 23),
+        ),
+      );
+      await repository.save(existing);
+      await repository.save(existing.copyWith(code: 'UPDATED'));
+
+      await expectLater(
+        repository.applyRosterImport(
+          eventItems: [imported],
+          coworkerUpdates: [
+            existing.copyWith(coworkers: const ['After']),
+          ],
+          replaceExisting: false,
+        ),
+        throwsA(isA<FormatException>()),
+      );
+
+      final saved = await repository.getItems();
+      expect(saved, hasLength(1));
+      expect(saved.single.coworkers, ['Before']);
+      expect(saved.single.code, 'UPDATED');
+    },
+  );
 }

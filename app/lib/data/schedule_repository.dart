@@ -312,6 +312,78 @@ class ScheduleRepository {
     );
   }
 
+  /// Commits a reviewed roster's owned events and coworker-only updates
+  /// together, without turning coworker rows into new calendar entries.
+  Future<ScheduleImportResult> applyRosterImport({
+    required List<ScheduleItem> eventItems,
+    required List<ScheduleItem> coworkerUpdates,
+    required bool replaceExisting,
+    ScheduleImportHistoryDraft? historyDraft,
+  }) async {
+    final eventIds = <String>{};
+    if (eventItems.any(
+      (item) => item.importProvenance == null || !eventIds.add(item.id),
+    )) {
+      throw const FormatException(
+        'The roster import contains a shift without source information or a duplicate shift.',
+      );
+    }
+    final coworkerIds = coworkerUpdates.map((item) => item.id).toSet();
+    if (coworkerIds.length != coworkerUpdates.length ||
+        coworkerIds.any(eventIds.contains)) {
+      throw const FormatException(
+        'The roster import contains a duplicate or conflicting shift update.',
+      );
+    }
+
+    var inserted = 0;
+    var replaced = 0;
+    var skipped = 0;
+    await database.transaction(() async {
+      final savedItems = await getItems();
+      final byId = {for (final item in savedItems) item.id: item};
+      final coworkerTargets = <ScheduleItem>[];
+      for (final reviewed in coworkerUpdates) {
+        final current = byId[reviewed.id];
+        if (current == null || !_sameCoworkerTarget(current, reviewed)) {
+          throw const FormatException(
+            'A matched shift changed after review. Reopen the roster preview and try again.',
+          );
+        }
+        coworkerTargets.add(current.copyWith(coworkers: reviewed.coworkers));
+      }
+
+      final existingIds = byId.keys.toSet();
+      for (final item in eventItems) {
+        if (existingIds.contains(item.id)) {
+          if (!replaceExisting) {
+            skipped++;
+            continue;
+          }
+          replaced++;
+        } else {
+          inserted++;
+        }
+        await save(item);
+      }
+      for (final updated in coworkerTargets) {
+        await save(updated);
+      }
+      if (historyDraft != null) {
+        await ScheduleImportHistoryRepository(database).recordWithinTransaction(
+          historyDraft,
+          acceptedCount: inserted + replaced + coworkerTargets.length,
+          additionalSkippedCount: skipped,
+        );
+      }
+    });
+    return ScheduleImportResult(
+      inserted: inserted,
+      replaced: replaced,
+      skipped: skipped,
+    );
+  }
+
   bool _sameCoworkerTarget(ScheduleItem current, ScheduleItem reviewed) {
     if (current.kind != ScheduleKind.work ||
         current.hasNoTime ||

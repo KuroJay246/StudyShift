@@ -49,20 +49,33 @@ class _ImportRow {
     required this.included,
     this.existing,
     this.ambiguousMatch = false,
+    this.coworkerOnly = false,
+    this.sourceName,
   });
 
   final ScheduleImportProposal proposal;
   final bool included;
   final ScheduleItem? existing;
   final bool ambiguousMatch;
+  final bool coworkerOnly;
+  final String? sourceName;
 
-  _ImportRow copyWith({ScheduleImportProposal? proposal, bool? included}) =>
-      _ImportRow(
-        proposal: proposal ?? this.proposal,
-        included: included ?? this.included,
-        existing: existing,
-        ambiguousMatch: ambiguousMatch,
-      );
+  String? get effectiveSourceName =>
+      sourceName ?? proposal.item.importProvenance?.sourceName;
+
+  _ImportRow copyWith({
+    ScheduleImportProposal? proposal,
+    bool? included,
+    bool? coworkerOnly,
+    String? sourceName,
+  }) => _ImportRow(
+    proposal: proposal ?? this.proposal,
+    included: included ?? this.included,
+    existing: existing,
+    ambiguousMatch: ambiguousMatch,
+    coworkerOnly: coworkerOnly ?? this.coworkerOnly,
+    sourceName: sourceName ?? this.sourceName,
+  );
 }
 
 class _OcrMatchResult {
@@ -851,7 +864,9 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           );
           proposals.add(
             reviewRow.copyWith(
-              included: reviewRow.existing == null && !reviewRow.ambiguousMatch,
+              included:
+                  (reviewRow.existing == null || reviewRow.coworkerOnly) &&
+                  !reviewRow.ambiguousMatch,
             ),
           );
           continue;
@@ -936,7 +951,9 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         );
         proposals.add(
           reviewRow.copyWith(
-            included: reviewRow.existing == null && !reviewRow.ambiguousMatch,
+            included:
+                (reviewRow.existing == null || reviewRow.coworkerOnly) &&
+                !reviewRow.ambiguousMatch,
           ),
         );
       }
@@ -945,8 +962,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         final currentSource = _sourceName;
         final retainedRows = [
           for (final row in _rows)
-            if (row.proposal.item.importProvenance?.sourceName != currentSource)
-              row,
+            if (row.effectiveSourceName != currentSource) row,
         ];
         final combinedRows = [...retainedRows, ...proposals];
         final duplicates = _duplicateBatchGroups(combinedRows);
@@ -998,14 +1014,13 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
 
   bool _isImportedWorkRow(_ImportRow row) {
     final item = row.proposal.item;
-    final sourceName = item.importProvenance?.sourceName.trim() ?? '';
+    final sourceName = row.effectiveSourceName?.trim() ?? '';
     return item.kind == ScheduleKind.work && sourceName.isNotEmpty;
   }
 
   int _batchSourceCount(List<_ImportRow> rows) => {
     for (final row in rows)
-      if (_isImportedWorkRow(row))
-        row.proposal.item.importProvenance!.sourceName,
+      if (_isImportedWorkRow(row)) row.effectiveSourceName!,
   }.length;
 
   Map<String, List<int>> _duplicateBatchGroups(List<_ImportRow> rows) {
@@ -1032,10 +1047,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     return {
       for (final entry in grouped.entries)
         if (entry.value
-                .map(
-                  (index) =>
-                      rows[index].proposal.item.importProvenance!.sourceName,
-                )
+                .map((index) => rows[index].effectiveSourceName!)
                 .toSet()
                 .length >
             1)
@@ -1061,17 +1073,37 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         : _OcrMatchResult(item: exactIdMatch);
     final existing = match.item;
     if (existing != null) matchedOcrIds.add(existing.id);
-    final matchedProposal = existing == null || existing.id == proposal.item.id
+    var matchedProposal = existing == null || existing.id == proposal.item.id
         ? proposal
         : ScheduleImportProposal(
             item: _withItemId(proposal.item, existing.id),
             sourceText: proposal.sourceText,
           );
+    var coworkerOnly = false;
+    if (existing != null && rosterProposal && !match.ambiguous) {
+      final mergedCoworkers = [...existing.coworkers];
+      for (final name in proposal.item.coworkers) {
+        if (!mergedCoworkers.any(
+          (saved) => saved.trim().toLowerCase() == name.trim().toLowerCase(),
+        )) {
+          mergedCoworkers.add(name);
+        }
+      }
+      coworkerOnly = mergedCoworkers.length != existing.coworkers.length;
+      if (coworkerOnly) {
+        matchedProposal = ScheduleImportProposal(
+          item: existing.copyWith(coworkers: mergedCoworkers),
+          sourceText: proposal.sourceText,
+        );
+      }
+    }
     return _ImportRow(
       proposal: matchedProposal,
       existing: existing,
-      included: existing == null && !match.ambiguous,
+      included: (existing == null || coworkerOnly) && !match.ambiguous,
       ambiguousMatch: match.ambiguous,
+      coworkerOnly: coworkerOnly,
+      sourceName: proposal.item.importProvenance?.sourceName,
     );
   }
 
@@ -1211,7 +1243,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         .where((row) => row.included && !row.ambiguousMatch)
         .toList();
     if (selected.isEmpty) {
-      setState(() => _error = 'Select at least one event to add.');
+      setState(() => _error = 'Select at least one change to apply.');
       return;
     }
     final sourceType = _sourceType;
@@ -1242,15 +1274,17 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     final skippedDuplicateCount = _rows
         .where((row) => !row.included && row.existing != null)
         .length;
-    final duplicateCount = selected.where((row) => row.existing != null).length;
-    if (_replaceMatches && duplicateCount > 0) {
+    final eventDuplicateCount = selected
+        .where((row) => row.existing != null && !row.coworkerOnly)
+        .length;
+    if (_replaceMatches && eventDuplicateCount > 0) {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           icon: const Icon(Icons.warning_amber_rounded),
           title: const Text('Replace saved events?'),
           content: Text(
-            '$duplicateCount matching event${duplicateCount == 1 ? '' : 's'} will be replaced with the reviewed calendar version. This cannot be undone in the app.',
+            '$eventDuplicateCount matching event${eventDuplicateCount == 1 ? '' : 's'} will be replaced with the reviewed calendar version. This cannot be undone in the app.',
           ),
           actions: [
             TextButton(
@@ -1271,10 +1305,18 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _error = null;
     });
     try {
+      final coworkerUpdates = selected
+          .where((row) => row.coworkerOnly)
+          .map((row) => row.proposal.item)
+          .toList(growable: false);
       final result = await ref
           .read(scheduleRepositoryProvider)
-          .importItems(
-            [for (final row in selected) row.proposal.item],
+          .applyRosterImport(
+            eventItems: [
+              for (final row in selected)
+                if (!row.coworkerOnly) row.proposal.item,
+            ],
+            coworkerUpdates: coworkerUpdates,
             replaceExisting: _replaceMatches,
             historyDraft: ScheduleImportHistoryDraft(
               sourceType: sourceType,
@@ -1292,7 +1334,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Added ${result.inserted}, replaced ${result.replaced}, skipped ${result.skipped}.',
+              'Added ${result.inserted}, replaced ${result.replaced}, skipped ${result.skipped}.${coworkerUpdates.isEmpty ? '' : ' Updated coworkers on ${coworkerUpdates.length} ${coworkerUpdates.length == 1 ? 'shift' : 'shifts'}.'}',
             ),
           ),
         );
@@ -1313,6 +1355,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         .where((row) => row.included && !row.ambiguousMatch)
         .length;
     final rosterBatchCount = _batchSourceCount(_rows);
+    final hasCoworkerUpdates = _rows.any((row) => row.coworkerOnly);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Import calendar'),
@@ -1477,7 +1520,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                   ),
                 ),
               Text(
-                'Proposed events · $selectedCount selected',
+                '${hasCoworkerUpdates ? 'Proposed changes' : 'Proposed events'} · $selectedCount selected',
                 style: Theme.of(context).textTheme.titleMedium
                     ?.copyWith(fontWeight: FontWeight.w700),
               ),
@@ -1605,7 +1648,13 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                         )
                       : const Icon(Icons.playlist_add_check_rounded),
                   label: Text(
-                    _saving ? 'Adding events…' : 'Add $selectedCount selected',
+                    _saving
+                        ? hasCoworkerUpdates
+                              ? 'Applying changes…'
+                              : 'Adding events…'
+                        : hasCoworkerUpdates
+                        ? 'Apply $selectedCount selected'
+                        : 'Add $selectedCount selected',
                   ),
                 ),
               ),
@@ -1998,7 +2047,14 @@ class _ProposalCard extends StatelessWidget {
                 padding: const EdgeInsets.only(left: 44, bottom: 4),
                 child: Text(_recurrenceDescription(context, item.recurrence!)),
               ),
-            if (existing != null)
+            if (row.coworkerOnly && existing != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 44, bottom: 4),
+                child: Text(
+                  'Coworkers to add: ${item.coworkers.where((name) => !existing.coworkers.any((saved) => saved.trim().toLowerCase() == name.trim().toLowerCase())).join(', ')}. Saved shift details stay unchanged.',
+                ),
+              )
+            else if (existing != null)
               Padding(
                 padding: const EdgeInsets.only(left: 44, bottom: 4),
                 child: Text(
@@ -2071,6 +2127,14 @@ List<String> _importedScheduleChanges(
   if (saved.timeZoneId != proposed.timeZoneId) changes.add('time zone');
   if (saved.code != proposed.code) changes.add('code');
   if (saved.employerName != proposed.employerName) changes.add('employer');
+  if (saved.coworkers.length != proposed.coworkers.length ||
+      saved.coworkers.indexed.any(
+        (entry) =>
+            entry.$1 >= proposed.coworkers.length ||
+            proposed.coworkers[entry.$1] != entry.$2,
+      )) {
+    changes.add('coworkers');
+  }
   if (saved.location != proposed.location) changes.add('location');
   if (saved.notes != proposed.notes) changes.add('notes');
   if (!_sameRecurrence(saved.recurrence, proposed.recurrence)) {

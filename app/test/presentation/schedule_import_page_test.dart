@@ -12,6 +12,7 @@ import 'package:shift_study/data/schedule_import_history_repository.dart';
 import 'package:shift_study/data/work_code_legend_repository.dart';
 import 'package:shift_study/data/csv_schedule_import.dart';
 import 'package:shift_study/data/preferences_repository.dart';
+import 'package:shift_study/data/roster_grid_import.dart';
 import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/domain/work_code_legend.dart';
 import 'package:shift_study/presentation/screens/settings_page.dart';
@@ -768,6 +769,22 @@ END:VCALENDAR''';
           'page': 0,
         },
         {
+          'text': 'Synthetic Coworker',
+          'left': .02,
+          'top': .28,
+          'right': .14,
+          'bottom': .30,
+          'page': 0,
+        },
+        {
+          'text': 'A1',
+          'left': .18,
+          'top': .28,
+          'right': .22,
+          'bottom': .30,
+          'page': 0,
+        },
+        {
           'text': 'UNMAPPED',
           'left': .38,
           'top': .20,
@@ -784,6 +801,37 @@ END:VCALENDAR''';
           'page': 0,
         },
       ];
+      final detectedTable = const RosterGridImportParser()
+          .detect([
+            for (final token in tokens)
+              OcrTextToken(
+                text: token['text']! as String,
+                left: token['left']! as double,
+                top: token['top']! as double,
+                right: token['right']! as double,
+                bottom: token['bottom']! as double,
+              ),
+          ])
+          .candidates
+          .single;
+      expect(
+        const RosterGridImportParser().coworkersForCell(
+          detectedTable,
+          selectedRow: 0,
+          columnIndex: 0,
+          code: 'A1',
+          legends: const [
+            WorkCodeLegend(
+              id: 'a1',
+              code: 'A1',
+              employer: 'Synthetic employer',
+              startMinute: 360,
+              endMinute: 540,
+            ),
+          ],
+        ),
+        ['Synthetic Coworker'],
+      );
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(fileChannel, (call) async {
             expect(call.method, 'openOcrImport');
@@ -880,17 +928,40 @@ END:VCALENDAR''';
       await tester.ensureVisible(find.text('Build shift review'));
       await tester.tap(find.text('Build shift review'));
       await tester.pumpAndSettle();
-      await tester.drag(find.byType(ListView), const Offset(0, -700));
+      await tester.scrollUntilVisible(
+        find.textContaining('Coworkers to add:'),
+        240,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.pumpAndSettle();
       expect(find.textContaining('Shift code: A1'), findsOneWidget);
       expect(find.text('Day off'), findsOneWidget);
-      expect(find.textContaining('Changed since saved:'), findsOneWidget);
+      expect(
+        find.textContaining('Coworkers to add: Synthetic Coworker'),
+        findsOneWidget,
+      );
+      await tester.scrollUntilVisible(
+        find.text('Codes to review · 1'),
+        240,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('Codes to review · 1'), findsOneWidget);
       expect(find.textContaining('UNMAPPED'), findsOneWidget);
       final saved = await ScheduleRepository(database).getItems();
       expect(saved, hasLength(1));
       expect(saved.single.id, existingShift.id);
       expect(saved.single.title, 'Owner entered ramp duty');
+
+      await tester.tap(find.byIcon(Icons.playlist_add_check_rounded));
+      await tester.pumpAndSettle();
+      final applied = await ScheduleRepository(database).getItems();
+      final retainedShift = applied.singleWhere(
+        (item) => item.id == existingShift.id,
+      );
+      expect(applied, hasLength(2));
+      expect(retainedShift.title, existingShift.title);
+      expect(retainedShift.intervals, existingShift.intervals);
+      expect(retainedShift.coworkers, ['Synthetic Coworker']);
     },
   );
 
