@@ -1888,7 +1888,8 @@ class _ScheduleCollectionPageState
         final now = _now();
         final today = CivilDate.fromDateTime(now);
         final through = today.addDays(90);
-        final weekThrough = today.addDays(7);
+        final weekStart = today.addDays(1 - today.weekday);
+        final weekThrough = weekStart.addDays(6);
         final queries = ref.read(scheduleQueriesProvider);
         final showOvertimeByOccurrence =
             widget.kind == ScheduleKind.work && _selectedFilter == 'Overtime';
@@ -2092,7 +2093,7 @@ class _ScheduleCollectionPageState
         final localizations = MaterialLocalizations.of(context);
         final compactLayout = MediaQuery.sizeOf(context).height < 500;
         final weekItems = queries
-            .forRange(allItems, today, weekThrough)
+            .forRange(allItems, weekStart, weekThrough)
             .where((entry) => entry.item.kind == ScheduleKind.work)
             .toList();
         var scheduledMinutes = 0;

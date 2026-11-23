@@ -126,6 +126,51 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('weekly work summary includes shifts earlier in the same week', (
+    tester,
+  ) async {
+    await scheduleRepository.save(
+      ScheduleItem(
+        id: 'synthetic-weekly-past-shift',
+        kind: ScheduleKind.work,
+        title: 'Synthetic completed Monday shift',
+        startDate: CivilDate(2026, 11, 23),
+        intervals: [EventInterval.sameDay(startMinute: 300, endMinute: 540)],
+      ),
+    );
+    await scheduleRepository.save(
+      ScheduleItem(
+        id: 'synthetic-weekly-future-shift',
+        kind: ScheduleKind.work,
+        title: 'Synthetic future Tuesday shift',
+        startDate: CivilDate(2026, 11, 24),
+        intervals: [EventInterval.sameDay(startMinute: 600, endMinute: 840)],
+      ),
+    );
+    final container = createContainer();
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: Scaffold(
+            body: WorkPage(clock: () => DateTime(2026, 11, 23, 9)),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester.widgetList<Text>(find.byType(Text)).map((text) => text.data),
+      containsAll(['8', '2']),
+    );
+    expect(find.text('Synthetic completed Monday shift'), findsOneWidget);
+    expect(find.text('Synthetic future Tuesday shift'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('Overtime filter keeps the adjusted future recurrence date', (
     tester,
   ) async {
@@ -151,7 +196,7 @@ void main() {
         child: MaterialApp(
           theme: AppTheme.light(),
           home: Scaffold(
-            body: WorkPage(clock: () => DateTime(2026, 11, 23, 8)),
+            body: WorkPage(clock: () => DateTime(2026, 11, 30, 8)),
           ),
         ),
       ),
