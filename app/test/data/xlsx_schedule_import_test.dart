@@ -29,6 +29,46 @@ void main() {
     );
   });
 
+  test('parses coworker-only roster columns without event fields', () async {
+    final preview = parser.parseCoworkerRoster(
+      Uint8List.fromList(
+        _workbook(
+          headers: ['date', 'roster_code', 'coworkers'],
+          values: ['2026-11-24', 'A1', 'Synthetic Sam;Synthetic Lee'],
+        ),
+      ),
+    );
+
+    expect(preview.assignments, hasLength(1));
+    expect(preview.assignments.single.date.toString(), '2026-11-24');
+    expect(preview.assignments.single.code, 'A1');
+    expect(preview.assignments.single.coworkers, [
+      'Synthetic Sam',
+      'Synthetic Lee',
+    ]);
+  });
+
+  test('coworker roster workbook rejects formulas before parsing names', () {
+    expect(
+      () => parser.parseCoworkerRoster(
+        Uint8List.fromList(
+          _workbook(
+            headers: ['date', 'code', 'coworkers'],
+            values: ['2026-11-24', 'A1', 'Synthetic coworker'],
+            formula: true,
+          ),
+        ),
+      ),
+      throwsA(
+        isA<FormatException>().having(
+          (error) => error.message,
+          'message',
+          contains('formulas'),
+        ),
+      ),
+    );
+  });
+
   test('inspects and maps alternate Excel headings locally', () async {
     final bytes = Uint8List.fromList(
       _workbook(
@@ -144,6 +184,7 @@ List<int> _workbook({
   bool formula = false,
   bool hiddenRow = false,
   List<String>? headers,
+  List<String>? values,
 }) {
   final archive = Archive();
   void add(String name, String contents) {
@@ -163,21 +204,25 @@ List<int> _workbook({
   );
   final columns =
       headers ?? ['date', 'title', 'category', 'start', 'end', 'time_zone'];
-  final values = [
-    '2026-11-07',
-    'Synthetic ramp shift',
-    'shift',
-    '22:00',
-    '06:00',
-    'America/Barbados',
-  ];
+  final rowValues =
+      values ??
+      [
+        '2026-11-07',
+        'Synthetic ramp shift',
+        'shift',
+        '22:00',
+        '06:00',
+        'America/Barbados',
+      ];
   final rows = <String>[];
   for (var rowIndex = 0; rowIndex < 2; rowIndex++) {
     final cells = <String>[];
     for (var columnIndex = 0; columnIndex < columns.length; columnIndex++) {
       final reference =
           '${String.fromCharCode(65 + columnIndex)}${rowIndex + 1}';
-      final value = rowIndex == 0 ? columns[columnIndex] : values[columnIndex];
+      final value = rowIndex == 0
+          ? columns[columnIndex]
+          : rowValues[columnIndex];
       final formulaNode = formula && rowIndex == 1 && columnIndex == 1
           ? '<f>"Synthetic ramp shift"</f><v>Synthetic ramp shift</v>'
           : '<is><t>$value</t></is>';

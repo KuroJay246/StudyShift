@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../application/dependencies.dart';
 import '../../data/csv_schedule_import.dart';
 import '../../data/coworker_roster_matcher.dart';
+import '../../data/xlsx_schedule_import.dart';
 import '../../platform/schedule_import_file_bridge.dart';
 
 class CoworkerRosterImportPage extends ConsumerStatefulWidget {
@@ -21,6 +22,7 @@ class _CoworkerRosterImportPageState
   final _fileBridge = const ScheduleImportFileBridge();
   final _parser = const CsvScheduleImportParser();
   final _matcher = const CoworkerRosterMatcher();
+  final _xlsxParser = const XlsxScheduleImportParser();
   List<CoworkerRosterMatch> _matches = const [];
   List<String> _notices = const [];
   String? _fileName;
@@ -39,14 +41,16 @@ class _CoworkerRosterImportPageState
     try {
       final selected = await _fileBridge.openCalendar();
       if (selected == null) return;
-      if (!selected.name.toLowerCase().endsWith('.csv')) {
-        throw const FormatException(
-          'Coworker-only import currently accepts CSV files. Convert the roster to CSV and keep date, code and coworkers columns.',
-        );
-      }
-      final parsed = _parser.parseCoworkerRoster(
-        utf8.decode(selected.bytes!, allowMalformed: false),
-      );
+      final name = selected.name.toLowerCase();
+      final parsed = name.endsWith('.csv')
+          ? _parser.parseCoworkerRoster(
+              utf8.decode(selected.bytes!, allowMalformed: false),
+            )
+          : name.endsWith('.xlsx')
+          ? _xlsxParser.parseCoworkerRoster(selected.bytes!)
+          : throw const FormatException(
+              'Choose a .csv or .xlsx coworker roster file.',
+            );
       final saved = await ref.read(scheduleRepositoryProvider).getItems();
       final matches = parsed.assignments
           .map((assignment) => _matcher.match(assignment, saved))
@@ -139,7 +143,7 @@ class _CoworkerRosterImportPageState
             ),
             const SizedBox(height: 8),
             const Text(
-              'Use a CSV with date, code and coworkers columns. StudyShift matches the date and roster code to existing shifts. This flow never creates shifts.',
+              'Use a CSV or Excel sheet with date, code and coworkers columns. StudyShift matches the date and roster code to existing shifts. This flow never creates shifts.',
             ),
             const SizedBox(height: 8),
             const Text(
@@ -155,7 +159,7 @@ class _CoworkerRosterImportPageState
                     )
                   : const Icon(Icons.file_open_outlined),
               label: Text(
-                _loading ? 'Reading roster…' : 'Choose coworker roster CSV',
+                _loading ? 'Reading roster…' : 'Choose coworker roster file',
               ),
             ),
             if (_fileName != null) ...[

@@ -196,6 +196,178 @@ class XlsxScheduleImportParser {
     return ScheduleImportPreview(proposals: proposals, notices: notices);
   }
 
+  /// Reads coworker-only worksheets without requiring event titles, times, or
+  /// categories. It applies the same ZIP, XML, formula, visibility, and size
+  /// checks as calendar imports before matching rows to saved shifts.
+  CoworkerRosterPreview parseCoworkerRoster(Uint8List bytes) {
+    if (bytes.isEmpty || bytes.length > maxBytes) {
+      throw const FormatException('This Excel file is empty or too large.');
+    }
+    final archive = _inspectZip(bytes);
+    final workbookFile = archive.findFile('xl/workbook.xml');
+    if (workbookFile == null) {
+      throw const FormatException('Choose a valid .xlsx workbook.');
+    }
+    final workbookXml = _parseXml(
+      Uint8List.fromList(workbookFile.content as List<int>),
+    );
+    final sheets = workbookXml.findAllElements('sheet').toList();
+    if (sheets.isEmpty || sheets.length > maxSheets) {
+      throw const FormatException('This workbook needs 1 to 8 worksheets.');
+    }
+    if (sheets.any(
+      (sheet) =>
+          sheet.getAttribute('state') != null &&
+          sheet.getAttribute('state') != 'visible',
+    )) {
+      throw const FormatException('Unhide all worksheets before importing.');
+    }
+
+    var totalRows = 0;
+    for (final entry in archive.files.where(
+      (file) =>
+          file.isFile &&
+          file.name.startsWith('xl/worksheets/') &&
+          file.name.endsWith('.xml'),
+    )) {
+      final document = _parseXml(
+        Uint8List.fromList(entry.content as List<int>),
+      );
+      if (document.findAllElements('f').isNotEmpty) {
+        throw const FormatException(
+          'Remove formulas from the workbook before importing.',
+        );
+      }
+      if (document
+              .findAllElements('row')
+              .any(
+                (row) =>
+                    row.getAttribute('hidden') == '1' ||
+                    row.getAttribute('hidden') == 'true',
+              ) ||
+          document
+              .findAllElements('col')
+              .any(
+                (column) =>
+                    column.getAttribute('hidden') == '1' ||
+                    column.getAttribute('hidden') == 'true',
+              )) {
+        throw const FormatException(
+          'Unhide all rows and columns before importing.',
+        );
+      }
+      final rowNodes = document.findAllElements('row').toList();
+      totalRows += rowNodes.length;
+      if (rowNodes.length > maxRowsPerSheet ||
+          totalRows > CsvScheduleImportParser.maxRows) {
+        throw const FormatException(
+          'This workbook has too many rows to review at once.',
+        );
+      }
+      for (final row in rowNodes) {
+        final rowNumber = int.tryParse(row.getAttribute('r') ?? '');
+        if (rowNumber == null || rowNumber > maxRowsPerSheet + 1) {
+          throw const FormatException(
+            'A worksheet has an unsupported sparse row layout.',
+          );
+        }
+      }
+      for (final cell in document.findAllElements('c')) {
+        final reference = cell.getAttribute('r') ?? '';
+        final match = RegExp(r'^([A-Z]+)([1-9][0-9]*)$').firstMatch(reference);
+        if (match == null ||
+            _columnNumber(match.group(1)!) > maxColumns ||
+            int.parse(match.group(2)!) > maxRowsPerSheet + 1) {
+          throw const FormatException(
+            'A worksheet cell is outside the supported review area.',
+          );
+        }
+      }
+    }
+
+    final decoder = XlsxDecoder(archive);
+    final normalizedRows = <String>['date,code,coworkers,employer'];
+    final notices = <String>[];
+    var recognizedSheetCount = 0;
+    for (final sheet in sheets) {
+      final sheetName = sheet.getAttribute('name') ?? '';
+      final table = decoder.tables[sheetName];
+      if (table == null || table.rows.isEmpty) continue;
+      if (table.rows.length > maxRowsPerSheet + 1 ||
+          table.maxCols > maxColumns) {
+        throw const FormatException(
+          'A worksheet is larger than its supported review area.',
+        );
+      }
+      final rows = table.rows
+          .map((row) => row.map(_cellText).toList())
+          .toList();
+      final headers = rows.first
+          .map((value) => value.trim().toLowerCase().replaceAll(' ', '_'))
+          .toList(growable: false);
+      final dateIndex = headers.indexWhere(
+        const {'date', 'shift_date', 'work_date'}.contains,
+      );
+      final codeIndex = headers.indexWhere(
+        const {'code', 'shift_code', 'roster_code'}.contains,
+      );
+      final coworkersIndex = headers.indexWhere(
+        const {'coworkers', 'coworker', 'colleagues'}.contains,
+      );
+      final employerIndex = headers.indexOf('employer');
+      if (headers.toSet().length != headers.length ||
+          headers.any((header) => header.isEmpty)) {
+        notices.add(
+          'Worksheet "$sheetName" has blank or repeated headings and was skipped.',
+        );
+        continue;
+      }
+      if (dateIndex < 0 || codeIndex < 0 || coworkersIndex < 0) {
+        notices.add(
+          'Worksheet "$sheetName" was skipped because it needs date, code and coworkers columns.',
+        );
+        continue;
+      }
+      recognizedSheetCount++;
+      for (var rowIndex = 1; rowIndex < rows.length; rowIndex++) {
+        final row = rows[rowIndex];
+        if (row.every((value) => value.trim().isEmpty)) continue;
+        while (row.length < headers.length) {
+          row.add('');
+        }
+        if (row.length > headers.length) {
+          notices.add(
+            'Worksheet "$sheetName", row ${rowIndex + 1} has extra cells and was skipped.',
+          );
+          continue;
+        }
+        normalizedRows.add(
+          _csvLine([
+            row[dateIndex],
+            row[codeIndex],
+            row[coworkersIndex],
+            employerIndex < 0 ? '' : row[employerIndex],
+          ]),
+        );
+      }
+    }
+    if (recognizedSheetCount == 0) {
+      throw const FormatException(
+        'No worksheet has date, code and coworkers columns.',
+      );
+    }
+    if (normalizedRows.length - 1 > CsvScheduleImportParser.maxRows) {
+      throw const FormatException(
+        'This workbook has too many coworker rows to review at once.',
+      );
+    }
+    final parsed = _csvParser.parseCoworkerRoster(normalizedRows.join('\n'));
+    return CoworkerRosterPreview(
+      assignments: parsed.assignments,
+      notices: List.unmodifiable([...notices, ...parsed.notices]),
+    );
+  }
+
   /// Returns the first visible worksheet's header row for a local mapping step.
   /// Parsing still performs the complete workbook safety checks before use.
   List<String> inspectHeaders(Uint8List bytes) {
