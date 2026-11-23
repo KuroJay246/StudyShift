@@ -59,6 +59,75 @@ void main() {
     );
   });
 
+  test('completes only the selected recurring shift occurrence', () async {
+    final shift = ScheduleItem(
+      id: 'shift-overtime-occurrence-completion-test',
+      kind: ScheduleKind.work,
+      title: 'Synthetic recurring shift',
+      startDate: CivilDate(2026, 11, 22),
+      intervals: [EventInterval.sameDay(startMinute: 540, endMinute: 900)],
+      recurrence: WeeklyRecurrence(
+        weekdays: {DateTime.sunday},
+        until: CivilDate(2026, 12, 6),
+      ),
+    );
+    await scheduleRepository.save(shift);
+
+    await overtimeRepository.completeOccurrence(
+      shift,
+      CivilDate(2026, 11, 29),
+      overtimeMinutes: 0,
+    );
+
+    final savedSeries = (await scheduleRepository.getItems()).single;
+    expect(savedSeries.isCompleted, isFalse);
+    final completedOccurrence = await overtimeRepository.getForOccurrence(
+      shift.id,
+      CivilDate(2026, 11, 29),
+    );
+    expect(completedOccurrence?.minutes, 0);
+    expect(completedOccurrence?.isCompleted, isTrue);
+    expect(
+      await overtimeRepository.getForOccurrence(
+        shift.id,
+        CivilDate(2026, 12, 6),
+      ),
+      isNull,
+    );
+  });
+
+  test('clearing overtime on a completed occurrence keeps its completion', () async {
+    final shift = ScheduleItem(
+      id: 'shift-overtime-clear-completion-test',
+      kind: ScheduleKind.work,
+      title: 'Synthetic recurring shift',
+      startDate: CivilDate(2026, 11, 22),
+      intervals: [EventInterval.sameDay(startMinute: 540, endMinute: 900)],
+      recurrence: WeeklyRecurrence(
+        weekdays: {DateTime.sunday},
+        until: CivilDate(2026, 12, 6),
+      ),
+    );
+    await scheduleRepository.save(shift);
+    await overtimeRepository.completeOccurrence(
+      shift,
+      CivilDate(2026, 11, 29),
+      overtimeMinutes: 90,
+    );
+
+    await overtimeRepository.clearForOccurrence(
+      shift.id,
+      CivilDate(2026, 11, 29),
+    );
+
+    final record = await overtimeRepository.getForOccurrence(
+      shift.id,
+      CivilDate(2026, 11, 29),
+    );
+    expect(record?.minutes, 0);
+    expect(record?.isCompleted, isTrue);
+  });
+
   test(
     'rejects dates that are not occurrences of the selected shift',
     () async {

@@ -161,6 +161,7 @@ void main() {
             shiftItemId: 'synthetic-overnight',
             occurrenceDate: CivilDate(2026, 11, 6),
             minutes: 90,
+            isCompleted: true,
           ),
         ],
       );
@@ -213,6 +214,7 @@ void main() {
           shiftItemId: 'synthetic-overnight',
           occurrenceDate: CivilDate(2026, 11, 6),
           minutes: 90,
+          isCompleted: true,
         ),
       ]);
       expect(decoded.items[1].academicTermId, 'synthetic-term-1');
@@ -278,6 +280,44 @@ void main() {
           ),
         ],
       ),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
+  test('backup rejects a non-boolean overtime completion flag', () async {
+    final bytes = await _encryptedBackupWithPayload({
+      'format': 'shift-study-schedule',
+      'version': 2,
+      'createdAt': '2026-11-23T12:00:00.000Z',
+      'events': [
+        {
+          'id': 'synthetic-backup-shift',
+          'kind': 'work',
+          'title': 'Synthetic shift',
+          'startDate': '2026-11-22',
+          'intervals': [
+            {
+              'startDayOffset': 0,
+              'startMinute': 540,
+              'endDayOffset': 0,
+              'endMinute': 600,
+            },
+          ],
+          'workCategory': 'shift',
+        },
+      ],
+      'workOvertimeAdjustments': [
+        {
+          'shiftItemId': 'synthetic-backup-shift',
+          'occurrenceDate': '2026-11-22',
+          'minutes': 60,
+          'isCompleted': 'true',
+        },
+      ],
+    }, passphrase);
+
+    await expectLater(
+      codec.decode(bytes, passphrase: passphrase),
       throwsA(isA<FormatException>()),
     );
   });
@@ -420,6 +460,38 @@ Future<List<int>> _legacyVersionOneBackup(String passphrase) async {
     jsonEncode({
       'format': 'shift-study-encrypted-backup',
       'version': 1,
+      'cipher': 'AES-256-GCM',
+      'kdf': 'PBKDF2-HMAC-SHA256',
+      'iterations': iterations,
+      'salt': base64Encode(salt),
+      'nonce': base64Encode(box.nonce),
+      'mac': base64Encode(box.mac.bytes),
+      'ciphertext': base64Encode(box.cipherText),
+    }),
+  );
+}
+
+Future<List<int>> _encryptedBackupWithPayload(
+  Map<String, Object?> payload,
+  String passphrase,
+) async {
+  const iterations = 600000;
+  const version = 2;
+  final salt = List<int>.generate(16, (index) => index + 41);
+  final key = await Pbkdf2.hmacSha256(
+    iterations: iterations,
+    bits: 256,
+  ).deriveKeyFromPassword(password: passphrase, nonce: salt);
+  final box = await AesGcm.with256bits().encrypt(
+    utf8.encode(jsonEncode(payload)),
+    secretKey: key,
+    nonce: List<int>.generate(12, (index) => index + 61),
+    aad: utf8.encode('ShiftStudy.ScheduleBackup.v$version'),
+  );
+  return utf8.encode(
+    jsonEncode({
+      'format': 'shift-study-encrypted-backup',
+      'version': version,
       'cipher': 'AES-256-GCM',
       'kdf': 'PBKDF2-HMAC-SHA256',
       'iterations': iterations,

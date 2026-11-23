@@ -189,63 +189,78 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     ScheduleItem sourceItem,
+    CivilDate occurrenceDate,
+    int currentOvertimeMinutes,
   ) async {
+    final canRecordShiftOvertime =
+        sourceItem.workCategory == WorkCategory.shift;
     final overtime = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Shift wrap-up'),
-        content: const Text('Did you work overtime on this shift?'),
+        title: Text(
+          canRecordShiftOvertime ? 'Shift wrap-up' : 'Finish this duty?',
+        ),
+        content: Text(
+          canRecordShiftOvertime
+              ? 'Did you work extra hours on this shift? Your scheduled times will stay unchanged.'
+              : 'Mark this duty as completed?',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Cancel'),
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('No overtime'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Overtime'),
-          ),
+          if (canRecordShiftOvertime) ...[
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('No overtime'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Add overtime hours'),
+            ),
+          ] else
+            FilledButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Finish duty'),
+            ),
         ],
       ),
     );
     if (!context.mounted || overtime == null) return;
-    List<EventInterval> actualIntervals = sourceItem.intervals;
+    int? overtimeMinutes;
     if (overtime) {
-      final plannedEnd = sourceItem.intervals.last;
-      final selectedEnd = await showTimePicker(
+      overtimeMinutes = await showDialog<int>(
         context: context,
-        initialTime: TimeOfDay(
-          hour: (plannedEnd.endMinute ~/ 60) % 24,
-          minute: plannedEnd.endMinute % 60,
-        ),
-        helpText: 'Enter your actual shift finish time',
+        builder: (context) =>
+            _OvertimeHoursDialog(initialMinutes: currentOvertimeMinutes),
       );
-      if (!context.mounted) return;
-      if (selectedEnd == null) return;
-      actualIntervals = intervalsWithOvertimeEnd(
-        sourceItem.intervals,
-        selectedEnd.hour * 60 + selectedEnd.minute,
-      );
+      if (!context.mounted || overtimeMinutes == null) return;
     }
     try {
-      await ref
-          .read(scheduleRepositoryProvider)
-          .save(
-            sourceItem.copyWith(
-              isCompleted: true,
-              actualIntervals: actualIntervals,
-            ),
-          );
+      if (canRecordShiftOvertime) {
+        await ref
+            .read(workOvertimeRepositoryProvider)
+            .completeOccurrence(
+              sourceItem,
+              occurrenceDate,
+              overtimeMinutes: overtimeMinutes,
+            );
+      } else {
+        await ref
+            .read(scheduleRepositoryProvider)
+            .save(sourceItem.copyWith(isCompleted: true));
+      }
       ref.invalidate(scheduleItemsProvider);
+      ref.invalidate(workOvertimeAdjustmentsProvider);
       if (!context.mounted) return;
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            overtime ? 'Shift and overtime saved' : 'Shift completed',
+            overtime
+                ? 'Shift completed with overtime hours saved'
+                : 'Shift completed',
           ),
         ),
       );
@@ -262,11 +277,20 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
     ScheduleItem sourceItem,
+    CivilDate occurrenceDate,
   ) async {
     try {
-      await ref
-          .read(scheduleRepositoryProvider)
-          .save(sourceItem.copyWith(isCompleted: false, actualIntervals: null));
+      if (sourceItem.kind == ScheduleKind.work &&
+          sourceItem.workCategory == WorkCategory.shift) {
+        await ref
+            .read(workOvertimeRepositoryProvider)
+            .undoOccurrenceCompletion(sourceItem, occurrenceDate);
+        ref.invalidate(workOvertimeAdjustmentsProvider);
+      } else {
+        await ref.read(scheduleRepositoryProvider).save(
+          sourceItem.copyWith(isCompleted: false, actualIntervals: null),
+        );
+      }
       ref.invalidate(scheduleItemsProvider);
       if (!context.mounted) return;
       Navigator.pop(context);
@@ -366,6 +390,8 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
       }
     }
     final overtimeMinutes = overtimeAdjustment?.minutes ?? 0;
+    final occurrenceCompleted =
+        detailItem.isCompleted || overtimeAdjustment?.isCompleted == true;
     final hoursSummary = detailItem.workCategory == WorkCategory.shift
         ? WorkHoursSummary.forIntervals(
             intervals: overtimeMinutes > 0
@@ -386,7 +412,7 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
         .where((issue) => issue.kind != ScheduleTimeIssueKind.missingTimeZone)
         .toList(growable: false);
     final canFinishShift =
-        detailItem.isCompleted ||
+        occurrenceCompleted ||
         (timeResolution.intervals.isNotEmpty &&
             !timeResolution.intervals.first.start.isAfter(DateTime.now()));
     final canAddToDeviceCalendar =
@@ -452,12 +478,12 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
                 ),
               if (detailItem.supportsCompletionTracking)
                 _DetailRow(
-                  icon: detailItem.isCompleted
+                  icon: occurrenceCompleted
                       ? Icons.check_circle_outline_rounded
                       : Icons.radio_button_unchecked_rounded,
-                  text: detailItem.isCompleted ? 'Completed' : 'Not completed',
+                  text: occurrenceCompleted ? 'Completed' : 'Not completed',
                 ),
-              if (detailItem.isCompleted &&
+              if (occurrenceCompleted &&
                   actualFinish != null &&
                   detailItem.kind == ScheduleKind.work)
                 _DetailRow(
@@ -555,18 +581,29 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
                       child: OutlinedButton.icon(
                         onPressed: detailItem.kind == ScheduleKind.deadline
                             ? () => _toggleCompletion(context, ref, detailItem)
-                            : detailItem.isCompleted
-                            ? () => _undoShiftWrapUp(context, ref, detailItem)
+                            : occurrenceCompleted
+                            ? () => _undoShiftWrapUp(
+                                context,
+                                ref,
+                                detailItem,
+                                detailDate,
+                              )
                             : canFinishShift
-                            ? () => _finishShift(context, ref, detailItem)
+                            ? () => _finishShift(
+                                context,
+                                ref,
+                                detailItem,
+                                detailDate,
+                                overtimeMinutes,
+                              )
                             : null,
                         icon: Icon(
-                          detailItem.isCompleted
+                          occurrenceCompleted
                               ? Icons.undo_rounded
                               : Icons.check_rounded,
                         ),
                         label: Text(
-                          detailItem.isCompleted
+                          occurrenceCompleted
                               ? 'Undo'
                               : detailItem.kind == ScheduleKind.deadline
                               ? 'Complete'
@@ -585,7 +622,7 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
                   ],
                 ),
                 if (detailItem.kind == ScheduleKind.work &&
-                    !detailItem.isCompleted &&
+                    !occurrenceCompleted &&
                     !canFinishShift) ...[
                   const SizedBox(height: 6),
                   Text(

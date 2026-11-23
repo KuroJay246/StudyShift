@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shift_study/application/dependencies.dart';
 import 'package:shift_study/data/schedule_database.dart';
 import 'package:shift_study/data/schedule_repository.dart';
+import 'package:shift_study/data/work_overtime_repository.dart';
 import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/presentation/widgets/schedule_details_sheet.dart';
 
@@ -335,18 +336,18 @@ void main() {
     expect(find.text('Not completed'), findsOneWidget);
     await tester.tap(find.text('Finish shift'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('No overtime'));
+    await tester.tap(find.text('Finish duty'));
     await tester.pumpAndSettle();
 
     final saved = (await repository.getItems()).single;
     expect(saved.isCompleted, isTrue);
     expect(saved.workCategory, WorkCategory.overtime);
     expect(saved.intervals, overtime.intervals);
-    expect(saved.actualIntervals, overtime.intervals);
+    expect(saved.actualIntervals, isNull);
 
     await tester.tap(find.text('Open overtime details'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Actual finish:'), findsOneWidget);
+    expect(find.textContaining('Actual finish:'), findsNothing);
     await tester.tap(find.text('Undo'));
     await tester.pumpAndSettle();
     final cleared = (await repository.getItems()).single;
@@ -354,20 +355,90 @@ void main() {
     expect(cleared.actualIntervals, isNull);
   });
 
-  testWidgets('shift wrap-up saves the selected overtime finish', (
+  testWidgets(
+    'shift wrap-up records overtime duration without changing times',
+    (tester) async {
+      final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+      final repository = ScheduleRepository(database);
+      final shift = ScheduleItem(
+        id: 'synthetic-overtime-finish-time',
+        kind: ScheduleKind.work,
+        workCategory: WorkCategory.shift,
+        title: 'Synthetic scheduled shift',
+        startDate: CivilDate.fromDateTime(
+          DateTime.now().subtract(const Duration(days: 1)),
+        ),
+        intervals: [EventInterval.sameDay(startMinute: 540, endMinute: 600)],
+      );
+      await repository.save(shift);
+      final container = ProviderContainer(
+        overrides: [
+          scheduleDatabaseProvider.overrideWith((ref) {
+            ref.onDispose(database.close);
+            return database;
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            home: Consumer(
+              builder: (context, ref, _) => Scaffold(
+                body: TextButton(
+                  onPressed: () => showScheduleDetails(context, ref, shift),
+                  child: const Text('Open scheduled shift'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open scheduled shift'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Finish shift'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add overtime hours').last);
+      await tester.pumpAndSettle();
+      final fields = find.byType(TextField);
+      expect(fields, findsOneWidget);
+      await tester.enterText(fields, '1.5');
+      await tester.tap(find.text('Save hours'));
+      await tester.pumpAndSettle();
+
+      final saved = (await repository.getItems()).single;
+      expect(saved.isCompleted, isTrue);
+      expect(saved.intervals.single.endMinute, 600);
+      expect(saved.actualIntervals, isNull);
+      final adjustment = await WorkOvertimeRepository(database)
+          .getForOccurrence(saved.id, saved.startDate);
+      expect(adjustment?.minutes, 90);
+      expect(find.textContaining('Actual finish:'), findsNothing);
+    },
+  );
+
+  testWidgets('recurring shift completion applies only to its date', (
     tester,
   ) async {
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
     final repository = ScheduleRepository(database);
+    final pastDate = CivilDate.fromDateTime(
+      DateTime.now().subtract(const Duration(days: 1)),
+    );
+    final nextDate = pastDate.addDays(7);
     final shift = ScheduleItem(
-      id: 'synthetic-overtime-finish-time',
+      id: 'synthetic-recurring-shift-completion',
       kind: ScheduleKind.work,
       workCategory: WorkCategory.shift,
-      title: 'Synthetic scheduled shift',
-      startDate: CivilDate.fromDateTime(
-        DateTime.now().subtract(const Duration(days: 1)),
-      ),
+      title: 'Synthetic weekly shift',
+      startDate: pastDate,
       intervals: [EventInterval.sameDay(startMinute: 540, endMinute: 600)],
+      recurrence: WeeklyRecurrence(
+        weekdays: {pastDate.weekday},
+        until: nextDate,
+      ),
     );
     await repository.save(shift);
     final container = ProviderContainer(
@@ -387,33 +458,40 @@ void main() {
           home: Consumer(
             builder: (context, ref, _) => Scaffold(
               body: TextButton(
-                onPressed: () => showScheduleDetails(context, ref, shift),
-                child: const Text('Open scheduled shift'),
+                onPressed: () => showScheduleDetails(
+                  context,
+                  ref,
+                  shift,
+                  occurrenceDate: pastDate,
+                ),
+                child: const Text('Open recurring shift'),
               ),
             ),
           ),
         ),
       ),
     );
-    await tester.tap(find.text('Open scheduled shift'));
+    await tester.tap(find.text('Open recurring shift'));
     await tester.pumpAndSettle();
+    expect(find.text('Not completed'), findsOneWidget);
     await tester.tap(find.text('Finish shift'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Overtime'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byTooltip('Switch to text input mode'));
+    await tester.tap(find.text('No overtime'));
     await tester.pumpAndSettle();
 
-    final fields = find.byType(TextField);
-    expect(fields, findsNWidgets(2));
-    await tester.enterText(fields.last, '30');
-    await tester.tap(find.text('OK'));
-    await tester.pumpAndSettle();
+    expect((await repository.getItems()).single.isCompleted, isFalse);
+    final overtime = WorkOvertimeRepository(database);
+    final completed = await overtime.getForOccurrence(shift.id, pastDate);
+    expect(completed?.isCompleted, isTrue);
+    expect(completed?.minutes, 0);
+    expect(await overtime.getForOccurrence(shift.id, nextDate), isNull);
 
-    final saved = (await repository.getItems()).single;
-    expect(saved.isCompleted, isTrue);
-    expect(saved.intervals.single.endMinute, 600);
-    expect(saved.actualIntervals!.single.endMinute, 630);
+    await tester.tap(find.text('Open recurring shift'));
+    await tester.pumpAndSettle();
+    expect(find.text('Completed'), findsOneWidget);
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(await overtime.getForOccurrence(shift.id, pastDate), isNull);
   });
 
   testWidgets('a recurring daylight-saving gap explains safe next actions', (

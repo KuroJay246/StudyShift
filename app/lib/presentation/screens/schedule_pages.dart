@@ -1890,6 +1890,8 @@ class _ScheduleCollectionPageState
         final through = today.addDays(90);
         final weekThrough = today.addDays(7);
         final queries = ref.read(scheduleQueriesProvider);
+        final showOvertimeByOccurrence =
+            widget.kind == ScheduleKind.work && _selectedFilter == 'Overtime';
         final occurrences = queries
             .forRange(allItems, today, through)
             .where(
@@ -1910,7 +1912,13 @@ class _ScheduleCollectionPageState
                 (interval) => interval.end.isAfter(now),
               );
             })
-            .where((entry) => seen.add(entry.item.id))
+            .where(
+              (entry) => seen.add(
+                showOvertimeByOccurrence
+                    ? '${entry.item.id}|${entry.date}'
+                    : entry.item.id,
+              ),
+            )
             .toList();
         final workFilters = const [
           'Shifts',
@@ -1948,8 +1956,21 @@ class _ScheduleCollectionPageState
         final visibleActiveDutyIds = visibleActiveDuties
             .map((entry) => entry.occurrence.item.id)
             .toSet();
+        final visibleActiveDutyOccurrences = visibleActiveDuties
+            .map(
+              (entry) => '${entry.occurrence.item.id}|${entry.occurrence.date}',
+            )
+            .toSet();
         final upcoming = allUpcoming.where((entry) {
-          if (visibleActiveDutyIds.contains(entry.item.id)) return false;
+          if (showOvertimeByOccurrence) {
+            if (visibleActiveDutyOccurrences.contains(
+              '${entry.item.id}|${entry.date}',
+            )) {
+              return false;
+            }
+          } else if (visibleActiveDutyIds.contains(entry.item.id)) {
+            return false;
+          }
           if (activeFilter == null) return true;
           if (widget.kind == ScheduleKind.work) {
             return switch (activeFilter) {

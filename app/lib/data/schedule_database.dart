@@ -87,6 +87,7 @@ class WorkOvertimeRows extends Table {
       text().references(ScheduleRows, #id, onDelete: KeyAction.cascade)();
   TextColumn get occurrenceDate => text()();
   IntColumn get minutes => integer()();
+  BoolColumn get isCompleted => boolean().withDefault(const Constant(false))();
 
   @override
   Set<Column<Object>> get primaryKey => {shiftItemId, occurrenceDate};
@@ -141,7 +142,7 @@ class ScheduleDatabase extends _$ScheduleDatabase {
   ScheduleDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 23;
+  int get schemaVersion => 24;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -241,6 +242,9 @@ class ScheduleDatabase extends _$ScheduleDatabase {
         await m.addColumn(scheduleRows, scheduleRows.coworkersJson);
       }
       if (from < 23) await m.createTable(workOvertimeRows);
+      if (from >= 23 && from < 24) {
+        await m.addColumn(workOvertimeRows, workOvertimeRows.isCompleted);
+      }
     },
     beforeOpen: (details) async {
       await customStatement('PRAGMA foreign_keys = ON');

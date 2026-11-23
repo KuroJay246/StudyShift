@@ -9,6 +9,7 @@ class WorkOvertimeAdjustment {
     required this.shiftItemId,
     required this.occurrenceDate,
     required this.minutes,
+    this.isCompleted = false,
   }) {
     if (shiftItemId.trim().isEmpty) {
       throw ArgumentError.value(shiftItemId, 'shiftItemId');
@@ -16,11 +17,11 @@ class WorkOvertimeAdjustment {
     if (!occurrenceDate.isValid) {
       throw ArgumentError.value(occurrenceDate, 'occurrenceDate');
     }
-    if (minutes < 1 || minutes > 24 * 60) {
+    if (minutes < 0 || minutes > 24 * 60 || (minutes == 0 && !isCompleted)) {
       throw ArgumentError.value(
         minutes,
         'minutes',
-        'Overtime must be between 1 minute and 24 hours.',
+        'Overtime must be between 1 minute and 24 hours; a zero-minute record must mark a completed occurrence.',
       );
     }
   }
@@ -28,16 +29,19 @@ class WorkOvertimeAdjustment {
   final String shiftItemId;
   final CivilDate occurrenceDate;
   final int minutes;
+  final bool isCompleted;
 
   @override
   bool operator ==(Object other) =>
       other is WorkOvertimeAdjustment &&
       other.shiftItemId == shiftItemId &&
       other.occurrenceDate == occurrenceDate &&
-      other.minutes == minutes;
+      other.minutes == minutes &&
+      other.isCompleted == isCompleted;
 
   @override
-  int get hashCode => Object.hash(shiftItemId, occurrenceDate, minutes);
+  int get hashCode =>
+      Object.hash(shiftItemId, occurrenceDate, minutes, isCompleted);
 }
 
 /// Worked-time totals for a single shift occurrence.

@@ -4537,8 +4537,28 @@ class $WorkOvertimeRowsTable extends WorkOvertimeRows
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _isCompletedMeta = const VerificationMeta(
+    'isCompleted',
+  );
   @override
-  List<GeneratedColumn> get $columns => [shiftItemId, occurrenceDate, minutes];
+  late final GeneratedColumn<bool> isCompleted = GeneratedColumn<bool>(
+    'is_completed',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_completed" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    shiftItemId,
+    occurrenceDate,
+    minutes,
+    isCompleted,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -4581,6 +4601,15 @@ class $WorkOvertimeRowsTable extends WorkOvertimeRows
     } else if (isInserting) {
       context.missing(_minutesMeta);
     }
+    if (data.containsKey('is_completed')) {
+      context.handle(
+        _isCompletedMeta,
+        isCompleted.isAcceptableOrUnknown(
+          data['is_completed']!,
+          _isCompletedMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -4602,6 +4631,10 @@ class $WorkOvertimeRowsTable extends WorkOvertimeRows
         DriftSqlType.int,
         data['${effectivePrefix}minutes'],
       )!,
+      isCompleted: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_completed'],
+      )!,
     );
   }
 
@@ -4615,10 +4648,12 @@ class WorkOvertimeRow extends DataClass implements Insertable<WorkOvertimeRow> {
   final String shiftItemId;
   final String occurrenceDate;
   final int minutes;
+  final bool isCompleted;
   const WorkOvertimeRow({
     required this.shiftItemId,
     required this.occurrenceDate,
     required this.minutes,
+    required this.isCompleted,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -4626,6 +4661,7 @@ class WorkOvertimeRow extends DataClass implements Insertable<WorkOvertimeRow> {
     map['shift_item_id'] = Variable<String>(shiftItemId);
     map['occurrence_date'] = Variable<String>(occurrenceDate);
     map['minutes'] = Variable<int>(minutes);
+    map['is_completed'] = Variable<bool>(isCompleted);
     return map;
   }
 
@@ -4634,6 +4670,7 @@ class WorkOvertimeRow extends DataClass implements Insertable<WorkOvertimeRow> {
       shiftItemId: Value(shiftItemId),
       occurrenceDate: Value(occurrenceDate),
       minutes: Value(minutes),
+      isCompleted: Value(isCompleted),
     );
   }
 
@@ -4646,6 +4683,7 @@ class WorkOvertimeRow extends DataClass implements Insertable<WorkOvertimeRow> {
       shiftItemId: serializer.fromJson<String>(json['shiftItemId']),
       occurrenceDate: serializer.fromJson<String>(json['occurrenceDate']),
       minutes: serializer.fromJson<int>(json['minutes']),
+      isCompleted: serializer.fromJson<bool>(json['isCompleted']),
     );
   }
   @override
@@ -4655,6 +4693,7 @@ class WorkOvertimeRow extends DataClass implements Insertable<WorkOvertimeRow> {
       'shiftItemId': serializer.toJson<String>(shiftItemId),
       'occurrenceDate': serializer.toJson<String>(occurrenceDate),
       'minutes': serializer.toJson<int>(minutes),
+      'isCompleted': serializer.toJson<bool>(isCompleted),
     };
   }
 
@@ -4662,10 +4701,12 @@ class WorkOvertimeRow extends DataClass implements Insertable<WorkOvertimeRow> {
     String? shiftItemId,
     String? occurrenceDate,
     int? minutes,
+    bool? isCompleted,
   }) => WorkOvertimeRow(
     shiftItemId: shiftItemId ?? this.shiftItemId,
     occurrenceDate: occurrenceDate ?? this.occurrenceDate,
     minutes: minutes ?? this.minutes,
+    isCompleted: isCompleted ?? this.isCompleted,
   );
   WorkOvertimeRow copyWithCompanion(WorkOvertimeRowsCompanion data) {
     return WorkOvertimeRow(
@@ -4676,6 +4717,9 @@ class WorkOvertimeRow extends DataClass implements Insertable<WorkOvertimeRow> {
           ? data.occurrenceDate.value
           : this.occurrenceDate,
       minutes: data.minutes.present ? data.minutes.value : this.minutes,
+      isCompleted: data.isCompleted.present
+          ? data.isCompleted.value
+          : this.isCompleted,
     );
   }
 
@@ -4684,37 +4728,43 @@ class WorkOvertimeRow extends DataClass implements Insertable<WorkOvertimeRow> {
     return (StringBuffer('WorkOvertimeRow(')
           ..write('shiftItemId: $shiftItemId, ')
           ..write('occurrenceDate: $occurrenceDate, ')
-          ..write('minutes: $minutes')
+          ..write('minutes: $minutes, ')
+          ..write('isCompleted: $isCompleted')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(shiftItemId, occurrenceDate, minutes);
+  int get hashCode =>
+      Object.hash(shiftItemId, occurrenceDate, minutes, isCompleted);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is WorkOvertimeRow &&
           other.shiftItemId == this.shiftItemId &&
           other.occurrenceDate == this.occurrenceDate &&
-          other.minutes == this.minutes);
+          other.minutes == this.minutes &&
+          other.isCompleted == this.isCompleted);
 }
 
 class WorkOvertimeRowsCompanion extends UpdateCompanion<WorkOvertimeRow> {
   final Value<String> shiftItemId;
   final Value<String> occurrenceDate;
   final Value<int> minutes;
+  final Value<bool> isCompleted;
   final Value<int> rowid;
   const WorkOvertimeRowsCompanion({
     this.shiftItemId = const Value.absent(),
     this.occurrenceDate = const Value.absent(),
     this.minutes = const Value.absent(),
+    this.isCompleted = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   WorkOvertimeRowsCompanion.insert({
     required String shiftItemId,
     required String occurrenceDate,
     required int minutes,
+    this.isCompleted = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : shiftItemId = Value(shiftItemId),
        occurrenceDate = Value(occurrenceDate),
@@ -4723,12 +4773,14 @@ class WorkOvertimeRowsCompanion extends UpdateCompanion<WorkOvertimeRow> {
     Expression<String>? shiftItemId,
     Expression<String>? occurrenceDate,
     Expression<int>? minutes,
+    Expression<bool>? isCompleted,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (shiftItemId != null) 'shift_item_id': shiftItemId,
       if (occurrenceDate != null) 'occurrence_date': occurrenceDate,
       if (minutes != null) 'minutes': minutes,
+      if (isCompleted != null) 'is_completed': isCompleted,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -4737,12 +4789,14 @@ class WorkOvertimeRowsCompanion extends UpdateCompanion<WorkOvertimeRow> {
     Value<String>? shiftItemId,
     Value<String>? occurrenceDate,
     Value<int>? minutes,
+    Value<bool>? isCompleted,
     Value<int>? rowid,
   }) {
     return WorkOvertimeRowsCompanion(
       shiftItemId: shiftItemId ?? this.shiftItemId,
       occurrenceDate: occurrenceDate ?? this.occurrenceDate,
       minutes: minutes ?? this.minutes,
+      isCompleted: isCompleted ?? this.isCompleted,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -4759,6 +4813,9 @@ class WorkOvertimeRowsCompanion extends UpdateCompanion<WorkOvertimeRow> {
     if (minutes.present) {
       map['minutes'] = Variable<int>(minutes.value);
     }
+    if (isCompleted.present) {
+      map['is_completed'] = Variable<bool>(isCompleted.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -4771,6 +4828,7 @@ class WorkOvertimeRowsCompanion extends UpdateCompanion<WorkOvertimeRow> {
           ..write('shiftItemId: $shiftItemId, ')
           ..write('occurrenceDate: $occurrenceDate, ')
           ..write('minutes: $minutes, ')
+          ..write('isCompleted: $isCompleted, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -7631,6 +7689,7 @@ typedef $$WorkOvertimeRowsTableCreateCompanionBuilder =
       required String shiftItemId,
       required String occurrenceDate,
       required int minutes,
+      Value<bool> isCompleted,
       Value<int> rowid,
     });
 typedef $$WorkOvertimeRowsTableUpdateCompanionBuilder =
@@ -7638,6 +7697,7 @@ typedef $$WorkOvertimeRowsTableUpdateCompanionBuilder =
       Value<String> shiftItemId,
       Value<String> occurrenceDate,
       Value<int> minutes,
+      Value<bool> isCompleted,
       Value<int> rowid,
     });
 
@@ -7692,6 +7752,11 @@ class $$WorkOvertimeRowsTableFilterComposer
     builder: (column) => ColumnFilters(column),
   );
 
+  ColumnFilters<bool> get isCompleted => $composableBuilder(
+    column: $table.isCompleted,
+    builder: (column) => ColumnFilters(column),
+  );
+
   $$ScheduleRowsTableFilterComposer get shiftItemId {
     final $$ScheduleRowsTableFilterComposer composer = $composerBuilder(
       composer: this,
@@ -7735,6 +7800,11 @@ class $$WorkOvertimeRowsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<bool> get isCompleted => $composableBuilder(
+    column: $table.isCompleted,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   $$ScheduleRowsTableOrderingComposer get shiftItemId {
     final $$ScheduleRowsTableOrderingComposer composer = $composerBuilder(
       composer: this,
@@ -7775,6 +7845,11 @@ class $$WorkOvertimeRowsTableAnnotationComposer
 
   GeneratedColumn<int> get minutes =>
       $composableBuilder(column: $table.minutes, builder: (column) => column);
+
+  GeneratedColumn<bool> get isCompleted => $composableBuilder(
+    column: $table.isCompleted,
+    builder: (column) => column,
+  );
 
   $$ScheduleRowsTableAnnotationComposer get shiftItemId {
     final $$ScheduleRowsTableAnnotationComposer composer = $composerBuilder(
@@ -7833,11 +7908,13 @@ class $$WorkOvertimeRowsTableTableManager
                 Value<String> shiftItemId = const Value.absent(),
                 Value<String> occurrenceDate = const Value.absent(),
                 Value<int> minutes = const Value.absent(),
+                Value<bool> isCompleted = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => WorkOvertimeRowsCompanion(
                 shiftItemId: shiftItemId,
                 occurrenceDate: occurrenceDate,
                 minutes: minutes,
+                isCompleted: isCompleted,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -7845,11 +7922,13 @@ class $$WorkOvertimeRowsTableTableManager
                 required String shiftItemId,
                 required String occurrenceDate,
                 required int minutes,
+                Value<bool> isCompleted = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => WorkOvertimeRowsCompanion.insert(
                 shiftItemId: shiftItemId,
                 occurrenceDate: occurrenceDate,
                 minutes: minutes,
+                isCompleted: isCompleted,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

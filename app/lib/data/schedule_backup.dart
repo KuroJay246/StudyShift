@@ -104,6 +104,7 @@ class ScheduleBackupCodec {
               'shiftItemId': adjustment.shiftItemId,
               'occurrenceDate': adjustment.occurrenceDate.toString(),
               'minutes': adjustment.minutes,
+              'isCompleted': adjustment.isCompleted,
             },
         ],
         'academicTerms': [for (final term in academicTerms) _encodeTerm(term)],
@@ -309,11 +310,18 @@ class ScheduleBackupCodec {
     try {
       for (final raw in rawOvertime) {
         final value = _readObject(raw, 'Backup overtime entry is invalid.');
+        final isCompleted = value['isCompleted'];
+        if (isCompleted != null && isCompleted is! bool) {
+          throw const FormatException(
+            'Backup overtime completion status is invalid.',
+          );
+        }
         overtimeAdjustments.add(
           WorkOvertimeAdjustment(
             shiftItemId: _requiredString(value, 'shiftItemId', 256),
             occurrenceDate: _readDateValue(value['occurrenceDate']),
             minutes: _requiredInt(value, 'minutes'),
+            isCompleted: isCompleted == true,
           ),
         );
       }

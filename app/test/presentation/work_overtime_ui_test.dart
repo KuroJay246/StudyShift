@@ -125,4 +125,44 @@ void main() {
     expect(find.textContaining('Over 8h per shift: 0h'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('Overtime filter keeps the adjusted future recurrence date', (
+    tester,
+  ) async {
+    final shift = ScheduleItem(
+      id: 'synthetic-recurring-overtime-filter',
+      kind: ScheduleKind.work,
+      title: 'Synthetic recurring overtime shift',
+      startDate: CivilDate(2026, 11, 23),
+      intervals: [EventInterval.sameDay(startMinute: 540, endMinute: 1020)],
+      recurrence: WeeklyRecurrence(weekdays: {DateTime.monday}, until: null),
+    );
+    await scheduleRepository.save(shift);
+    await overtimeRepository.setForOccurrence(
+      shift,
+      CivilDate(2026, 11, 30),
+      120,
+    );
+    final container = createContainer();
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: Scaffold(
+            body: WorkPage(clock: () => DateTime(2026, 11, 23, 8)),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Overtime'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Synthetic recurring overtime shift'), findsOneWidget);
+    expect(find.textContaining('Nov 30'), findsOneWidget);
+    expect(find.textContaining('Extra hours: 2h'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

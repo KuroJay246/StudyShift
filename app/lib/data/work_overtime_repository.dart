@@ -10,6 +10,73 @@ class WorkOvertimeRepository {
 
   final ScheduleDatabase database;
 
+  /// Completes a shift and replaces its logged extra duration atomically.
+  /// Planned intervals remain unchanged; [overtimeMinutes] is the total extra
+  /// time for this occurrence, including work during a split-shift gap.
+  Future<void> completeOccurrence(
+    ScheduleItem shift,
+    CivilDate date, {
+    int? overtimeMinutes,
+  }) async {
+    if (shift.kind != ScheduleKind.work ||
+        shift.workCategory != WorkCategory.shift ||
+        shift.hasNoTime ||
+        !_isOccurrence(shift, date)) {
+      throw const FormatException(
+        'Choose a scheduled shift occurrence before completing it.',
+      );
+    }
+    final adjustment = WorkOvertimeAdjustment(
+      shiftItemId: shift.id,
+      occurrenceDate: date,
+      minutes: overtimeMinutes ?? 0,
+      isCompleted: true,
+    );
+    await database.transaction(() async {
+      await ScheduleRepository(database).save(
+        shift.copyWith(isCompleted: shift.recurrence == null),
+      );
+      await _writeAdjustment(adjustment);
+    });
+  }
+
+  /// Clears the completion state for just one shift occurrence. Logged extra
+  /// hours remain available for correction until the user clears them.
+  Future<void> undoOccurrenceCompletion(
+    ScheduleItem shift,
+    CivilDate date,
+  ) async {
+    if (shift.kind != ScheduleKind.work ||
+        shift.workCategory != WorkCategory.shift ||
+        shift.hasNoTime ||
+        !_isOccurrence(shift, date)) {
+      throw const FormatException(
+        'Choose a scheduled shift occurrence before undoing completion.',
+      );
+    }
+    await database.transaction(() async {
+      if (shift.recurrence == null) {
+        await ScheduleRepository(database).save(
+          shift.copyWith(isCompleted: false, actualIntervals: null),
+        );
+      }
+      final current = await getForOccurrence(shift.id, date);
+      if (current == null || !current.isCompleted) return;
+      if (current.minutes == 0) {
+        await _deleteOccurrence(shift.id, date);
+      } else {
+        await _writeAdjustment(
+          WorkOvertimeAdjustment(
+            shiftItemId: current.shiftItemId,
+            occurrenceDate: current.occurrenceDate,
+            minutes: current.minutes,
+            isCompleted: false,
+          ),
+        );
+      }
+    });
+  }
+
   Stream<List<WorkOvertimeAdjustment>> watchAll() => database
       .select(database.workOvertimeRows)
       .watch()
@@ -51,11 +118,42 @@ class WorkOvertimeRepository {
         'Choose a scheduled shift occurrence before adding overtime.',
       );
     }
+    final current = await getForOccurrence(shift.id, date);
     final adjustment = WorkOvertimeAdjustment(
       shiftItemId: shift.id,
       occurrenceDate: date,
       minutes: minutes,
+      isCompleted: current?.isCompleted ?? false,
     );
+    await _writeAdjustment(adjustment);
+  }
+
+  Future<void> clearForOccurrence(String shiftItemId, CivilDate date) async {
+    final current = await getForOccurrence(shiftItemId, date);
+    if (current?.isCompleted == true) {
+      await _writeAdjustment(
+        WorkOvertimeAdjustment(
+          shiftItemId: shiftItemId,
+          occurrenceDate: date,
+          minutes: 0,
+          isCompleted: true,
+        ),
+      );
+      return;
+    }
+    await _deleteOccurrence(shiftItemId, date);
+  }
+
+  Future<void> _deleteOccurrence(String shiftItemId, CivilDate date) async {
+    await (database.delete(database.workOvertimeRows)..where(
+          (record) =>
+              record.shiftItemId.equals(shiftItemId) &
+              record.occurrenceDate.equals(date.toString()),
+        ))
+        .go();
+  }
+
+  Future<void> _writeAdjustment(WorkOvertimeAdjustment adjustment) async {
     await database
         .into(database.workOvertimeRows)
         .insertOnConflictUpdate(
@@ -63,17 +161,9 @@ class WorkOvertimeRepository {
             shiftItemId: adjustment.shiftItemId,
             occurrenceDate: adjustment.occurrenceDate.toString(),
             minutes: adjustment.minutes,
+            isCompleted: Value(adjustment.isCompleted),
           ),
         );
-  }
-
-  Future<void> clearForOccurrence(String shiftItemId, CivilDate date) async {
-    await (database.delete(database.workOvertimeRows)..where(
-          (record) =>
-              record.shiftItemId.equals(shiftItemId) &
-              record.occurrenceDate.equals(date.toString()),
-        ))
-        .go();
   }
 
   Future<void> restoreItems(
@@ -104,6 +194,7 @@ class WorkOvertimeRepository {
           shiftItemId: adjustment.shiftItemId,
           occurrenceDate: adjustment.occurrenceDate.toString(),
           minutes: adjustment.minutes,
+          isCompleted: Value(adjustment.isCompleted),
         );
         if (replaceExisting) {
           await database
@@ -132,6 +223,7 @@ class WorkOvertimeRepository {
         shiftItemId: row.shiftItemId,
         occurrenceDate: _readDate(row.occurrenceDate),
         minutes: row.minutes,
+        isCompleted: row.isCompleted,
       );
 
   CivilDate _readDate(String value) {
