@@ -217,7 +217,6 @@ class RosterGridImportParser {
         ? null
         : _uniqueDefinition(legends, target);
     final names = <String>[];
-    final seen = <String>{};
     for (var index = 0; index < table.rows.length; index++) {
       if (index == selectedRow ||
           columnIndex >= table.rows[index].cells.length) {
@@ -238,8 +237,7 @@ class RosterGridImportParser {
             'D/O',
             'DO',
           }.contains(normalized) ||
-          name.isEmpty ||
-          seen.contains(name.toLowerCase())) {
+          name.isEmpty) {
         continue;
       }
       if (legends == null) {
@@ -255,7 +253,6 @@ class RosterGridImportParser {
           continue;
         }
       }
-      seen.add(name.toLowerCase());
       names.add(name);
     }
     return List.unmodifiable(names);

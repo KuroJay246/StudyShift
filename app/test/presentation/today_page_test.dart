@@ -267,7 +267,7 @@ void main() {
     expect(find.text('Bridgetown · 27°'), findsOneWidget);
   });
 
-  testWidgets('weather can be changed by swiping anywhere across Today hero', (
+  testWidgets('weather swipe leaves the featured schedule card untouched', (
     tester,
   ) async {
     const places = ['Bristol · 10°', 'Bridgetown · 27°'];
@@ -313,7 +313,8 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('Bridgetown · 27°'), findsOneWidget);
+    expect(find.text('Bristol · 10°'), findsOneWidget);
+    expect(find.text('Bridgetown · 27°'), findsNothing);
   });
 
   test('sun and moon keep natural celestial colors across accent palettes', () {

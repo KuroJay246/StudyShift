@@ -45,7 +45,7 @@ void main() {
         columnIndex: 0,
         code: ' a1 ',
       ),
-      ['Coworker One'],
+      ['Coworker One', 'Coworker One'],
     );
     expect(
       parser.coworkersForCell(
@@ -55,7 +55,7 @@ void main() {
         code: 'A1',
         legends: const [],
       ),
-      ['Coworker One'],
+      ['Coworker One', 'Coworker One'],
     );
   });
 

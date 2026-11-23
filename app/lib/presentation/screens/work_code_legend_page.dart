@@ -305,7 +305,15 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                     final time = shift.intervals
                         .map((interval) => _formatInterval(context, interval))
                         .join(' · ');
-                    final names = shift.coworkers.toSet().toList()..sort();
+                    final coworkerCounts = <String, int>{};
+                    for (final coworker in shift.coworkers) {
+                      coworkerCounts.update(
+                        coworker,
+                        (count) => count + 1,
+                        ifAbsent: () => 1,
+                      );
+                    }
+                    final names = coworkerCounts.keys.toList()..sort();
                     return Card(
                       child: Padding(
                         padding: const EdgeInsets.all(16),
@@ -344,7 +352,11 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                                       Icons.person_outline_rounded,
                                       size: 18,
                                     ),
-                                    label: Text(name),
+                                    label: Text(
+                                      coworkerCounts[name]! > 1
+                                          ? '$name ×${coworkerCounts[name]}'
+                                          : name,
+                                    ),
                                   ),
                               ],
                             ),

@@ -108,7 +108,7 @@ void main() {
               EventInterval.sameDay(startMinute: 360, endMinute: 540),
             ],
             workCategory: WorkCategory.shift,
-            coworkers: const ['Synthetic coworker'],
+            coworkers: const ['Synthetic coworker', 'Synthetic coworker'],
           ),
         );
     await tester.pumpWidget(
@@ -120,7 +120,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Coworkers'));
     await tester.pumpAndSettle();
-    expect(find.text('Synthetic coworker'), findsOneWidget);
+    expect(find.text('Synthetic coworker ×2'), findsOneWidget);
     expect(find.textContaining('Synthetic morning shift'), findsOneWidget);
     expect(find.textContaining('Nov 18'), findsOneWidget);
     expect(find.byTooltip('Add coworker'), findsNothing);

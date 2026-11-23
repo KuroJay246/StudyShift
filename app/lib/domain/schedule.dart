@@ -493,7 +493,6 @@ class ScheduleItem {
 }
 
 List<String> _normalizeCoworkers(List<String> names) {
-  final seen = <String>{};
   final normalized = <String>[];
   for (final raw in names) {
     final name = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
@@ -506,7 +505,7 @@ List<String> _normalizeCoworkers(List<String> names) {
         'Coworker names must be plain text up to 512 characters.',
       );
     }
-    if (seen.add(name.toLowerCase())) normalized.add(name);
+    normalized.add(name);
   }
   if (normalized.length > 100) {
     throw ArgumentError.value(

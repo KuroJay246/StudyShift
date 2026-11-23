@@ -113,67 +113,67 @@ class _TodayHeroState extends State<TodayHero>
   @override
   Widget build(BuildContext context) {
     if (widget.compact) {
-      return _weatherSwipeTarget(
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final sideBySide =
-                constraints.maxWidth >= 640 && widget.featuredContent != null;
-            final greeting = Text(
-              widget.greeting,
-              maxLines: sideBySide ? 1 : null,
-              overflow: sideBySide ? TextOverflow.ellipsis : null,
-              style: Theme.of(context).textTheme.titleLarge
-                  ?.copyWith(fontWeight: FontWeight.w700),
-            );
-            final header = Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                greeting,
-                _dateControls(context, compact: true),
-                if (widget.weatherCaption != null) ...[
-                  const SizedBox(height: 2),
-                  widget.weatherCaption!,
-                ],
-                if (widget.weatherSummary != null) ...[
-                  const SizedBox(height: 6),
-                  widget.weatherSummary!,
-                ],
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          final sideBySide =
+              constraints.maxWidth >= 640 && widget.featuredContent != null;
+          final greeting = Text(
+            widget.greeting,
+            maxLines: sideBySide ? 1 : null,
+            overflow: sideBySide ? TextOverflow.ellipsis : null,
+            style: Theme.of(context).textTheme.titleLarge
+                ?.copyWith(fontWeight: FontWeight.w700),
+          );
+          final header = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              greeting,
+              _dateControls(context, compact: true),
+              if (widget.weatherCaption != null) ...[
+                const SizedBox(height: 2),
+                widget.weatherCaption!,
               ],
-            );
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(12, 2, 12, 0),
-              child: sideBySide
-                  ? Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Expanded(
-                          flex: 5,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [_weatherPageTransition(header)],
-                          ),
+              if (widget.weatherSummary != null) ...[
+                const SizedBox(height: 6),
+                widget.weatherSummary!,
+              ],
+            ],
+          );
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(12, 2, 12, 0),
+            child: sideBySide
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        flex: 5,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _weatherSwipeTarget(_weatherPageTransition(header)),
+                          ],
                         ),
-                        const SizedBox(width: 16),
-                        Expanded(flex: 7, child: widget.featuredContent!),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(flex: 7, child: widget.featuredContent!),
+                    ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _weatherSwipeTarget(_weatherPageTransition(header)),
+                      if (widget.featuredContent != null) ...[
+                        const SizedBox(height: 4),
+                        widget.featuredContent!,
                       ],
-                    )
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _weatherPageTransition(header),
-                        if (widget.featuredContent != null) ...[
-                          const SizedBox(height: 4),
-                          widget.featuredContent!,
-                        ],
-                      ],
-                    ),
-            );
-          },
-        ),
+                    ],
+                  ),
+          );
+        },
       );
     }
 
@@ -216,15 +216,15 @@ class _TodayHeroState extends State<TodayHero>
             ),
           ),
         ),
-        _weatherSwipeTarget(
-          Padding(
-            // Keep the greeting, date and featured card in one painted region so
-            // the sky and horizon flow behind the whole Today composition.
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
+        Padding(
+          // Keep the greeting, date and featured card in one painted region so
+          // the sky and horizon flow behind the whole Today composition.
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _weatherSwipeTarget(
                 _weatherPageTransition(
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -261,12 +261,12 @@ class _TodayHeroState extends State<TodayHero>
                     ],
                   ),
                 ),
-                if (widget.featuredContent != null) ...[
-                  const SizedBox(height: 8),
-                  widget.featuredContent!,
-                ],
+              ),
+              if (widget.featuredContent != null) ...[
+                const SizedBox(height: 8),
+                widget.featuredContent!,
               ],
-            ),
+            ],
           ),
         ),
       ],
