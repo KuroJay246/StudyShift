@@ -534,4 +534,89 @@ void main() {
       );
     },
   );
+
+  test(
+    'coworker updates are atomic and change no other schedule fields',
+    () async {
+      final first = ScheduleItem(
+        id: 'roster-shift-a',
+        kind: ScheduleKind.work,
+        title: 'Synthetic A shift',
+        startDate: CivilDate(2026, 11, 24),
+        timeZoneId: 'America/Barbados',
+        intervals: [EventInterval.sameDay(startMinute: 540, endMinute: 1020)],
+        code: 'A1',
+        employerName: 'Synthetic employer',
+        notes: 'Keep this note',
+        coworkers: const ['Synthetic original'],
+      );
+      final second = ScheduleItem(
+        id: 'roster-shift-b',
+        kind: ScheduleKind.work,
+        title: 'Synthetic B shift',
+        startDate: CivilDate(2026, 11, 25),
+        timeZoneId: first.timeZoneId,
+        intervals: first.intervals,
+        code: 'AC',
+        employerName: first.employerName,
+        notes: first.notes,
+        coworkers: first.coworkers,
+      );
+      await repository.save(first);
+      await repository.save(second);
+
+      await repository.updateCoworkersAtomically([
+        first.copyWith(
+          coworkers: const ['Synthetic original', 'Synthetic Lee'],
+        ),
+        second.copyWith(coworkers: const ['Synthetic Sam']),
+      ]);
+
+      final saved = await repository.getItems();
+      expect(saved.map((item) => item.title), [
+        'Synthetic A shift',
+        'Synthetic B shift',
+      ]);
+      expect(saved.first.coworkers, ['Synthetic original', 'Synthetic Lee']);
+      expect(saved.first.notes, 'Keep this note');
+      expect(saved.last.coworkers, ['Synthetic Sam']);
+    },
+  );
+
+  test('stale coworker batch does not partially update saved shifts', () async {
+    final first = ScheduleItem(
+      id: 'stale-roster-shift-a',
+      kind: ScheduleKind.work,
+      title: 'Synthetic A shift',
+      startDate: CivilDate(2026, 11, 24),
+      intervals: [EventInterval.sameDay(startMinute: 540, endMinute: 1020)],
+      code: 'A1',
+      coworkers: const ['Before'],
+    );
+    final second = ScheduleItem(
+      id: 'stale-roster-shift-b',
+      kind: ScheduleKind.work,
+      title: first.title,
+      startDate: CivilDate(2026, 11, 25),
+      intervals: first.intervals,
+      code: 'AC',
+      coworkers: first.coworkers,
+    );
+    await repository.save(first);
+    await repository.save(second);
+    await repository.save(second.copyWith(code: 'UPDATED'));
+
+    await expectLater(
+      repository.updateCoworkersAtomically([
+        first.copyWith(coworkers: const ['After']),
+        second.copyWith(coworkers: const ['After']),
+      ]),
+      throwsA(isA<FormatException>()),
+    );
+
+    final saved = await repository.getItems();
+    expect(saved.first.coworkers, ['Before']);
+    expect(saved.last.coworkers, ['Before']);
+    expect(saved.last.code, 'UPDATED');
+  });
 }

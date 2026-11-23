@@ -195,6 +195,39 @@ class ScheduleRepository {
 
   Future<void> delete(String id) => database.deleteItem(id);
 
+  /// Applies reviewed coworker-only roster changes as one database change.
+  ///
+  /// Rows are reloaded and validated inside the transaction so a removed or
+  /// changed shift cannot leave a partially applied roster update.
+  Future<void> updateCoworkersAtomically(
+    List<ScheduleItem> reviewedItems,
+  ) async {
+    if (reviewedItems.isEmpty) return;
+    final ids = reviewedItems.map((item) => item.id).toSet();
+    if (ids.length != reviewedItems.length) {
+      throw const FormatException(
+        'The coworker roster contains a duplicate shift match.',
+      );
+    }
+    await database.transaction(() async {
+      final currentItems = await getItems();
+      final byId = {for (final item in currentItems) item.id: item};
+      final updates = <ScheduleItem>[];
+      for (final reviewed in reviewedItems) {
+        final current = byId[reviewed.id];
+        if (current == null || !_sameCoworkerTarget(current, reviewed)) {
+          throw const FormatException(
+            'A matched shift changed after review. Reopen the roster preview and try again.',
+          );
+        }
+        updates.add(current.copyWith(coworkers: reviewed.coworkers));
+      }
+      for (final updated in updates) {
+        await save(updated);
+      }
+    });
+  }
+
   Future<ScheduleRestoreResult> restoreItems(
     List<ScheduleItem> items, {
     required bool replaceExisting,
@@ -278,6 +311,32 @@ class ScheduleRepository {
       skipped: skipped,
     );
   }
+
+  bool _sameCoworkerTarget(ScheduleItem current, ScheduleItem reviewed) {
+    if (current.kind != ScheduleKind.work ||
+        current.hasNoTime ||
+        current.workCategory == WorkCategory.dayOff ||
+        current.workCategory == WorkCategory.restDay ||
+        current.workCategory == WorkCategory.leave) {
+      return false;
+    }
+    final currentEmployer = current.employerName?.trim().toLowerCase();
+    final reviewedEmployer = reviewed.employerName?.trim().toLowerCase();
+    return reviewed.kind == ScheduleKind.work &&
+        current.startDate == reviewed.startDate &&
+        _normalizeRosterCode(current.code) ==
+            _normalizeRosterCode(reviewed.code) &&
+        currentEmployer == reviewedEmployer &&
+        current.workCategory == reviewed.workCategory &&
+        current.timeZoneId == reviewed.timeZoneId &&
+        current.intervals.length == reviewed.intervals.length &&
+        List.generate(current.intervals.length, (index) => index).every(
+          (index) => current.intervals[index] == reviewed.intervals[index],
+        );
+  }
+
+  String _normalizeRosterCode(String? code) =>
+      (code ?? '').trim().replaceAll(RegExp(r'\s+'), '').toUpperCase();
 
   CivilDate _date(String raw) {
     final pieces = raw.split('-').map(int.parse).toList();

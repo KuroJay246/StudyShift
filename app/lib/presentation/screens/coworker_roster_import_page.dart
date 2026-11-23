@@ -96,9 +96,9 @@ class _CoworkerRosterImportPageState
     setState(() => _saving = true);
     try {
       final repository = ref.read(scheduleRepositoryProvider);
-      for (final match in eligible) {
-        await repository.save(match.updatedShift!);
-      }
+      await repository.updateCoworkersAtomically([
+        for (final match in eligible) match.updatedShift!,
+      ]);
       ref.invalidate(scheduleItemsProvider);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
