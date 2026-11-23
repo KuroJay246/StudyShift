@@ -132,6 +132,78 @@ void main() {
     expect(find.byTooltip('Add coworker'), findsNothing);
   });
 
+  testWidgets('coworker roster cards stay compact with several names', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    tester.view.physicalSize = const Size(411, 914);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(scheduleRepositoryProvider)
+        .save(
+          ScheduleItem(
+            id: 'synthetic-five-coworker-shift',
+            kind: ScheduleKind.work,
+            title: 'Synthetic afternoon shift',
+            startDate: CivilDate(2026, 11, 24),
+            intervals: [
+              EventInterval.sameDay(startMinute: 600, endMinute: 1080),
+            ],
+            workCategory: WorkCategory.shift,
+            coworkers: const [
+              'Synthetic Alex',
+              'Synthetic Bailey',
+              'Synthetic Casey',
+              'Synthetic Devon',
+              'Synthetic Ellis',
+            ],
+          ),
+        );
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: WorkCodeLegendPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Coworkers'));
+    await tester.pumpAndSettle();
+
+    final shiftCard = tester.widgetList<Card>(find.byType(Card)).first;
+    final height = tester.getSize(find.byWidget(shiftCard)).height;
+    expect(height, lessThanOrEqualTo(245));
+    final coworkerSummary = tester.widget<Text>(
+      find.textContaining('Synthetic Alex'),
+    );
+    expect(
+      find.bySemanticsLabel(RegExp('Coworkers assigned to this shift')),
+      findsOneWidget,
+    );
+    for (final name in [
+      'Synthetic Alex',
+      'Synthetic Bailey',
+      'Synthetic Casey',
+      'Synthetic Devon',
+      'Synthetic Ellis',
+    ]) {
+      expect(coworkerSummary.data, contains(name));
+    }
+    semantics.dispose();
+  });
+
   testWidgets('supervisors are grouped by permanent and acting type', (
     tester,
   ) async {

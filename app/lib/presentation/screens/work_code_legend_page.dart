@@ -341,6 +341,13 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                       );
                     }
                     final names = coworkerCounts.keys.toList()..sort();
+                    final coworkerSummary = names
+                        .map(
+                          (name) => coworkerCounts[name]! > 1
+                              ? '$name ×${coworkerCounts[name]}'
+                              : name,
+                        )
+                        .join(' · ');
                     return Card(
                       child: Padding(
                         padding: const EdgeInsets.all(16),
@@ -363,29 +370,14 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                             ),
                             const SizedBox(height: 4),
                             Text('$date${time.isEmpty ? '' : ' · $time'}'),
-                            const SizedBox(height: 12),
-                            Text(
-                              'Working this shift',
-                              style: Theme.of(context).textTheme.labelLarge,
-                            ),
-                            const SizedBox(height: 6),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 6,
-                              children: [
-                                for (final name in names)
-                                  Chip(
-                                    avatar: const Icon(
-                                      Icons.person_outline_rounded,
-                                      size: 18,
-                                    ),
-                                    label: Text(
-                                      coworkerCounts[name]! > 1
-                                          ? '$name ×${coworkerCounts[name]}'
-                                          : name,
-                                    ),
-                                  ),
-                              ],
+                            const SizedBox(height: 8),
+                            Semantics(
+                              label:
+                                  'Coworkers assigned to this shift: $coworkerSummary',
+                              child: Text(
+                                coworkerSummary,
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
                             ),
                           ],
                         ),
