@@ -437,7 +437,8 @@ void main() {
       await tester.pumpAndSettle();
 
       final workPage = find.byType(WorkPage, skipOffstage: false);
-      expect(tester.getTopLeft(workPage).dx, greaterThan(0));
+      final initialWorkX = tester.getTopLeft(workPage).dx;
+      expect(initialWorkX, greaterThan(0));
       final weekPage = find.byType(WeekPage, skipOffstage: false);
       final startX = tester.getTopLeft(weekPage).dx;
       final weekTitle = find.descendant(
@@ -472,9 +473,19 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       expect(
+        tester.getTopLeft(weekPage).dx,
+        lessThan(startX),
+        reason: 'Calendar should track a horizontal drag before release.',
+      );
+      expect(
+        tester.getTopLeft(workPage).dx,
+        lessThan(initialWorkX),
+        reason: 'The adjacent Work page should follow the Calendar drag.',
+      );
+      expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         1,
-        reason: 'The destination changes after the swipe is released.',
+        reason: 'The selected destination changes after the swipe is released.',
       );
       await gesture.up();
       await tester.pumpAndSettle();

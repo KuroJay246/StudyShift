@@ -1146,12 +1146,18 @@ class WeekPage extends ConsumerStatefulWidget {
     super.key,
     required this.focusDate,
     required this.onFocusDateChanged,
-    this.onNavigateBySwipe,
+    this.onDestinationDragStart,
+    this.onDestinationDragUpdate,
+    this.onDestinationDragEnd,
+    this.onDestinationDragCancel,
   });
 
   final CivilDate focusDate;
   final ValueChanged<CivilDate> onFocusDateChanged;
-  final ValueChanged<int>? onNavigateBySwipe;
+  final VoidCallback? onDestinationDragStart;
+  final ValueChanged<double>? onDestinationDragUpdate;
+  final VoidCallback? onDestinationDragEnd;
+  final VoidCallback? onDestinationDragCancel;
 
   @override
   ConsumerState<WeekPage> createState() => _WeekPageState();
@@ -1161,6 +1167,13 @@ class _WeekPageState extends ConsumerState<WeekPage> {
   bool _monthView = false;
   int? _destinationSwipePointer;
   Offset? _destinationSwipeStart;
+  bool _destinationSwipeHorizontal = false;
+
+  void _clearDestinationSwipe() {
+    _destinationSwipePointer = null;
+    _destinationSwipeStart = null;
+    _destinationSwipeHorizontal = false;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1353,31 +1366,50 @@ class _WeekPageState extends ConsumerState<WeekPage> {
             Expanded(
               child: Listener(
                 key: const ValueKey('calendar-destination-swipe-area'),
-                onPointerDown: widget.onNavigateBySwipe == null
+                onPointerDown: widget.onDestinationDragStart == null
                     ? null
                     : (event) {
                         _destinationSwipePointer = event.pointer;
                         _destinationSwipeStart = event.position;
+                        _destinationSwipeHorizontal = false;
                       },
-                onPointerUp: widget.onNavigateBySwipe == null
+                onPointerMove: widget.onDestinationDragUpdate == null
+                    ? null
+                    : (event) {
+                        final start = _destinationSwipeStart;
+                        if (event.pointer != _destinationSwipePointer ||
+                            start == null) {
+                          return;
+                        }
+                        final delta = event.position - start;
+                        if (!_destinationSwipeHorizontal) {
+                          if (delta.dx.abs() < 12 && delta.dy.abs() < 12) {
+                            return;
+                          }
+                          if (delta.dy.abs() >= delta.dx.abs()) {
+                            _clearDestinationSwipe();
+                            return;
+                          }
+                          _destinationSwipeHorizontal = true;
+                          widget.onDestinationDragStart?.call();
+                        }
+                        widget.onDestinationDragUpdate?.call(delta.dx);
+                      },
+                onPointerUp: widget.onDestinationDragEnd == null
                     ? null
                     : (event) {
                         if (event.pointer != _destinationSwipePointer) return;
-                        final start = _destinationSwipeStart;
-                        _destinationSwipePointer = null;
-                        _destinationSwipeStart = null;
-                        if (start == null) return;
-                        final delta = event.position - start;
-                        if (delta.dx.abs() >= 72 &&
-                            delta.dx.abs() > delta.dy.abs()) {
-                          widget.onNavigateBySwipe!(delta.dx < 0 ? 1 : -1);
+                        final wasHorizontal = _destinationSwipeHorizontal;
+                        _clearDestinationSwipe();
+                        if (wasHorizontal) {
+                          widget.onDestinationDragEnd?.call();
                         }
                       },
                 onPointerCancel: (event) {
-                  if (event.pointer == _destinationSwipePointer) {
-                    _destinationSwipePointer = null;
-                    _destinationSwipeStart = null;
-                  }
+                  if (event.pointer != _destinationSwipePointer) return;
+                  final wasHorizontal = _destinationSwipeHorizontal;
+                  _clearDestinationSwipe();
+                  if (wasHorizontal) widget.onDestinationDragCancel?.call();
                 },
                 child: _monthView
                     ? _MonthCalendar(

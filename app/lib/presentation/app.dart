@@ -325,7 +325,10 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
 
   Widget _page(
     _Destination destination, {
-    ValueChanged<int>? onNavigateBySwipe,
+    VoidCallback? onDestinationDragStart,
+    ValueChanged<double>? onDestinationDragUpdate,
+    VoidCallback? onDestinationDragEnd,
+    VoidCallback? onDestinationDragCancel,
   }) => switch (destination) {
     _Destination.today => TodayPage(
       selectedDay: _selectedDay,
@@ -335,7 +338,10 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
     _Destination.week => WeekPage(
       focusDate: _selectedDay,
       onFocusDateChanged: (date) => setState(() => _selectedDay = date),
-      onNavigateBySwipe: onNavigateBySwipe,
+      onDestinationDragStart: onDestinationDragStart,
+      onDestinationDragUpdate: onDestinationDragUpdate,
+      onDestinationDragEnd: onDestinationDragEnd,
+      onDestinationDragCancel: onDestinationDragCancel,
     ),
     _Destination.work => const WorkPage(),
     _Destination.school => const StudyPage(),
@@ -409,11 +415,16 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
   void _updateDestinationDragBy(double primaryDelta, double width) {
     if (width <= 0) return;
     _destinationSwipeDistance += primaryDelta;
+    _updateDestinationDragTo(_destinationSwipeDistance, width);
+  }
+
+  void _updateDestinationDragTo(double distance, double width) {
+    if (width <= 0) return;
+    _destinationSwipeDistance = distance;
     final items = _items;
-    _pagePosition.value =
-        (_gestureStartIndex - _destinationSwipeDistance / width)
-            .clamp(0, items.length - 1)
-            .toDouble();
+    _pagePosition.value = (_gestureStartIndex - distance / width)
+        .clamp(0, items.length - 1)
+        .toDouble();
   }
 
   void _finishDestinationDrag(DragEndDetails details, List<_NavItem> items) {
@@ -812,12 +823,27 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
                           key: ValueKey(item.destination),
                           child: _page(
                             item.destination,
-                            onNavigateBySwipe:
+                            onDestinationDragStart:
                                 item.destination == _Destination.week
-                                ? (delta) => _navigateToIndex(
-                                    selectedIndex + delta,
+                                ? _startDestinationDrag
+                                : null,
+                            onDestinationDragUpdate:
+                                item.destination == _Destination.week
+                                ? (distance) => _updateDestinationDragTo(
+                                    distance,
+                                    constraints.maxWidth,
+                                  )
+                                : null,
+                            onDestinationDragEnd:
+                                item.destination == _Destination.week
+                                ? () => _finishDestinationDrag(
+                                    DragEndDetails(),
                                     items,
                                   )
+                                : null,
+                            onDestinationDragCancel:
+                                item.destination == _Destination.week
+                                ? () => _settleToIndex(selectedIndex, items)
                                 : null,
                           ),
                         ),
