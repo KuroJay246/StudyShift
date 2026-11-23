@@ -74,6 +74,10 @@ END:VCALENDAR''';
     expect(find.textContaining('department, job_role'), findsOneWidget);
     expect(find.textContaining('date,end_date,title'), findsOneWidget);
     expect(find.textContaining('one row per shift interval'), findsOneWidget);
+    expect(
+      find.textContaining('Timed events also need start, end and a time_zone'),
+      findsOneWidget,
+    );
     expect(find.textContaining('SYNTH-001'), findsOneWidget);
     await tester.tap(find.text('CSV and Excel file format'));
     await tester.pumpAndSettle();
