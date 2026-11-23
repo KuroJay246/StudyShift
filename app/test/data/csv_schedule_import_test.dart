@@ -9,8 +9,8 @@ void main() {
     'reads quoted CSV fields and keeps overnight work on the next day',
     () async {
       final preview = await parser.parse(
-        'date,title,category,start,end,time_zone,employer,department,job_role,code,code_meaning,location,notes,reporting_instruction,supervisor_name,supervisor_phone,contact_name,contact_phone\r\n'
-        '2026-11-07,"Ramp, east",shift,21:00,05:00,America/Barbados,Synthetic Air,Synthetic ramp operations,Ramp agent,R1,"Synthetic ramp duty",Airport,"Use stand ""B""","Synthetic report at gate 2",Synthetic supervisor,+1 246 555 0100,Synthetic ops desk,+1 246 555 0101\r\n',
+        'date,title,category,start,end,time_zone,employer,department,job_role,code,code_meaning,coworkers,location,notes,reporting_instruction,supervisor_name,supervisor_phone,contact_name,contact_phone\r\n'
+        '2026-11-07,"Ramp, east",shift,21:00,05:00,America/Barbados,Synthetic Air,Synthetic ramp operations,Ramp agent,R1,"Synthetic ramp duty","Synthetic teammate A; Synthetic teammate B",Airport,"Use stand ""B""","Synthetic report at gate 2",Synthetic supervisor,+1 246 555 0100,Synthetic ops desk,+1 246 555 0101\r\n',
         sourceName: 'roster.csv',
         importedAt: DateTime.utc(2026, 11, 6),
       );
@@ -36,6 +36,7 @@ void main() {
       expect(item.notes, 'Use stand "B"');
       expect(item.reportingInstruction, 'Synthetic report at gate 2');
       expect(item.codeMeaning, 'Synthetic ramp duty');
+      expect(item.coworkers, ['Synthetic teammate A', 'Synthetic teammate B']);
       expect(item.supervisorName, 'Synthetic supervisor');
       expect(item.supervisorPhone, '+1 246 555 0100');
       expect(item.contactName, 'Synthetic ops desk');

@@ -257,6 +257,7 @@ class XlsxScheduleImportParser {
       'time_zone',
       'code',
       'code_meaning',
+      'coworkers',
       'employer',
       'department',
       'job_role',

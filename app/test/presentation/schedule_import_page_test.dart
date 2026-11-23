@@ -68,10 +68,12 @@ END:VCALENDAR''';
     await tester.tap(find.text('CSV and Excel file format'));
     await tester.pumpAndSettle();
     expect(
-      find.textContaining('code_meaning, reporting_instruction'),
+      find.textContaining('code_meaning,coworkers,reporting_instruction'),
       findsOneWidget,
     );
-    expect(find.textContaining('department,job_role'), findsWidgets);
+    expect(find.textContaining('department, job_role'), findsOneWidget);
+    expect(find.textContaining('date,end_date,title'), findsOneWidget);
+    expect(find.textContaining('one row per shift interval'), findsOneWidget);
     expect(find.textContaining('SYNTH-001'), findsOneWidget);
     await tester.tap(find.text('CSV and Excel file format'));
     await tester.pumpAndSettle();
@@ -388,6 +390,14 @@ END:VCALENDAR''';
         'bottom': .22,
         'page': 0,
       },
+      {
+        'text': 'OFF',
+        'left': .58,
+        'top': .20,
+        'right': .62,
+        'bottom': .22,
+        'page': 0,
+      },
     ];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(fileChannel, (call) async {
@@ -465,12 +475,17 @@ END:VCALENDAR''';
     await tester.tap(find.text('Person One').last);
     await tester.pumpAndSettle();
     expect(find.text('Person One'), findsOneWidget);
+    final staffRowField = tester.widget<DropdownButtonFormField<int>>(
+      find.byKey(const ValueKey('roster-staff-row-0')),
+    );
+    expect(staffRowField.decoration.helperMaxLines, 2);
     await tester.ensureVisible(find.text('Build shift review'));
     await tester.tap(find.text('Build shift review'));
     await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView), const Offset(0, -700));
     await tester.pumpAndSettle();
     expect(find.textContaining('Shift code: A1'), findsOneWidget);
+    expect(find.text('Day off'), findsOneWidget);
     expect(find.text('Codes to review · 1'), findsOneWidget);
     expect(find.textContaining('UNMAPPED'), findsOneWidget);
     expect(await ScheduleRepository(database).getItems(), isEmpty);

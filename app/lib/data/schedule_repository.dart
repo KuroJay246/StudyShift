@@ -63,6 +63,7 @@ class ScheduleRepository {
               .toList(),
           code: row.code,
           codeMeaning: row.codeMeaning,
+          coworkers: _decodeCoworkers(row.coworkersJson),
           employerName: row.employerName,
           departmentName: row.departmentName,
           jobRole: row.jobRole,
@@ -114,6 +115,7 @@ class ScheduleRepository {
       timeZoneId: Value(item.timeZoneId),
       code: Value(item.code),
       codeMeaning: Value(item.codeMeaning),
+      coworkersJson: Value(jsonEncode(item.coworkers)),
       employerName: Value(item.employerName),
       departmentName: Value(item.departmentName),
       jobRole: Value(item.jobRole),
@@ -365,6 +367,22 @@ List<EventInterval>? _decodeActualIntervals(String? value) {
     rethrow;
   } on Object {
     throw const FormatException('Invalid actual intervals.');
+  }
+}
+
+List<String> _decodeCoworkers(String value) {
+  try {
+    final decoded = jsonDecode(value);
+    if (decoded is! List ||
+        decoded.length > 100 ||
+        decoded.any((name) => name is! String)) {
+      throw const FormatException('Invalid stored coworkers.');
+    }
+    return decoded.cast<String>();
+  } on FormatException {
+    rethrow;
+  } on Object {
+    throw const FormatException('Invalid stored coworkers.');
   }
 }
 

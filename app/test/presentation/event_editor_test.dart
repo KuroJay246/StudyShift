@@ -390,13 +390,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      tester
-          .widget<TextFormField>(
-            find.byKey(const ValueKey('supervisor-name-field')),
-          )
-          .controller
-          ?.text,
-      'Synthetic Acting Supervisor',
+      find.byKey(const ValueKey('supervisor-name-field')),
+      findsNothing,
+      reason: 'A saved supervisor selector replaces the duplicate name field.',
     );
     expect(
       tester
@@ -473,15 +469,18 @@ void main() {
         find.byKey(const ValueKey('work-role-field')),
         'Ramp agent',
       );
+      final codeSelector = find.byKey(
+        const ValueKey('work-code-legend-selector'),
+      );
       await tester.scrollUntilVisible(
-        find.byKey(const ValueKey('work-code-field')),
+        codeSelector,
         400,
         scrollable: find.byType(Scrollable).first,
       );
-      await tester.enterText(
-        find.byKey(const ValueKey('work-code-field')),
-        'R1',
-      );
+      await tester.tap(codeSelector);
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('Synthetic Air · R1'));
+      await tester.pumpAndSettle();
       await tester.pumpAndSettle();
       await _saveEvent(tester);
       expect(find.text('Enter a name.'), findsNothing);
@@ -567,11 +566,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      tester
-          .widget<TextFormField>(find.byKey(const ValueKey('work-code-field')))
-          .controller
-          ?.text,
-      'R2',
+      find.byKey(const ValueKey('work-code-field')),
+      findsNothing,
+      reason: 'Saved roster codes are selected, never retyped.',
     );
     expect(
       tester

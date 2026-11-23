@@ -35,6 +35,7 @@ void main() {
     expect(find.text('Shift legend'), findsOneWidget);
     expect(find.text('Codes'), findsOneWidget);
     expect(find.text('Supervisors'), findsOneWidget);
+    expect(find.text('Coworkers'), findsOneWidget);
     expect(find.text('Search code or description'), findsOneWidget);
     expect(find.text('No work references saved'), findsOneWidget);
   });
@@ -82,6 +83,49 @@ void main() {
     expect(find.text('Permanent supervisors'), findsOneWidget);
   });
 
+  testWidgets('coworkers section groups names with their roster shifts', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(scheduleRepositoryProvider)
+        .save(
+          ScheduleItem(
+            id: 'synthetic-coworker-shift',
+            kind: ScheduleKind.work,
+            title: 'Synthetic morning shift',
+            startDate: CivilDate(2026, 11, 18),
+            intervals: [
+              EventInterval.sameDay(startMinute: 360, endMinute: 540),
+            ],
+            workCategory: WorkCategory.shift,
+            coworkers: const ['Synthetic coworker'],
+          ),
+        );
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: WorkCodeLegendPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Coworkers'));
+    await tester.pumpAndSettle();
+    expect(find.text('Synthetic coworker'), findsOneWidget);
+    expect(find.textContaining('Synthetic morning shift'), findsOneWidget);
+    expect(find.textContaining('Nov 18'), findsOneWidget);
+    expect(find.byTooltip('Add coworker'), findsNothing);
+  });
+
   testWidgets('supervisors are grouped by permanent and acting type', (
     tester,
   ) async {
@@ -109,6 +153,12 @@ void main() {
     );
     await repository.save(
       const SupervisorProfile(
+        id: 'synthetic-second-permanent-supervisor',
+        name: 'Synthetic Second Permanent Supervisor',
+      ),
+    );
+    await repository.save(
+      const SupervisorProfile(
         id: 'synthetic-acting-supervisor',
         name: 'Synthetic Acting Supervisor',
         type: SupervisorType.acting,
@@ -132,10 +182,36 @@ void main() {
     expect(find.text('Acting supervisors'), findsOneWidget);
     expect(
       tester.getTopLeft(find.text('Permanent supervisors')).dy,
-      lessThan(tester.getTopLeft(find.text('Synthetic Permanent Supervisor')).dy),
+      lessThan(
+        tester.getTopLeft(find.text('Synthetic Permanent Supervisor')).dy,
+      ),
     );
     expect(
       tester.getTopLeft(find.text('Synthetic Permanent Supervisor')).dy,
+      lessThan(
+        tester
+            .getTopLeft(find.text('Synthetic Second Permanent Supervisor'))
+            .dy,
+      ),
+    );
+    final firstSupervisorCard = tester.getRect(
+      find.ancestor(
+        of: find.text('Synthetic Permanent Supervisor'),
+        matching: find.byType(Card),
+      ),
+    );
+    final secondSupervisorCard = tester.getRect(
+      find.ancestor(
+        of: find.text('Synthetic Second Permanent Supervisor'),
+        matching: find.byType(Card),
+      ),
+    );
+    expect(
+      secondSupervisorCard.top - firstSupervisorCard.bottom,
+      greaterThanOrEqualTo(12),
+    );
+    expect(
+      tester.getTopLeft(find.text('Synthetic Second Permanent Supervisor')).dy,
       lessThan(tester.getTopLeft(find.text('Acting supervisors')).dy),
     );
     expect(
@@ -176,8 +252,8 @@ void main() {
           const WorkCodeLegend(
             id: 'synthetic-a1-legend',
             code: 'A1',
-            assignmentDetails: 'Split shift · Flights: AA2725, LI681, B6361',
-            flightIds: ['AA2725', 'LI681', 'B6361'],
+            assignmentDetails: 'Split shift · Flights: SYN100, SYN200, SYN300',
+            flightIds: ['SYN100', 'SYN200', 'SYN300'],
           ),
         );
     await container
@@ -201,7 +277,7 @@ void main() {
               EventInterval.sameDay(startMinute: 360, endMinute: 540),
             ],
             code: 'A1',
-            codeMeaning: 'Split shift · Flights: AA2725, LI681, B6361',
+            codeMeaning: 'Split shift · Flights: SYN100, SYN200, SYN300',
             workCategory: WorkCategory.shift,
           ),
         );
@@ -217,7 +293,7 @@ void main() {
               EventInterval.sameDay(startMinute: 720, endMinute: 960),
             ],
             code: 'A1',
-            codeMeaning: 'Split shift · Flights: AA2725, LI681, B6361',
+            codeMeaning: 'Split shift · Flights: SYN100, SYN200, SYN300',
             workCategory: WorkCategory.shift,
           ),
         );
@@ -320,7 +396,7 @@ void main() {
         employer: 'Employer A',
         code: 'A1',
         assignmentDetails: 'Morning arrivals',
-        flightIds: ['AA100'],
+        flightIds: ['SYN100'],
         startMinute: 360,
         endMinute: 540,
       ),
@@ -331,7 +407,7 @@ void main() {
         employer: 'Employer B',
         code: 'A1',
         assignmentDetails: 'Afternoon departures',
-        flightIds: ['BB200'],
+        flightIds: ['SYN200'],
         startMinute: 720,
         endMinute: 960,
       ),
@@ -349,6 +425,13 @@ void main() {
     expect(find.text('Employer A'), findsOneWidget);
     expect(find.text('Employer B'), findsOneWidget);
     expect(find.text('1 possible flight'), findsNWidgets(2));
+    final employerACard = tester.getRect(
+      find.ancestor(of: find.text('Employer A'), matching: find.byType(Card)),
+    );
+    final employerBCard = tester.getRect(
+      find.ancestor(of: find.text('Employer B'), matching: find.byType(Card)),
+    );
+    expect(employerBCard.top - employerACard.bottom, greaterThanOrEqualTo(12));
     await tester.enterText(find.byType(TextField), 'Employer B');
     await tester.pumpAndSettle();
     expect(find.text('1 result'), findsOneWidget);
@@ -356,8 +439,8 @@ void main() {
     expect(find.text('Morning arrivals'), findsNothing);
     await tester.tap(find.text('Afternoon departures'));
     await tester.pumpAndSettle();
-    expect(find.text('BB200'), findsOneWidget);
-    expect(find.text('AA100'), findsNothing);
+    expect(find.text('SYN200'), findsOneWidget);
+    expect(find.text('SYN100'), findsNothing);
   });
 
   testWidgets('search and detail sheet expose flights linked to a code', (
@@ -379,8 +462,8 @@ void main() {
           const WorkCodeLegend(
             id: 'synthetic-a1-legend',
             code: 'A1',
-            assignmentDetails: 'Split shift · Flights: AA2725, LI681, B6361',
-            flightIds: ['AA2725', 'LI681', 'B6361'],
+            assignmentDetails: 'Split shift · Flights: SYN100, SYN200, SYN300',
+            flightIds: ['SYN100', 'SYN200', 'SYN300'],
             startMinute: 360,
             endMinute: 540,
           ),
@@ -398,7 +481,7 @@ void main() {
               EventInterval.sameDay(startMinute: 720, endMinute: 960),
             ],
             code: 'A1',
-            codeMeaning: 'Split shift · Flights: AA2725, LI681, B6361',
+            codeMeaning: 'Split shift · Flights: SYN100, SYN200, SYN300',
             workCategory: WorkCategory.shift,
           ),
         );
@@ -410,7 +493,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'AA2725');
+    await tester.enterText(find.byType(TextField), 'SYN100');
     await tester.pumpAndSettle();
     expect(find.text('1 result'), findsOneWidget);
     expect(find.text('A1'), findsOneWidget);
@@ -419,9 +502,9 @@ void main() {
     await tester.tap(find.text('Split shift'));
     await tester.pumpAndSettle();
     expect(find.text('Possible flights'), findsOneWidget);
-    expect(find.text('AA2725'), findsNWidgets(2));
-    expect(find.text('LI681'), findsOneWidget);
-    expect(find.text('B6361'), findsOneWidget);
+    expect(find.text('SYN100'), findsNWidgets(2));
+    expect(find.text('SYN200'), findsOneWidget);
+    expect(find.text('SYN300'), findsOneWidget);
     expect(
       find.text('Typical roster details · not live flight assignments'),
       findsOneWidget,
@@ -535,7 +618,7 @@ void main() {
     );
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Associated flight codes'),
-      'AA100, LI200',
+      'SYN100, SYN200',
     );
     await tester.tap(find.text('Save shift code'));
     await tester.pumpAndSettle();
@@ -547,7 +630,102 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Possible flights'), findsOneWidget);
     expect(find.text('Employer A'), findsOneWidget);
-    expect(find.text('AA100'), findsOneWidget);
-    expect(find.text('LI200'), findsOneWidget);
+    expect(find.text('SYN100'), findsOneWidget);
+    expect(find.text('SYN200'), findsOneWidget);
+  });
+
+  testWidgets('saved code card exposes editing and preserves its flight list', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(workCodeLegendRepositoryProvider)
+        .save(
+          const WorkCodeLegend(
+            id: 'synthetic-editable-code',
+            code: 'QX',
+            assignmentDetails: 'Synthetic ramp reference',
+            flightIds: ['SYN100', 'SYN200'],
+          ),
+        );
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: WorkCodeLegendPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Edit QX'), findsOneWidget);
+    await tester.tap(find.byTooltip('Edit QX'));
+    await tester.pumpAndSettle();
+    expect(find.text('Save shift code'), findsOneWidget);
+    expect(
+      find.widgetWithText(TextFormField, 'Associated flight codes'),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Associated flight codes'),
+      'SYN100, SYN300',
+    );
+    await tester.tap(find.text('Save shift code'));
+    await tester.pumpAndSettle();
+    expect(
+      (await container.read(workCodeLegendRepositoryProvider).getItems())
+          .single
+          .flightIds,
+      ['SYN100', 'SYN300'],
+    );
+  });
+
+  testWidgets('roster-only code exposes a clear define action', (tester) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(scheduleRepositoryProvider)
+        .save(
+          ScheduleItem(
+            id: 'synthetic-observed-code',
+            kind: ScheduleKind.work,
+            title: 'Synthetic ramp duty',
+            startDate: CivilDate(2026, 11, 18),
+            intervals: [
+              EventInterval.sameDay(startMinute: 360, endMinute: 540),
+            ],
+            code: 'QX',
+            codeMeaning: 'Synthetic ramp handling',
+            workCategory: WorkCategory.shift,
+          ),
+        );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: WorkCodeLegendPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('Define QX'), findsOneWidget);
+    expect(find.byTooltip('Actions for QX'), findsNothing);
+    await tester.tap(find.byTooltip('Define QX'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add shift code'), findsOneWidget);
   });
 }

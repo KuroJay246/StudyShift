@@ -12,6 +12,7 @@ import '../../application/day_availability.dart';
 import '../../application/schedule_queries.dart';
 import '../../domain/schedule.dart';
 import '../../domain/schedule_engine.dart';
+import '../../domain/work_overtime.dart';
 import '../../data/preferences_repository.dart';
 import '../../data/weather_repository.dart';
 import '../../data/open_meteo_weather_service.dart';
@@ -32,6 +33,9 @@ import 'weather_settings_page.dart';
 
 String greetingForLocalHour(int hour) =>
     greetingForWeather(localHour: hour, isDay: null);
+
+String _hoursLabel(int minutes) =>
+    '${(minutes / 60).toStringAsFixed(minutes % 60 == 0 ? 0 : 1)}h';
 
 SchedulePalette _todayFeaturePalette(BuildContext context) {
   final theme = Theme.of(context);
@@ -1142,10 +1146,12 @@ class WeekPage extends ConsumerStatefulWidget {
     super.key,
     required this.focusDate,
     required this.onFocusDateChanged,
+    this.onNavigateBySwipe,
   });
 
   final CivilDate focusDate;
   final ValueChanged<CivilDate> onFocusDateChanged;
+  final ValueChanged<int>? onNavigateBySwipe;
 
   @override
   ConsumerState<WeekPage> createState() => _WeekPageState();
@@ -1153,6 +1159,8 @@ class WeekPage extends ConsumerStatefulWidget {
 
 class _WeekPageState extends ConsumerState<WeekPage> {
   bool _monthView = false;
+  int? _destinationSwipePointer;
+  Offset? _destinationSwipeStart;
 
   @override
   Widget build(BuildContext context) {
@@ -1343,48 +1351,80 @@ class _WeekPageState extends ConsumerState<WeekPage> {
                 ),
               ),
             Expanded(
-              child: _monthView
-                  ? _MonthCalendar(
-                      firstDay: monthGridStart,
-                      month: monthStart,
-                      focusDate: focusDate,
-                      occurrences: occurrences,
-                      selectedOccurrences: queries.forDay(allItems, focusDate),
-                      conflictedIds: conflicts,
-                      use24Hour: use24,
-                      onSelectDate: widget.onFocusDateChanged,
-                      onSelectEvent: (occurrence) => showScheduleDetails(
-                        context,
-                        ref,
-                        occurrence.item,
-                        occurrenceDate: occurrence.date,
-                      ),
-                    )
-                  : AnimatedSwitcher(
-                      duration: AppMotion.duration(context, AppMotion.change),
-                      reverseDuration: AppMotion.duration(
-                        context,
-                        AppMotion.exit,
-                      ),
-                      switchInCurve: Curves.easeInOutCubic,
-                      switchOutCurve: Curves.easeInOutCubic,
-                      transitionBuilder: AppMotion.sharedFadeSlide,
-                      child: WeekGrid(
-                        key: ValueKey(weekStart),
-                        weekStart: weekStart,
+              child: Listener(
+                key: const ValueKey('calendar-destination-swipe-area'),
+                onPointerDown: widget.onNavigateBySwipe == null
+                    ? null
+                    : (event) {
+                        _destinationSwipePointer = event.pointer;
+                        _destinationSwipeStart = event.position;
+                      },
+                onPointerUp: widget.onNavigateBySwipe == null
+                    ? null
+                    : (event) {
+                        if (event.pointer != _destinationSwipePointer) return;
+                        final start = _destinationSwipeStart;
+                        _destinationSwipePointer = null;
+                        _destinationSwipeStart = null;
+                        if (start == null) return;
+                        final delta = event.position - start;
+                        if (delta.dx.abs() >= 72 &&
+                            delta.dx.abs() > delta.dy.abs()) {
+                          widget.onNavigateBySwipe!(delta.dx < 0 ? 1 : -1);
+                        }
+                      },
+                onPointerCancel: (event) {
+                  if (event.pointer == _destinationSwipePointer) {
+                    _destinationSwipePointer = null;
+                    _destinationSwipeStart = null;
+                  }
+                },
+                child: _monthView
+                    ? _MonthCalendar(
+                        firstDay: monthGridStart,
+                        month: monthStart,
                         focusDate: focusDate,
                         occurrences: occurrences,
+                        selectedOccurrences: queries.forDay(
+                          allItems,
+                          focusDate,
+                        ),
                         conflictedIds: conflicts,
                         use24Hour: use24,
-                        onFocusDateChanged: widget.onFocusDateChanged,
-                        onSelect: (occurrence) => showScheduleDetails(
+                        onSelectDate: widget.onFocusDateChanged,
+                        onSelectEvent: (occurrence) => showScheduleDetails(
                           context,
                           ref,
                           occurrence.item,
                           occurrenceDate: occurrence.date,
                         ),
+                      )
+                    : AnimatedSwitcher(
+                        duration: AppMotion.duration(context, AppMotion.change),
+                        reverseDuration: AppMotion.duration(
+                          context,
+                          AppMotion.exit,
+                        ),
+                        switchInCurve: Curves.easeInOutCubic,
+                        switchOutCurve: Curves.easeInOutCubic,
+                        transitionBuilder: AppMotion.sharedFadeSlide,
+                        child: WeekGrid(
+                          key: ValueKey(weekStart),
+                          weekStart: weekStart,
+                          focusDate: focusDate,
+                          occurrences: occurrences,
+                          conflictedIds: conflicts,
+                          use24Hour: use24,
+                          onFocusDateChanged: widget.onFocusDateChanged,
+                          onSelect: (occurrence) => showScheduleDetails(
+                            context,
+                            ref,
+                            occurrence.item,
+                            occurrenceDate: occurrence.date,
+                          ),
+                        ),
                       ),
-                    ),
+              ),
             ),
             if (analysis.timeIssues.isNotEmpty)
               Padding(
@@ -1715,6 +1755,7 @@ class _ScheduleCollectionPageState
   String? _selectedFilter;
   bool _showAllClasses = false;
   bool _showAllWork = false;
+  bool _showAllPastShifts = false;
   Timer? _clockRefresh;
 
   DateTime _now() => widget.clock?.call() ?? DateTime.now();
@@ -1829,6 +1870,21 @@ class _ScheduleCollectionPageState
         onRetry: () => ref.invalidate(scheduleItemsProvider),
       ),
       data: (allItems) {
+        final overtimeAdjustments =
+            ref.watch(workOvertimeAdjustmentsProvider).asData?.value ??
+            const <WorkOvertimeAdjustment>[];
+        final overtimeByOccurrence = {
+          for (final adjustment in overtimeAdjustments)
+            '${adjustment.shiftItemId}|${adjustment.occurrenceDate}':
+                adjustment.minutes,
+        };
+        int overtimeFor(EventOccurrence occurrence) =>
+            overtimeByOccurrence['${occurrence.item.id}|${occurrence.date}'] ??
+            0;
+        bool hasOvertime(EventOccurrence occurrence) =>
+            occurrence.item.workCategory == WorkCategory.overtime ||
+            (occurrence.item.workCategory == WorkCategory.shift &&
+                overtimeFor(occurrence) > 0);
         final now = _now();
         final today = CivilDate.fromDateTime(now);
         final through = today.addDays(90);
@@ -1883,8 +1939,7 @@ class _ScheduleCollectionPageState
           return switch (activeFilter) {
             'Shifts' =>
               entry.occurrence.item.workCategory == WorkCategory.shift,
-            'Overtime' =>
-              entry.occurrence.item.workCategory == WorkCategory.overtime,
+            'Overtime' => hasOvertime(entry.occurrence),
             'Training' =>
               entry.occurrence.item.workCategory == WorkCategory.training,
             _ => false,
@@ -1902,7 +1957,7 @@ class _ScheduleCollectionPageState
               'Days Off' =>
                 entry.item.workCategory == WorkCategory.dayOff ||
                     entry.item.workCategory == WorkCategory.restDay,
-              'Overtime' => entry.item.workCategory == WorkCategory.overtime,
+              'Overtime' => hasOvertime(entry),
               'Leave' => entry.item.workCategory == WorkCategory.leave,
               'Training' => entry.item.workCategory == WorkCategory.training,
               _ => true,
@@ -1934,6 +1989,72 @@ class _ScheduleCollectionPageState
                 upcoming.length > 3
             ? upcoming.take(3).toList()
             : upcoming;
+        final shiftItems = allItems
+            .where(
+              (item) =>
+                  item.kind == ScheduleKind.work &&
+                  (item.workCategory == WorkCategory.shift ||
+                      item.workCategory == WorkCategory.overtime),
+            )
+            .toList();
+        final firstShiftDate = shiftItems.isEmpty
+            ? null
+            : shiftItems
+                  .map((item) => item.startDate)
+                  .reduce(
+                    (first, next) => first.compareTo(next) <= 0 ? first : next,
+                  );
+        final recentPastStart = today.addDays(-30);
+        final historyStart = _showAllPastShifts || firstShiftDate == null
+            ? firstShiftDate ?? today
+            : firstShiftDate.compareTo(recentPastStart) > 0
+            ? firstShiftDate
+            : recentPastStart;
+        final activeOccurrenceKeys = queries
+            .currentlyHappeningEntries(allItems, now)
+            .map(
+              (entry) => '${entry.occurrence.item.id}|${entry.occurrence.date}',
+            )
+            .toSet();
+        bool matchesPastFilter(EventOccurrence occurrence) =>
+            switch (activeFilter) {
+              'Shifts' => occurrence.item.workCategory == WorkCategory.shift,
+              'Overtime' => hasOvertime(occurrence),
+              _ => false,
+            };
+        bool hasEnded(EventOccurrence occurrence) {
+          // This section records roster dates before today. A shift that ended
+          // earlier today remains in today's schedule and is not reclassified.
+          return occurrence.date.compareTo(today) < 0;
+        }
+
+        final pastShifts =
+            widget.kind != ScheduleKind.work ||
+                firstShiftDate == null ||
+                historyStart.compareTo(today) > 0
+            ? <EventOccurrence>[]
+            : queries
+                  .forRange(allItems, historyStart, today)
+                  .where(
+                    (entry) =>
+                        entry.item.kind == ScheduleKind.work &&
+                        matchesPastFilter(entry) &&
+                        hasEnded(entry) &&
+                        !activeOccurrenceKeys.contains(
+                          '${entry.item.id}|${entry.date}',
+                        ),
+                  )
+                  .toList();
+        pastShifts.sort((left, right) {
+          final dateOrder = right.date.compareTo(left.date);
+          if (dateOrder != 0) return dateOrder;
+          final leftStart = left.item.intervals.first.startEpochMinute;
+          final rightStart = right.item.intervals.first.startEpochMinute;
+          return rightStart.compareTo(leftStart);
+        });
+        final hasOlderPastShifts =
+            firstShiftDate != null &&
+            firstShiftDate.compareTo(recentPastStart) < 0;
         final issues = queries
             .analyzeRange(allItems, today, through)
             .timeIssues
@@ -1953,24 +2074,31 @@ class _ScheduleCollectionPageState
             .forRange(allItems, today, weekThrough)
             .where((entry) => entry.item.kind == ScheduleKind.work)
             .toList();
-        final scheduledMinutes = weekItems
-            .where(
-              (entry) =>
-                  entry.item.workCategory == WorkCategory.shift ||
-                  entry.item.workCategory == WorkCategory.overtime ||
-                  entry.item.workCategory == WorkCategory.training,
-            )
-            .expand(
-              (entry) => entry.item.actualIntervals ?? entry.item.intervals,
-            )
-            .fold<int>(
-              0,
-              (total, interval) =>
-                  total +
-                  (interval.endDayOffset - interval.startDayOffset) * 1440 +
-                  interval.endMinute -
-                  interval.startMinute,
+        var scheduledMinutes = 0;
+        var overtimeMinutes = 0;
+        var premiumEligibleMinutes = 0;
+        for (final entry in weekItems) {
+          final category = entry.item.workCategory;
+          if (category == WorkCategory.shift) {
+            final loggedOvertime = overtimeFor(entry);
+            final intervals = loggedOvertime > 0
+                ? entry.item.intervals
+                : entry.item.actualIntervals ?? entry.item.intervals;
+            final baseMinutes = WorkHoursSummary.sumIntervalMinutes(intervals);
+            scheduledMinutes += baseMinutes;
+            overtimeMinutes += loggedOvertime;
+            premiumEligibleMinutes += WorkHoursSummary.fromMinutes(
+              scheduledMinutes: baseMinutes,
+              overtimeMinutes: loggedOvertime,
+            ).premiumEligibleMinutes;
+          } else if (category == WorkCategory.overtime ||
+              category == WorkCategory.training) {
+            scheduledMinutes += WorkHoursSummary.sumIntervalMinutes(
+              entry.item.actualIntervals ?? entry.item.intervals,
             );
+          }
+        }
+        final totalWorkMinutes = scheduledMinutes + overtimeMinutes;
         final shiftCount = weekItems
             .where(
               (entry) =>
@@ -2001,8 +2129,8 @@ class _ScheduleCollectionPageState
                   Expanded(
                     child: _WorkSummary(
                       label: 'Total hours',
-                      value: (scheduledMinutes / 60).toStringAsFixed(
-                        scheduledMinutes % 60 == 0 ? 0 : 1,
+                      value: (totalWorkMinutes / 60).toStringAsFixed(
+                        totalWorkMinutes % 60 == 0 ? 0 : 1,
                       ),
                     ),
                   ),
@@ -2019,6 +2147,16 @@ class _ScheduleCollectionPageState
                   ),
                 ],
               ),
+              if (overtimeMinutes > 0 || premiumEligibleMinutes > 0) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Extra hours: ${_hoursLabel(overtimeMinutes)} · '
+                  'Over 8h per shift: ${_hoursLabel(premiumEligibleMinutes)}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
               const SizedBox(height: 20),
             ],
             if (widget.kind == ScheduleKind.work &&
@@ -2049,6 +2187,7 @@ class _ScheduleCollectionPageState
                         onSelected: (_) => setState(() {
                           _selectedFilter = filters[index];
                           _showAllWork = false;
+                          _showAllPastShifts = false;
                         }),
                         showCheckmark: false,
                       ),
@@ -2200,6 +2339,61 @@ class _ScheduleCollectionPageState
                 if (index < visibleUpcoming.length - 1)
                   const SizedBox(height: 10),
               ],
+            if (widget.kind == ScheduleKind.work && pastShifts.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Past shifts',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  if (hasOlderPastShifts)
+                    TextButton(
+                      onPressed: () => setState(
+                        () => _showAllPastShifts = !_showAllPastShifts,
+                      ),
+                      child: Text(
+                        _showAllPastShifts
+                            ? 'Show recent shifts'
+                            : 'Show all past shifts',
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Dates alone do not mark a shift as completed.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
+              for (var index = 0; index < pastShifts.length; index++) ...[
+                ScheduleEventTile(
+                  item: pastShifts[index].item,
+                  use24Hour: use24,
+                  showExtendedWorkDetails: false,
+                  conflict: conflicts.contains(pastShifts[index].item.id),
+                  reviewTime: issues.contains(pastShifts[index].item.id),
+                  dateLabel: localizations.formatMediumDate(
+                    DateTime(
+                      pastShifts[index].date.year,
+                      pastShifts[index].date.month,
+                      pastShifts[index].date.day,
+                    ),
+                  ),
+                  onTap: () => showScheduleDetails(
+                    context,
+                    ref,
+                    pastShifts[index].item,
+                    occurrenceDate: pastShifts[index].date,
+                  ),
+                ),
+                if (index < pastShifts.length - 1) const SizedBox(height: 10),
+              ],
+            ],
             if (upcomingDeadlines.isNotEmpty) ...[
               const SizedBox(height: 24),
               Text(

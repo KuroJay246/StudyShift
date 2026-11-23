@@ -295,6 +295,7 @@ void main() {
       ],
       code: 'RMP',
       codeMeaning: 'Synthetic ramp duty',
+      coworkers: const ['Synthetic teammate A', 'Synthetic teammate B'],
       notes: 'Synthetic example',
       reportingInstruction: 'Synthetic reporting point: north gate',
     );
@@ -303,11 +304,18 @@ void main() {
     expect(result.intervals, shift.intervals);
     expect(result.code, 'RMP');
     expect(result.codeMeaning, 'Synthetic ramp duty');
+    expect(result.coworkers, ['Synthetic teammate A', 'Synthetic teammate B']);
     expect(result.notes, 'Synthetic example');
     expect(
       result.reportingInstruction,
       'Synthetic reporting point: north gate',
     );
+    await repository.save(
+      result.copyWith(coworkers: const ['Synthetic teammate C']),
+    );
+    expect((await repository.getItems()).single.coworkers, [
+      'Synthetic teammate C',
+    ]);
   });
 
   test(

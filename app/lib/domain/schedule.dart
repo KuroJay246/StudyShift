@@ -164,7 +164,9 @@ List<EventInterval> intervalsWithOvertimeEnd(
   int actualEndMinute,
 ) {
   if (planned.isEmpty || actualEndMinute < 0 || actualEndMinute >= 1440) {
-    throw ArgumentError('A timed work interval and valid finish time are required.');
+    throw ArgumentError(
+      'A timed work interval and valid finish time are required.',
+    );
   }
   final updated = [...planned];
   final last = updated.last;
@@ -225,6 +227,7 @@ class ScheduleItem {
     this.timeZoneId,
     this.code,
     this.codeMeaning,
+    List<String> coworkers = const [],
     String? employerName,
     String? departmentName,
     String? jobRole,
@@ -256,6 +259,9 @@ class ScheduleItem {
        supervisorPhone = kind == ScheduleKind.work ? supervisorPhone : null,
        contactName = kind == ScheduleKind.work ? contactName : null,
        contactPhone = kind == ScheduleKind.work ? contactPhone : null,
+       coworkers = kind == ScheduleKind.work
+           ? List.unmodifiable(_normalizeCoworkers(coworkers))
+           : const [],
        employerName = kind == ScheduleKind.work ? employerName : null,
        departmentName = kind == ScheduleKind.work ? departmentName : null,
        jobRole = kind == ScheduleKind.work ? jobRole : null,
@@ -280,7 +286,9 @@ class ScheduleItem {
     if (this.actualIntervals != null) {
       final actual = this.actualIntervals!;
       if (!supportsCompletionTracking || !this.isCompleted) {
-        throw ArgumentError('Actual intervals require a completed shift or deadline.');
+        throw ArgumentError(
+          'Actual intervals require a completed shift or deadline.',
+        );
       }
       if (actual.length != this.intervals.length ||
           actual.asMap().entries.any((entry) {
@@ -289,7 +297,9 @@ class ScheduleItem {
             return interval.startEpochMinute != planned.startEpochMinute ||
                 interval.endEpochMinute < planned.endEpochMinute;
           })) {
-        throw ArgumentError('Actual intervals must preserve planned intervals and only extend them.');
+        throw ArgumentError(
+          'Actual intervals must preserve planned intervals and only extend them.',
+        );
       }
     }
     if (timeZoneId != null && timeZoneId!.trim().isEmpty) {
@@ -390,6 +400,7 @@ class ScheduleItem {
   final String? timeZoneId;
   final String? code;
   final String? codeMeaning;
+  final List<String> coworkers;
   final String? employerName;
   final String? departmentName;
   final String? jobRole;
@@ -427,6 +438,7 @@ class ScheduleItem {
     String? title,
     Object? code = _unchanged,
     Object? codeMeaning = _unchanged,
+    List<String>? coworkers,
     Object? employerName = _unchanged,
     Object? departmentName = _unchanged,
     Object? jobRole = _unchanged,
@@ -450,6 +462,7 @@ class ScheduleItem {
     timeZoneId: timeZoneId,
     code: _optionalValue(code, this.code),
     codeMeaning: _optionalValue(codeMeaning, this.codeMeaning),
+    coworkers: coworkers ?? this.coworkers,
     employerName: _optionalValue(employerName, this.employerName),
     departmentName: _optionalValue(departmentName, this.departmentName),
     jobRole: _optionalValue(jobRole, this.jobRole),
@@ -477,6 +490,32 @@ class ScheduleItem {
         ? this.reminderMinutesBefore
         : reminderMinutesBefore as int?,
   );
+}
+
+List<String> _normalizeCoworkers(List<String> names) {
+  final seen = <String>{};
+  final normalized = <String>[];
+  for (final raw in names) {
+    final name = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (name.isEmpty ||
+        name.length > 512 ||
+        name.contains(RegExp(r'[\x00-\x1f\x7f]'))) {
+      throw ArgumentError.value(
+        raw,
+        'coworkers',
+        'Coworker names must be plain text up to 512 characters.',
+      );
+    }
+    if (seen.add(name.toLowerCase())) normalized.add(name);
+  }
+  if (normalized.length > 100) {
+    throw ArgumentError.value(
+      names,
+      'coworkers',
+      'A shift cannot list more than 100 coworkers.',
+    );
+  }
+  return normalized;
 }
 
 String? _optionalValue(Object? requested, String? existing) =>

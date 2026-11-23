@@ -262,6 +262,7 @@ class IcsScheduleImportParser {
               workCategory: category.workCategory,
               deadlineType: category.deadlineType,
               recurrence: recurrence,
+              coworkers: _readCoworkers(event),
               location: _cleanOptional(event.location),
               notes: _cleanOptional(event.description),
               allDay: category.kind == ScheduleKind.personal,
@@ -365,6 +366,7 @@ class IcsScheduleImportParser {
             workCategory: category.workCategory,
             deadlineType: category.deadlineType,
             recurrence: recurrence,
+            coworkers: _readCoworkers(event),
             location: _cleanOptional(event.location),
             notes: _cleanOptional(event.description),
             importProvenance: _provenance(
@@ -616,6 +618,7 @@ class IcsScheduleImportParser {
         notes: _withoutExpansionMarker(first.notes),
         allDay: first.allDay,
         recurrence: recurrence,
+        coworkers: first.coworkers,
         importProvenance: ScheduleImportProvenance(
           format: provenance.format,
           uid: provenance.uid,
@@ -727,6 +730,7 @@ class IcsScheduleImportParser {
         workCategory: first.workCategory,
         deadlineType: first.deadlineType,
         recurrence: first.recurrence,
+        coworkers: first.coworkers,
         location: first.location,
         notes: first.notes,
         allDay: first.allDay,
@@ -777,6 +781,26 @@ class IcsScheduleImportParser {
       throw const FormatException('Invalid StudyShift actual-time metadata.');
     }
     return _SelfExportActualEnd(dayOffset, minute, foldChoice);
+  }
+
+  static List<String> _readCoworkers(EventComponent event) {
+    final value = event.valueOrNull<String>('X-SHIFT-STUDY-COWORKERS');
+    if (value == null || value.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(
+        utf8.decode(base64Url.decode(base64Url.normalize(value))),
+      );
+      if (decoded is! List ||
+          decoded.length > 100 ||
+          decoded.any((name) => name is! String || name.length > 512)) {
+        throw const FormatException('Invalid coworker metadata.');
+      }
+      return decoded.cast<String>();
+    } on FormatException {
+      rethrow;
+    } on Object {
+      throw const FormatException('Invalid coworker metadata.');
+    }
   }
 
   static EventInterval _intervalWithActualEnd(

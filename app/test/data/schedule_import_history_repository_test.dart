@@ -137,7 +137,7 @@ void main() {
           .customSelect('SELECT * FROM schedule_import_history_rows')
           .get();
 
-      expect(version.read<int>('user_version'), 21);
+      expect(version.read<int>('user_version'), 23);
       expect(preserved.read<String>('title'), 'Existing record');
       expect(history, isEmpty);
     },

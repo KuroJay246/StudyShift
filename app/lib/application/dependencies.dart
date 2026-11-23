@@ -10,9 +10,11 @@ import '../data/schedule_repository.dart';
 import '../data/schedule_import_history_repository.dart';
 import '../data/supervisor_repository.dart';
 import '../data/work_code_legend_repository.dart';
+import '../data/work_overtime_repository.dart';
 import '../data/weather_repository.dart';
 import '../data/open_meteo_weather_service.dart';
 import '../domain/schedule.dart';
+import '../domain/work_overtime.dart';
 import '../domain/supervisor_profile.dart';
 import '../domain/academic_term.dart';
 import '../domain/schedule_engine.dart';
@@ -34,6 +36,15 @@ final scheduleDatabaseProvider = Provider<ScheduleDatabase>((ref) {
 final scheduleRepositoryProvider = Provider<ScheduleRepository>(
   (ref) => ScheduleRepository(ref.watch(scheduleDatabaseProvider)),
 );
+
+final workOvertimeRepositoryProvider = Provider<WorkOvertimeRepository>(
+  (ref) => WorkOvertimeRepository(ref.watch(scheduleDatabaseProvider)),
+);
+
+final workOvertimeAdjustmentsProvider =
+    StreamProvider<List<WorkOvertimeAdjustment>>(
+      (ref) => ref.watch(workOvertimeRepositoryProvider).watchAll(),
+    );
 
 final scheduleImportHistoryRepositoryProvider =
     Provider<ScheduleImportHistoryRepository>(

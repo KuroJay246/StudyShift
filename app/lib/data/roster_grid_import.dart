@@ -1,3 +1,5 @@
+import '../domain/work_code_legend.dart';
+
 /// Text recognized from one word in a document, with its page-relative bounds.
 /// Coordinates are normalized to 0..1 by the Android OCR bridge.
 class OcrTextToken {
@@ -189,6 +191,96 @@ class RosterGridImportParser {
       }
     }
     return RosterGridDetection(List.unmodifiable(_deduplicate(candidates)));
+  }
+
+  List<String> coworkersForCell(
+    RosterGridCandidate table, {
+    required int selectedRow,
+    required int columnIndex,
+    required String code,
+    List<WorkCodeLegend>? legends,
+  }) {
+    if (selectedRow < 0 ||
+        selectedRow >= table.rows.length ||
+        columnIndex < 0 ||
+        columnIndex >= table.columns.length) {
+      throw const FormatException('The selected roster cell is unavailable.');
+    }
+    final target = code.trim().toUpperCase();
+    if (target.isEmpty) return const [];
+    final selectedCell = table.rows[selectedRow].cells[columnIndex];
+    if (selectedCell.isAmbiguous ||
+        selectedCell.text.trim().toUpperCase() != target) {
+      return const [];
+    }
+    final selectedDefinition = legends == null
+        ? null
+        : _uniqueDefinition(legends, target);
+    final names = <String>[];
+    final seen = <String>{};
+    for (var index = 0; index < table.rows.length; index++) {
+      if (index == selectedRow ||
+          columnIndex >= table.rows[index].cells.length) {
+        continue;
+      }
+      final cell = table.rows[index].cells[columnIndex];
+      final name = table.rows[index].label.trim().replaceAll(
+        RegExp(r'\s+'),
+        ' ',
+      );
+      final normalized = cell.text.trim().toUpperCase();
+      if (cell.isAmbiguous ||
+          const {
+            'X',
+            'OFF',
+            'REST',
+            'DAY OFF',
+            'D/O',
+            'DO',
+          }.contains(normalized) ||
+          name.isEmpty ||
+          seen.contains(name.toLowerCase())) {
+        continue;
+      }
+      if (legends == null) {
+        if (normalized != target) continue;
+      } else if (normalized == target) {
+        // A matching code in the same date column is the strongest roster
+        // assignment signal even before that code's time legend is defined.
+      } else {
+        final coworkerDefinition = _uniqueDefinition(legends, normalized);
+        if (selectedDefinition == null ||
+            coworkerDefinition == null ||
+            !_definitionsOverlap(selectedDefinition, coworkerDefinition)) {
+          continue;
+        }
+      }
+      seen.add(name.toLowerCase());
+      names.add(name);
+    }
+    return List.unmodifiable(names);
+  }
+
+  WorkCodeLegend? _uniqueDefinition(List<WorkCodeLegend> legends, String code) {
+    final matches = legends
+        .where((legend) => legend.code.trim().toUpperCase() == code)
+        .toList(growable: false);
+    return matches.length == 1 && matches.single.timeWindows.isNotEmpty
+        ? matches.single
+        : null;
+  }
+
+  bool _definitionsOverlap(WorkCodeLegend left, WorkCodeLegend right) {
+    for (final first in left.timeWindows) {
+      final firstEnd = first.endMinute + first.endDayOffset * 1440;
+      for (final second in right.timeWindows) {
+        final secondEnd = second.endMinute + second.endDayOffset * 1440;
+        if (first.startMinute < secondEnd && second.startMinute < firstEnd) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   List<DateTime> mapDates(

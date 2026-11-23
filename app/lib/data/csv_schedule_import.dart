@@ -56,6 +56,7 @@ class CsvScheduleImportParser {
       'time_zone',
       'code',
       'code_meaning',
+      'coworkers',
       'employer',
       'department',
       'job_role',
@@ -334,6 +335,7 @@ class CsvScheduleImportParser {
       timeZoneId: first.timeZoneId,
       code: first.code,
       codeMeaning: first.codeMeaning,
+      coworkers: first.coworkers,
       location: first.location,
       notes: first.notes,
       reportingInstruction: first.reportingInstruction,
@@ -397,6 +399,7 @@ class CsvScheduleImportParser {
     final location = _optional(values['location']);
     final code = _optional(values['code']);
     final codeMeaning = _optional(values['code_meaning']);
+    final coworkers = _coworkerNames(values['coworkers']);
     final employerName = _optional(values['employer']);
     final departmentName = _optional(values['department']);
     final jobRole = _optional(values['job_role']);
@@ -433,6 +436,7 @@ class CsvScheduleImportParser {
           supervisorPhone: supervisorPhone,
           contactName: contactName,
           contactPhone: contactPhone,
+          coworkers: coworkers,
           workCategory: workCategory,
           importProvenance: provenance,
         );
@@ -484,6 +488,7 @@ class CsvScheduleImportParser {
           date: date,
           code: code,
           codeMeaning: codeMeaning,
+          coworkers: coworkers,
           location: location,
           notes: note,
           reportingInstruction: reportingInstruction,
@@ -523,6 +528,7 @@ class CsvScheduleImportParser {
     required CivilDate date,
     required String? code,
     required String? codeMeaning,
+    required List<String> coworkers,
     required String? location,
     required String? notes,
     required String? reportingInstruction,
@@ -583,6 +589,7 @@ class CsvScheduleImportParser {
         zone,
         code,
         codeMeaning,
+        coworkers,
         location,
         notes,
         provenance,
@@ -625,6 +632,7 @@ class CsvScheduleImportParser {
       zone,
       code,
       codeMeaning,
+      coworkers,
       location,
       notes,
       provenance,
@@ -673,6 +681,7 @@ class CsvScheduleImportParser {
     String zone,
     String? code,
     String? codeMeaning,
+    List<String> coworkers,
     String? location,
     String? notes,
     ScheduleImportProvenance provenance,
@@ -704,6 +713,7 @@ class CsvScheduleImportParser {
       departmentName: kind == ScheduleKind.work ? departmentName : null,
       jobRole: kind == ScheduleKind.work ? jobRole : null,
       codeMeaning: kind == ScheduleKind.work ? codeMeaning : null,
+      coworkers: kind == ScheduleKind.work ? coworkers : const [],
       location: location,
       notes: notes,
       reportingInstruction: kind == ScheduleKind.work
@@ -723,6 +733,15 @@ class CsvScheduleImportParser {
       importProvenance: provenance,
     );
   }
+
+  static List<String> _coworkerNames(String? value) => value == null
+      ? const []
+      : value
+            .split(';')
+            .map((name) => name.trim())
+            .where((name) => name.isNotEmpty)
+            .toSet()
+            .toList(growable: false);
 
   static void _requireNoTimes(Map<String, String> values) {
     if ((values['start']?.trim().isNotEmpty ?? false) ||

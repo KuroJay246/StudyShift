@@ -10,6 +10,7 @@ import 'package:shift_study/domain/academic_term.dart';
 import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/domain/supervisor_profile.dart';
 import 'package:shift_study/domain/work_code_legend.dart';
+import 'package:shift_study/domain/work_overtime.dart';
 
 void main() {
   const codec = ScheduleBackupCodec();
@@ -45,6 +46,7 @@ void main() {
           departmentName: 'Synthetic ramp operations',
           jobRole: 'Ramp agent',
           codeMeaning: 'Synthetic ramp duty',
+          coworkers: const ['Synthetic teammate'],
           reminderMinutesBefore: 30,
           reportingInstruction: 'Synthetic report at service desk',
           supervisorName: 'Synthetic supervisor',
@@ -154,6 +156,13 @@ void main() {
             notes: 'Synthetic backup contact',
           ),
         ],
+        overtimeAdjustments: [
+          WorkOvertimeAdjustment(
+            shiftItemId: 'synthetic-overnight',
+            occurrenceDate: CivilDate(2026, 11, 6),
+            minutes: 90,
+          ),
+        ],
       );
 
       expect(utf8.decode(bytes), isNot(contains('Synthetic recurring class')));
@@ -182,6 +191,7 @@ void main() {
       expect(decoded.items.first.employerName, 'Synthetic Air');
       expect(decoded.items.first.departmentName, 'Synthetic ramp operations');
       expect(decoded.items.first.jobRole, 'Ramp agent');
+      expect(decoded.items.first.coworkers, ['Synthetic teammate']);
       expect(decoded.workCodeLegends.single.code, 'QX');
       expect(decoded.workCodeLegends.single.flightIds, ['AA100', 'LI200']);
       expect(decoded.workCodeLegends.single.timeWindows, const [
@@ -196,6 +206,13 @@ void main() {
           type: SupervisorType.acting,
           phone: '555-0100',
           notes: 'Synthetic backup contact',
+        ),
+      ]);
+      expect(decoded.overtimeAdjustments, [
+        WorkOvertimeAdjustment(
+          shiftItemId: 'synthetic-overnight',
+          occurrenceDate: CivilDate(2026, 11, 6),
+          minutes: 90,
         ),
       ]);
       expect(decoded.items[1].academicTermId, 'synthetic-term-1');
@@ -231,18 +248,38 @@ void main() {
     },
   );
 
-  test('version 1 encrypted backup restores legacy single-window codes', () async {
-    final bytes = await _legacyVersionOneBackup(passphrase);
-    final decoded = await codec.decode(bytes, passphrase: passphrase);
-    expect(decoded.workCodeLegends.single.timeWindows, const [
-      WorkCodeTimeWindow(startMinute: 360, endMinute: 540),
-    ]);
-  });
+  test(
+    'version 1 encrypted backup restores legacy single-window codes',
+    () async {
+      final bytes = await _legacyVersionOneBackup(passphrase);
+      final decoded = await codec.decode(bytes, passphrase: passphrase);
+      expect(decoded.workCodeLegends.single.timeWindows, const [
+        WorkCodeTimeWindow(startMinute: 360, endMinute: 540),
+      ]);
+    },
+  );
 
   test('new backup envelope uses version 2 for multi-window data', () async {
     final bytes = await codec.encode(const [], passphrase: passphrase);
     final envelope = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
     expect(envelope['version'], 2);
+  });
+
+  test('backup rejects overtime references to missing shifts', () async {
+    await expectLater(
+      codec.encode(
+        const [],
+        passphrase: passphrase,
+        overtimeAdjustments: [
+          WorkOvertimeAdjustment(
+            shiftItemId: 'missing-shift',
+            occurrenceDate: CivilDate(2026, 11, 22),
+            minutes: 60,
+          ),
+        ],
+      ),
+      throwsA(isA<FormatException>()),
+    );
   });
 
   test(

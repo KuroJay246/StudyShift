@@ -183,6 +183,13 @@ class IcsScheduleExport {
           value: '${intervalIndex + 1}',
         ),
         CalendarProperty(name: 'X-SHIFT-STUDY-PARTS', value: '$partCount'),
+        if (item.coworkers.isNotEmpty)
+          CalendarProperty(
+            name: 'X-SHIFT-STUDY-COWORKERS',
+            value: base64Url
+                .encode(utf8.encode(jsonEncode(item.coworkers)))
+                .replaceAll('=', ''),
+          ),
         if (item.supportsCompletionTracking && item.isCompleted)
           const CalendarProperty(name: 'X-SHIFT-STUDY-COMPLETED', value: '1'),
         if (item.actualIntervals != null)

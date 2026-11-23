@@ -15,7 +15,7 @@ class WorkCodeLegendPage extends ConsumerStatefulWidget {
   ConsumerState<WorkCodeLegendPage> createState() => _WorkCodeLegendPageState();
 }
 
-enum _LegendSection { codes, supervisors }
+enum _LegendSection { codes, supervisors, coworkers }
 
 class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
   final _search = TextEditingController();
@@ -31,6 +31,13 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
     await showDialog<void>(
       context: context,
       builder: (_) => _WorkCodeLegendDialog(current: current),
+    );
+  }
+
+  Future<void> _define(WorkCodeLegend suggestion) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _WorkCodeLegendDialog(suggestion: suggestion),
     );
   }
 
@@ -101,41 +108,21 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
       appBar: AppBar(
         title: const Text('Shift legend'),
         actions: [
-          IconButton(
-            tooltip: _section == _LegendSection.codes
-                ? 'Add shift code'
-                : 'Add supervisor',
-            onPressed: _section == _LegendSection.codes
-                ? _edit
-                : _editSupervisor,
-            icon: const Icon(Icons.add_rounded),
-          ),
+          if (_section != _LegendSection.coworkers)
+            IconButton(
+              tooltip: _section == _LegendSection.codes
+                  ? 'Add shift code'
+                  : 'Add supervisor',
+              onPressed: _section == _LegendSection.codes
+                  ? _edit
+                  : _editSupervisor,
+              icon: const Icon(Icons.add_rounded),
+            ),
         ],
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: SegmentedButton<_LegendSection>(
-              segments: const [
-                ButtonSegment(
-                  value: _LegendSection.codes,
-                  icon: Icon(Icons.schedule_rounded),
-                  label: Text('Codes'),
-                ),
-                ButtonSegment(
-                  value: _LegendSection.supervisors,
-                  icon: Icon(Icons.badge_outlined),
-                  label: Text('Supervisors'),
-                ),
-              ],
-              selected: {_section},
-              onSelectionChanged: (selection) => setState(() {
-                _section = selection.first;
-                _search.clear();
-              }),
-            ),
-          ),
+          _sectionPicker(context),
           Expanded(
             child: _section == _LegendSection.codes
                 ? legend.when(
@@ -160,7 +147,8 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                       ),
                     ),
                   )
-                : supervisors.when(
+                : _section == _LegendSection.supervisors
+                ? supervisors.when(
                     loading: () =>
                         const Center(child: CircularProgressIndicator()),
                     error: (error, _) => _loadFailure(
@@ -168,10 +156,206 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                       () => ref.invalidate(supervisorProfilesProvider),
                     ),
                     data: (items) => _buildSupervisorContent(items, query),
+                  )
+                : schedules.when(
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (error, _) => _loadFailure(
+                      'Roster coworker details could not be loaded.',
+                      () => ref.invalidate(scheduleItemsProvider),
+                    ),
+                    data: (items) => _buildCoworkerContent(items, query),
                   ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _sectionPicker(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+    child: Row(
+      children: [
+        for (final section in _LegendSection.values)
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: Semantics(
+                button: true,
+                selected: _section == section,
+                child: Material(
+                  color: _section == section
+                      ? Theme.of(context).colorScheme.secondaryContainer
+                      : Theme.of(context).colorScheme.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => setState(() {
+                      _section = section;
+                      _search.clear();
+                    }),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 11,
+                        horizontal: 3,
+                      ),
+                      child: Text(
+                        switch (section) {
+                          _LegendSection.codes => 'Codes',
+                          _LegendSection.supervisors => 'Supervisors',
+                          _LegendSection.coworkers => 'Coworkers',
+                        },
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        softWrap: false,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          fontWeight: _section == section
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    ),
+  );
+
+  Widget _buildCoworkerContent(List<ScheduleItem> items, String query) {
+    final shifts =
+        items
+            .where(
+              (item) =>
+                  item.kind == ScheduleKind.work && item.coworkers.isNotEmpty,
+            )
+            .where((item) {
+              if (query.isEmpty) return true;
+              return [
+                item.title,
+                item.code ?? '',
+                item.startDate.toString(),
+                ...item.coworkers,
+              ].join(' ').toLowerCase().contains(query);
+            })
+            .toList()
+          ..sort((a, b) {
+            final byDate = a.startDate.compareTo(b.startDate);
+            if (byDate != 0) return byDate;
+            final aStart = a.intervals.isEmpty
+                ? 0
+                : a.intervals.first.startMinute;
+            final bStart = b.intervals.isEmpty
+                ? 0
+                : b.intervals.first.startMinute;
+            return aStart.compareTo(bStart);
+          });
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+          child: TextField(
+            controller: _search,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search_rounded),
+              hintText: 'Search coworkers or shifts',
+              suffixIcon: query.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: () {
+                        _search.clear();
+                        setState(() {});
+                      },
+                      icon: const Icon(Icons.clear_rounded),
+                    ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: shifts.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text(
+                      query.isEmpty
+                          ? 'Coworkers appear here when a roster import matches their shift code and date, or when you add names to a shift.'
+                          : 'No matching coworkers.',
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                  itemCount: shifts.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (context, index) {
+                    final shift = shifts[index];
+                    final date = MaterialLocalizations.of(context)
+                        .formatMediumDate(
+                          DateTime(
+                            shift.startDate.year,
+                            shift.startDate.month,
+                            shift.startDate.day,
+                          ),
+                        );
+                    final time = shift.intervals
+                        .map((interval) => _formatInterval(context, interval))
+                        .join(' · ');
+                    final names = shift.coworkers.toSet().toList()..sort();
+                    return Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.work_outline_rounded),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    shift.title,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text('$date${time.isEmpty ? '' : ' · $time'}'),
+                            const SizedBox(height: 12),
+                            Text(
+                              'Working this shift',
+                              style: Theme.of(context).textTheme.labelLarge,
+                            ),
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 6,
+                              children: [
+                                for (final name in names)
+                                  Chip(
+                                    avatar: const Icon(
+                                      Icons.person_outline_rounded,
+                                      size: 18,
+                                    ),
+                                    label: Text(name),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 
@@ -253,11 +437,23 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
               else ...[
                 if (permanent.isNotEmpty) ...[
                   _supervisorGroupTitle(context, 'Permanent supervisors'),
-                  for (final profile in permanent) _supervisorCard(profile),
+                  const SizedBox(height: StudyShiftSpacing.x2),
+                  for (var index = 0; index < permanent.length; index++) ...[
+                    _supervisorCard(permanent[index]),
+                    if (index < permanent.length - 1)
+                      const SizedBox(height: StudyShiftSpacing.x3),
+                  ],
                 ],
                 if (acting.isNotEmpty) ...[
+                  if (permanent.isNotEmpty)
+                    const SizedBox(height: StudyShiftSpacing.x4),
                   _supervisorGroupTitle(context, 'Acting supervisors'),
-                  for (final profile in acting) _supervisorCard(profile),
+                  const SizedBox(height: StudyShiftSpacing.x2),
+                  for (var index = 0; index < acting.length; index++) ...[
+                    _supervisorCard(acting[index]),
+                    if (index < acting.length - 1)
+                      const SizedBox(height: StudyShiftSpacing.x3),
+                  ],
                 ],
               ],
             ],
@@ -331,9 +527,8 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
     padding: const EdgeInsets.only(top: 8, bottom: 4),
     child: Text(
       title,
-      style: Theme.of(
-        context,
-      ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+      style: Theme.of(context).textTheme.titleSmall
+          ?.copyWith(fontWeight: FontWeight.w700),
     ),
   );
 
@@ -471,7 +666,7 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: StudyShiftSpacing.x2),
               ],
               if (cards.isEmpty && definitions.isEmpty && observed.isEmpty)
                 _emptyReferenceCard(context)
@@ -483,12 +678,16 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                   ),
                 )
               else
-                for (final data in cards)
+                for (var index = 0; index < cards.length; index++) ...[
                   _codeCard(
                     context,
-                    data,
-                    showEmployer: codeCounts[data.code.toLowerCase()]! > 1,
+                    cards[index],
+                    showEmployer:
+                        codeCounts[cards[index].code.toLowerCase()]! > 1,
                   ),
+                  if (index < cards.length - 1)
+                    const SizedBox(height: StudyShiftSpacing.x3),
+                ],
             ],
           ),
         ),
@@ -544,15 +743,48 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  if (data.definitions.isNotEmpty)
-                    PopupMenuButton<String>(
-                      tooltip: 'Actions for ${data.code}',
-                      onSelected: (action) => action == 'edit'
-                          ? _edit(data.definitions.first)
-                          : _delete(data.definitions.first),
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(value: 'edit', child: Text('Edit')),
-                        PopupMenuItem(value: 'delete', child: Text('Remove')),
+                  if (data.definitions.isNotEmpty || data.hasRosterObservation)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Tooltip(
+                          message: data.definitions.isEmpty
+                              ? 'Define ${data.code}'
+                              : 'Edit ${data.code}',
+                          child: TextButton.icon(
+                            onPressed: () => data.definitions.isEmpty
+                                ? _define(
+                                    WorkCodeLegend(
+                                      id: 'legend-observed-${(data.employerName ?? 'general').toLowerCase().replaceAll(RegExp(r'[^a-z0-9-]'), '-')}-${data.code.toLowerCase().replaceAll(RegExp(r'[^a-z0-9-]'), '-')}',
+                                      code: data.code,
+                                      employer: data.employerName ?? '',
+                                      assignmentDetails: summary,
+                                      flightIds: flights,
+                                    ),
+                                  )
+                                : _edit(data.definitions.first),
+                            icon: Icon(
+                              data.definitions.isEmpty
+                                  ? Icons.add_rounded
+                                  : Icons.edit_outlined,
+                              size: 18,
+                            ),
+                            label: Text(
+                              data.definitions.isEmpty ? 'Define' : 'Edit',
+                            ),
+                          ),
+                        ),
+                        if (data.definitions.isNotEmpty)
+                          PopupMenuButton<String>(
+                            tooltip: 'Actions for ${data.code}',
+                            onSelected: (_) => _delete(data.definitions.first),
+                            itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: Text('Remove definition'),
+                              ),
+                            ],
+                          ),
                       ],
                     )
                   else
@@ -581,7 +813,9 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                           vertical: 5,
                         ),
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.secondaryContainer,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .secondaryContainer,
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Row(
@@ -800,9 +1034,10 @@ class _CodeCardData {
 }
 
 class _WorkCodeLegendDialog extends ConsumerStatefulWidget {
-  const _WorkCodeLegendDialog({this.current});
+  const _WorkCodeLegendDialog({this.current, this.suggestion});
 
   final WorkCodeLegend? current;
+  final WorkCodeLegend? suggestion;
 
   @override
   ConsumerState<_WorkCodeLegendDialog> createState() =>
@@ -811,33 +1046,27 @@ class _WorkCodeLegendDialog extends ConsumerStatefulWidget {
 
 class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
   final _formKey = GlobalKey<FormState>();
-  late final _code = TextEditingController(text: widget.current?.code ?? '');
-  late final _employer = TextEditingController(
-    text: widget.current?.employer ?? '',
-  );
+  WorkCodeLegend? get _initial => widget.current ?? widget.suggestion;
+  late final _code = TextEditingController(text: _initial?.code ?? '');
+  late final _employer = TextEditingController(text: _initial?.employer ?? '');
   late final _meaning = TextEditingController(
-    text: widget.current?.assignmentDetails ?? '',
+    text: _initial?.assignmentDetails ?? '',
   );
   late final _flightIds = TextEditingController(
-    text: widget.current?.flightIds.join(', ') ?? '',
+    text: _initial?.flightIds.join(', ') ?? '',
   );
-  late final List<TimeOfDay?> _starts =
-      widget.current?.timeWindows.isNotEmpty == true
-      ? widget.current!.timeWindows
+  late final List<TimeOfDay?> _starts = _initial?.timeWindows.isNotEmpty == true
+      ? _initial!.timeWindows
             .map((window) => _toTime(window.startMinute))
             .toList()
       : [null];
-  late final List<TimeOfDay?> _ends =
-      widget.current?.timeWindows.isNotEmpty == true
-      ? widget.current!.timeWindows
+  late final List<TimeOfDay?> _ends = _initial?.timeWindows.isNotEmpty == true
+      ? _initial!.timeWindows
             .map((window) => _toTime(window.endMinute))
             .toList()
       : [null];
-  late final List<int> _endDayOffsets =
-      widget.current?.timeWindows.isNotEmpty == true
-      ? widget.current!.timeWindows
-            .map((window) => window.endDayOffset)
-            .toList()
+  late final List<int> _endDayOffsets = _initial?.timeWindows.isNotEmpty == true
+      ? _initial!.timeWindows.map((window) => window.endDayOffset).toList()
       : [0];
   String? _error;
 
@@ -888,6 +1117,7 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
             WorkCodeLegend(
               id:
                   widget.current?.id ??
+                  widget.suggestion?.id ??
                   'legend-${DateTime.now().microsecondsSinceEpoch}',
               employer: _employer.text,
               code: _code.text,
@@ -1040,7 +1270,7 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
               textCapitalization: TextCapitalization.characters,
               decoration: const InputDecoration(
                 labelText: 'Associated flight codes',
-                hintText: 'AA2725, LI681, B6361',
+                hintText: 'SYN100, SYN200, SYN300',
                 helperText: 'Typical references only; not live flight data.',
               ),
             ),

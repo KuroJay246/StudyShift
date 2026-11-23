@@ -70,6 +70,9 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
   late final _contactName = TextEditingController(
     text: widget.existing?.contactName ?? '',
   );
+  late final _coworkers = TextEditingController(
+    text: widget.existing?.coworkers.join('\n') ?? '',
+  );
   late final _contactPhone = TextEditingController(
     text: widget.existing?.contactPhone ?? '',
   );
@@ -159,6 +162,7 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
     _supervisorName.dispose();
     _supervisorPhone.dispose();
     _contactName.dispose();
+    _coworkers.dispose();
     _contactPhone.dispose();
     _timeZone.dispose();
     super.dispose();
@@ -559,6 +563,13 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                 _codeMeaning.text.trim().isNotEmpty
             ? _codeMeaning.text.trim()
             : null,
+        coworkers: widget.kind == ScheduleKind.work
+            ? _coworkers.text
+                  .split(RegExp(r'[\n;]'))
+                  .map((name) => name.trim())
+                  .where((name) => name.isNotEmpty)
+                  .toList(growable: false)
+            : const [],
         location: _location.text.trim().isEmpty ? null : _location.text.trim(),
         notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
         reportingInstruction:
@@ -857,9 +868,9 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
               ],
               if (!_hasNoTime) ...[
                 for (var i = 0; i < _starts.length; i++) ...[
-                  if (i > 0) const Divider(height: 12),
+                  if (i > 0) const SizedBox(height: 12),
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
+                    padding: const EdgeInsets.symmetric(vertical: 4),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1136,20 +1147,24 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                         icon: const Icon(Icons.menu_book_outlined),
                         label: const Text('Set up shift codes'),
                       ),
-                    if (legends.isNotEmpty) const SizedBox(height: 8),
-                    TextFormField(
-                      key: const ValueKey('work-code-field'),
-                      controller: _code,
-                      decoration: const InputDecoration(
-                        labelText: 'Roster code · optional',
+                    if (_code.text.isNotEmpty &&
+                        _legendForCode(legends) == null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: InputDecorator(
+                          key: const ValueKey('work-code-legacy-value'),
+                          decoration: const InputDecoration(
+                            labelText: 'Saved roster code',
+                            helperText: 'This existing code is preserved. Add it to Shift code legend to select it for new shifts.',
+                            helperMaxLines: 3,
+                          ),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(_code.text),
+                          ),
+                        ),
                       ),
-                      textCapitalization: TextCapitalization.characters,
-                      onChanged: (_) {
-                        _selectedLegendId = null;
-                        _applyLegendSuggestion(legends);
-                      },
-                    ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 12),
                     TextFormField(
                       key: const ValueKey('work-location-field'),
                       controller: _location,
@@ -1309,10 +1324,14 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                         key: const ValueKey('saved-supervisor-selector'),
                         initialValue: selectedSupervisor?.id,
                         isExpanded: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Choose a saved supervisor',
-                          helperText: 'Selecting a supervisor fills their saved contact number.',
-                          helperMaxLines: 2,
+                        decoration: InputDecoration(
+                          labelText: 'Supervisor · optional',
+                          helperText:
+                              selectedSupervisor == null &&
+                                  _supervisorName.text.trim().isNotEmpty
+                              ? 'Saved name: ${_supervisorName.text}. Choose a listed supervisor to change it.'
+                              : 'Choose a saved supervisor; their phone is filled in below.',
+                          helperMaxLines: 3,
                         ),
                         items: [
                           const DropdownMenuItem<String?>(
@@ -1349,17 +1368,20 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                         icon: const Icon(Icons.people_outline_rounded),
                         label: const Text('Set up supervisor list'),
                       ),
-                    const SizedBox(height: 8),
-                    TextFormField(
-                      key: const ValueKey('supervisor-name-field'),
-                      controller: _supervisorName,
-                      decoration: const InputDecoration(
-                        labelText: 'Supervisor · optional',
+                    const SizedBox(height: 16),
+                    if (supervisors.isEmpty &&
+                        supervisorsAsync?.isLoading != true) ...[
+                      TextFormField(
+                        key: const ValueKey('supervisor-name-field'),
+                        controller: _supervisorName,
+                        decoration: const InputDecoration(
+                          labelText: 'Supervisor · optional',
+                        ),
+                        textCapitalization: TextCapitalization.words,
+                        maxLength: 512,
                       ),
-                      textCapitalization: TextCapitalization.words,
-                      maxLength: 512,
-                    ),
-                    const SizedBox(height: 12),
+                      const SizedBox(height: 12),
+                    ],
                     TextFormField(
                       key: const ValueKey('supervisor-phone-field'),
                       controller: _supervisorPhone,
@@ -1386,6 +1408,32 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                       ),
                       keyboardType: TextInputType.phone,
                       maxLength: 256,
+                    ),
+                    const SizedBox(height: 12),
+                    ExpansionTile(
+                      key: const ValueKey('coworkers-expansion'),
+                      tilePadding: EdgeInsets.zero,
+                      title: const Text('Coworkers · optional'),
+                      subtitle: Text(
+                        _coworkers.text.isEmpty
+                            ? 'Roster import fills names that share this shift and date.'
+                            : '${_coworkers.text.split(RegExp(r'[\n;]')).where((name) => name.trim().isNotEmpty).length} names on this shift',
+                      ),
+                      children: [
+                        TextFormField(
+                          key: const ValueKey('coworkers-field'),
+                          controller: _coworkers,
+                          decoration: const InputDecoration(
+                            hintText: 'One name per line',
+                            helperText: 'Roster imports fill this list from matching shifts.',
+                            alignLabelWithHint: true,
+                          ),
+                          textCapitalization: TextCapitalization.words,
+                          minLines: 2,
+                          maxLines: 5,
+                          maxLength: 6000,
+                        ),
+                      ],
                     ),
                   ],
                 ],
@@ -1513,8 +1561,8 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
     onPressed: onPressed,
     style: OutlinedButton.styleFrom(
       alignment: Alignment.centerLeft,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      visualDensity: VisualDensity.compact,
+      minimumSize: const Size.fromHeight(56),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1553,8 +1601,8 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
     onPressed: onPressed,
     style: OutlinedButton.styleFrom(
       alignment: Alignment.centerLeft,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      visualDensity: VisualDensity.compact,
+      minimumSize: const Size.fromHeight(52),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
     ),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,

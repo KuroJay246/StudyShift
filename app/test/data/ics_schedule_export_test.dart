@@ -30,6 +30,7 @@ void main() {
           reportingInstruction: 'Synthetic report at service desk',
           code: 'QX',
           codeMeaning: 'Synthetic ramp duty',
+          coworkers: const ['Synthetic teammate A', 'Synthetic teammate B'],
         ),
         ScheduleItem(
           id: 'split',
@@ -109,6 +110,10 @@ void main() {
         floatingTimeZoneId: 'America/Barbados',
         importedAt: now,
       );
+      expect(imported.proposals.first.item.coworkers, [
+        'Synthetic teammate A',
+        'Synthetic teammate B',
+      ]);
       expect(imported.proposals, hasLength(5));
       final importedShift = imported.proposals.singleWhere(
         (entry) => entry.item.title == 'Ramp; shift, A',

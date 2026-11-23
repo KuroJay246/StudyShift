@@ -222,6 +222,7 @@ class OcrScheduleImportParser {
         supervisorPhone: item.supervisorPhone,
         contactName: item.contactName,
         contactPhone: item.contactPhone,
+        coworkers: item.coworkers,
         academicTermId: item.academicTermId,
         recurrence: item.recurrence,
         workCategory: item.workCategory,

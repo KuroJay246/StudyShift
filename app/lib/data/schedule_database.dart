@@ -44,6 +44,7 @@ class ScheduleRows extends Table {
   TextColumn get supervisorPhone => text().nullable()();
   TextColumn get contactName => text().nullable()();
   TextColumn get contactPhone => text().nullable()();
+  TextColumn get coworkersJson => text().withDefault(const Constant('[]'))();
   TextColumn get academicTermId => text().nullable().references(
     AcademicTermRows,
     #id,
@@ -79,6 +80,16 @@ class IntervalRows extends Table {
   IntColumn get endMinute => integer()();
   TextColumn get startFoldChoice => text().nullable()();
   TextColumn get endFoldChoice => text().nullable()();
+}
+
+class WorkOvertimeRows extends Table {
+  TextColumn get shiftItemId =>
+      text().references(ScheduleRows, #id, onDelete: KeyAction.cascade)();
+  TextColumn get occurrenceDate => text()();
+  IntColumn get minutes => integer()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {shiftItemId, occurrenceDate};
 }
 
 class WorkCodeLegendRows extends Table {
@@ -122,6 +133,7 @@ class PreferenceRows extends Table {
     AcademicTermRows,
     ScheduleImportHistoryRows,
     SupervisorProfileRows,
+    WorkOvertimeRows,
   ],
 )
 class ScheduleDatabase extends _$ScheduleDatabase {
@@ -129,7 +141,7 @@ class ScheduleDatabase extends _$ScheduleDatabase {
   ScheduleDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 21;
+  int get schemaVersion => 23;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -225,6 +237,10 @@ class ScheduleDatabase extends _$ScheduleDatabase {
           workCodeLegendRows.timeWindowsJson,
         );
       }
+      if (from < 22) {
+        await m.addColumn(scheduleRows, scheduleRows.coworkersJson);
+      }
+      if (from < 23) await m.createTable(workOvertimeRows);
     },
     beforeOpen: (details) async {
       await customStatement('PRAGMA foreign_keys = ON');

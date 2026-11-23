@@ -1,8 +1,117 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shift_study/data/roster_grid_import.dart';
+import 'package:shift_study/domain/work_code_legend.dart';
 
 void main() {
   const parser = RosterGridImportParser();
+
+  test('finds coworkers only for the same unambiguous code and date cell', () {
+    const table = RosterGridCandidate(
+      page: 0,
+      headerTop: .1,
+      columns: [RosterGridColumn(dayNumber: 18)],
+      rows: [
+        RosterGridRow(
+          label: 'Selected person',
+          cells: [RosterGridCell(text: 'A1', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Coworker One',
+          cells: [RosterGridCell(text: 'A1', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Coworker One',
+          cells: [RosterGridCell(text: 'A1', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Other shift',
+          cells: [RosterGridCell(text: 'VS', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Off today',
+          cells: [RosterGridCell(text: 'OFF', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Unclear cell',
+          cells: [RosterGridCell(text: 'A1', isAmbiguous: true)],
+        ),
+      ],
+    );
+
+    expect(
+      parser.coworkersForCell(
+        table,
+        selectedRow: 0,
+        columnIndex: 0,
+        code: ' a1 ',
+      ),
+      ['Coworker One'],
+    );
+    expect(
+      parser.coworkersForCell(
+        table,
+        selectedRow: 0,
+        columnIndex: 0,
+        code: 'A1',
+        legends: const [],
+      ),
+      ['Coworker One'],
+    );
+  });
+
+  test('finds roster coworkers by overlapping shift times, not code alone', () {
+    const table = RosterGridCandidate(
+      page: 0,
+      headerTop: .1,
+      columns: [RosterGridColumn(dayNumber: 18)],
+      rows: [
+        RosterGridRow(
+          label: 'Selected person',
+          cells: [RosterGridCell(text: 'A1', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Overlapping coworker',
+          cells: [RosterGridCell(text: 'B1', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Later coworker',
+          cells: [RosterGridCell(text: 'C1', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Unknown code',
+          cells: [RosterGridCell(text: 'Z9', isAmbiguous: false)],
+        ),
+      ],
+    );
+    const legends = [
+      WorkCodeLegend(
+        id: 'a1',
+        code: 'A1',
+        timeWindows: [WorkCodeTimeWindow(startMinute: 360, endMinute: 540)],
+      ),
+      WorkCodeLegend(
+        id: 'b1',
+        code: 'B1',
+        timeWindows: [WorkCodeTimeWindow(startMinute: 510, endMinute: 720)],
+      ),
+      WorkCodeLegend(
+        id: 'c1',
+        code: 'C1',
+        timeWindows: [WorkCodeTimeWindow(startMinute: 600, endMinute: 720)],
+      ),
+    ];
+
+    expect(
+      parser.coworkersForCell(
+        table,
+        selectedRow: 0,
+        columnIndex: 0,
+        code: 'A1',
+        legends: legends,
+      ),
+      ['Overlapping coworker'],
+    );
+  });
 
   test('detects weekday and numbered date columns in a roster grid', () {
     final result = parser.detect(_sampleGrid());
@@ -25,11 +134,41 @@ void main() {
 
   test('keeps final date cells when roster columns are unevenly spaced', () {
     const tokens = [
-      OcrTextToken(text: 'Mon 16', left: .22, top: .10, right: .28, bottom: .12),
-      OcrTextToken(text: 'Tue 17', left: .29, top: .10, right: .35, bottom: .12),
-      OcrTextToken(text: 'Wed 18', left: .36, top: .10, right: .42, bottom: .12),
-      OcrTextToken(text: 'Thu 19', left: .47, top: .10, right: .53, bottom: .12),
-      OcrTextToken(text: 'Person One', left: .02, top: .20, right: .13, bottom: .22),
+      OcrTextToken(
+        text: 'Mon 16',
+        left: .22,
+        top: .10,
+        right: .28,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: 'Tue 17',
+        left: .29,
+        top: .10,
+        right: .35,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: 'Wed 18',
+        left: .36,
+        top: .10,
+        right: .42,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: 'Thu 19',
+        left: .47,
+        top: .10,
+        right: .53,
+        bottom: .12,
+      ),
+      OcrTextToken(
+        text: 'Person One',
+        left: .02,
+        top: .20,
+        right: .13,
+        bottom: .22,
+      ),
       OcrTextToken(text: 'A1', left: .24, top: .20, right: .26, bottom: .22),
       OcrTextToken(text: 'OFF', left: .31, top: .20, right: .34, bottom: .22),
       OcrTextToken(text: 'VS', left: .38, top: .20, right: .40, bottom: .22),

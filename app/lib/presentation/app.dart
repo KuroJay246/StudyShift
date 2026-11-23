@@ -323,7 +323,10 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
   String get _title =>
       _items.firstWhere((item) => item.destination == _selected).label;
 
-  Widget _page(_Destination destination) => switch (destination) {
+  Widget _page(
+    _Destination destination, {
+    ValueChanged<int>? onNavigateBySwipe,
+  }) => switch (destination) {
     _Destination.today => TodayPage(
       selectedDay: _selectedDay,
       clock: _now,
@@ -332,6 +335,7 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
     _Destination.week => WeekPage(
       focusDate: _selectedDay,
       onFocusDateChanged: (date) => setState(() => _selectedDay = date),
+      onNavigateBySwipe: onNavigateBySwipe,
     ),
     _Destination.work => const WorkPage(),
     _Destination.school => const StudyPage(),
@@ -806,7 +810,16 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
                       for (final item in items)
                         _RetainedDestinationPage(
                           key: ValueKey(item.destination),
-                          child: _page(item.destination),
+                          child: _page(
+                            item.destination,
+                            onNavigateBySwipe:
+                                item.destination == _Destination.week
+                                ? (delta) => _navigateToIndex(
+                                    selectedIndex + delta,
+                                    items,
+                                  )
+                                : null,
+                          ),
                         ),
                     ],
                   );

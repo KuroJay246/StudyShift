@@ -15,6 +15,9 @@ void main() {
       final database = ScheduleDatabase.forTesting(
         NativeDatabase.memory(
           setup: (db) {
+            db.execute(
+              'CREATE TABLE schedule_rows (id TEXT NOT NULL PRIMARY KEY)',
+            );
             db.execute('''
             CREATE TABLE work_code_legend_rows (
               id TEXT NOT NULL PRIMARY KEY,
@@ -56,6 +59,9 @@ void main() {
       final database = ScheduleDatabase.forTesting(
         NativeDatabase.memory(
           setup: (db) {
+            db.execute(
+              'CREATE TABLE schedule_rows (id TEXT NOT NULL PRIMARY KEY)',
+            );
             db.execute('''
             CREATE TABLE work_code_legend_rows (
               id TEXT NOT NULL PRIMARY KEY,

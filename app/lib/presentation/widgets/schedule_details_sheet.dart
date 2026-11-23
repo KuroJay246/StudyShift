@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../application/dependencies.dart';
 import '../../domain/schedule.dart';
 import '../../domain/schedule_engine.dart';
+import '../../domain/work_overtime.dart';
 import '../../platform/clock_alarm_bridge.dart';
 import '../../platform/local_reminders.dart';
 import '../schedule_format.dart';
@@ -30,6 +31,47 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
   const _ScheduleDetailsSheet({required this.item, this.occurrenceDate});
   final ScheduleItem item;
   final CivilDate? occurrenceDate;
+
+  Future<void> _editOvertimeHours(
+    BuildContext context,
+    WidgetRef ref,
+    ScheduleItem shift,
+    CivilDate date,
+    int currentMinutes,
+  ) async {
+    final minutes = await showDialog<int>(
+      context: context,
+      builder: (context) =>
+          _OvertimeHoursDialog(initialMinutes: currentMinutes),
+    );
+    if (minutes == null || !context.mounted) return;
+    try {
+      final repository = ref.read(workOvertimeRepositoryProvider);
+      if (minutes == 0) {
+        await repository.clearForOccurrence(shift.id, date);
+      } else {
+        await repository.setForOccurrence(shift, date, minutes);
+      }
+      ref.invalidate(workOvertimeAdjustmentsProvider);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              minutes == 0
+                  ? 'Overtime hours cleared'
+                  : 'Overtime hours saved for this shift',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save overtime hours: $error')),
+        );
+      }
+    }
+  }
 
   Future<void> _setOccurrenceCancelled(
     BuildContext context,
@@ -64,6 +106,7 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
               supervisorPhone: sourceItem.supervisorPhone,
               contactName: sourceItem.contactName,
               contactPhone: sourceItem.contactPhone,
+              coworkers: sourceItem.coworkers,
               workCategory: sourceItem.workCategory,
               deadlineType: sourceItem.deadlineType,
               allDay: sourceItem.allDay,
@@ -311,6 +354,26 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
     final detailDate = recurrence == null
         ? detailItem.startDate
         : occurrenceDate ?? detailItem.startDate;
+    final overtimeAdjustments =
+        ref.watch(workOvertimeAdjustmentsProvider).asData?.value ??
+        const <WorkOvertimeAdjustment>[];
+    WorkOvertimeAdjustment? overtimeAdjustment;
+    for (final adjustment in overtimeAdjustments) {
+      if (adjustment.shiftItemId == detailItem.id &&
+          adjustment.occurrenceDate == detailDate) {
+        overtimeAdjustment = adjustment;
+        break;
+      }
+    }
+    final overtimeMinutes = overtimeAdjustment?.minutes ?? 0;
+    final hoursSummary = detailItem.workCategory == WorkCategory.shift
+        ? WorkHoursSummary.forIntervals(
+            intervals: overtimeMinutes > 0
+                ? detailItem.intervals
+                : detailItem.actualIntervals ?? detailItem.intervals,
+            overtimeMinutes: overtimeMinutes,
+          )
+        : null;
     final startDate = DateTime(
       detailDate.year,
       detailDate.month,
@@ -541,6 +604,60 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
                   ),
                 ),
               ],
+              if (hoursSummary != null) ...[
+                const SizedBox(height: 12),
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Shift hours',
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Scheduled ${_hoursText(hoursSummary.scheduledMinutes)}'
+                          '  ·  Extra ${_hoursText(hoursSummary.overtimeMinutes)}'
+                          '  ·  Total ${_hoursText(hoursSummary.totalMinutes)}',
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Premium-eligible after 8h: '
+                          '${_hoursText(hoursSummary.premiumEligibleMinutes)}',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => _editOvertimeHours(
+                              context,
+                              ref,
+                              detailItem,
+                              detailDate,
+                              overtimeMinutes,
+                            ),
+                            icon: const Icon(Icons.more_time_rounded),
+                            label: Text(
+                              overtimeMinutes == 0
+                                  ? 'Add overtime hours'
+                                  : 'Edit overtime hours',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
@@ -726,6 +843,11 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
                   icon: Icons.phone_outlined,
                   text: 'Contact phone: ${detailItem.contactPhone}',
                 ),
+              if (detailItem.coworkers.isNotEmpty)
+                _DetailRow(
+                  icon: Icons.groups_outlined,
+                  text: 'Working with: ${detailItem.coworkers.join(', ')}',
+                ),
               if (detailItem.importProvenance case final provenance?) ...[
                 const SizedBox(height: 12),
                 const Divider(),
@@ -828,3 +950,87 @@ class _DetailRow extends StatelessWidget {
     ),
   );
 }
+
+class _OvertimeHoursDialog extends StatefulWidget {
+  const _OvertimeHoursDialog({required this.initialMinutes});
+
+  final int initialMinutes;
+
+  @override
+  State<_OvertimeHoursDialog> createState() => _OvertimeHoursDialogState();
+}
+
+class _OvertimeHoursDialogState extends State<_OvertimeHoursDialog> {
+  late final _controller = TextEditingController(
+    text: widget.initialMinutes == 0
+        ? ''
+        : (widget.initialMinutes / 60).toStringAsFixed(
+            widget.initialMinutes % 60 == 0 ? 0 : 2,
+          ),
+  );
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final parsed = double.tryParse(_controller.text.trim());
+    if (parsed == null || parsed <= 0 || parsed > 24) {
+      setState(() => _error = 'Enter a total from 0.01 to 24 hours.');
+      return;
+    }
+    final minutes = (parsed * 60).round();
+    if (minutes < 1 || minutes > 24 * 60) {
+      setState(() => _error = 'Enter a total from 0.01 to 24 hours.');
+      return;
+    }
+    Navigator.pop(context, minutes);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Log overtime hours'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Total extra hours for this shift'),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _controller,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            suffixText: 'hours',
+            hintText: 'e.g. 1.5',
+            errorText: _error,
+          ),
+          onSubmitted: (_) => _save(),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Count all extra time for the shift, including time worked during a split gap. This does not change the shift times.',
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      if (widget.initialMinutes > 0)
+        TextButton(
+          onPressed: () => Navigator.pop(context, 0),
+          child: const Text('Clear'),
+        ),
+      FilledButton(onPressed: _save, child: const Text('Save hours')),
+    ],
+  );
+}
+
+String _hoursText(int minutes) =>
+    '${(minutes / 60).toStringAsFixed(minutes % 60 == 0 ? 0 : 1)}h';

@@ -399,7 +399,7 @@ void main() {
   });
 
   testWidgets(
-    'calendar body keeps its horizontal control; header swipe navigates pages',
+    'calendar schedule area swipes between destinations without moving its range controls',
     (tester) async {
       tester.view.physicalSize = const Size(412, 915);
       tester.view.devicePixelRatio = 1;
@@ -463,7 +463,7 @@ void main() {
       );
       expect(tester.getTopLeft(weekPage).dx, closeTo(startX, 0.1));
 
-      final gesture = await tester.startGesture(const Offset(206, 520));
+      final gesture = await tester.startGesture(const Offset(206, 380));
       await tester.pump();
       await gesture.moveBy(
         const Offset(-120, 0),
@@ -474,16 +474,39 @@ void main() {
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         1,
-        reason: 'Horizontal calendar content gestures stay on the calendar.',
+        reason: 'The destination changes after the swipe is released.',
       );
       await gesture.up();
       await tester.pumpAndSettle();
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-        1,
-        reason: 'The calendar must not switch destinations from body swipes.',
+        2,
+        reason: 'A left swipe over the schedule should open Work.',
       );
-      expect(tester.getTopLeft(weekPage).dx, closeTo(startX, 0.1));
+      expect(tester.getTopLeft(weekPage).dx, lessThan(startX));
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Calendar'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.dragFrom(const Offset(206, 380), const Offset(120, 0));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        0,
+        reason: 'A right swipe over the schedule should return to Today.',
+      );
+
+      await tester.tap(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.text('Calendar'),
+        ),
+      );
+      await tester.pumpAndSettle();
 
       await tester.tap(
         find.descendant(
@@ -502,7 +525,7 @@ void main() {
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         1,
-        reason: 'The week range header changes the calendar range only.',
+        reason: 'Range controls must not switch destinations.',
       );
       expect(tester.getTopLeft(workPage).dx, greaterThan(0));
     },

@@ -8,6 +8,7 @@ import '../domain/academic_term.dart';
 import '../domain/schedule.dart';
 import '../domain/supervisor_profile.dart';
 import '../domain/work_code_legend.dart';
+import '../domain/work_overtime.dart';
 
 class ScheduleBackup {
   const ScheduleBackup({
@@ -16,6 +17,7 @@ class ScheduleBackup {
     this.workCodeLegends = const [],
     this.academicTerms = const [],
     this.supervisors = const [],
+    this.overtimeAdjustments = const [],
   });
 
   final DateTime createdAt;
@@ -23,6 +25,7 @@ class ScheduleBackup {
   final List<WorkCodeLegend> workCodeLegends;
   final List<AcademicTerm> academicTerms;
   final List<SupervisorProfile> supervisors;
+  final List<WorkOvertimeAdjustment> overtimeAdjustments;
 }
 
 /// A portable, authenticated, passphrase-encrypted schedule backup.
@@ -47,6 +50,7 @@ class ScheduleBackupCodec {
     List<WorkCodeLegend> workCodeLegends = const [],
     List<AcademicTerm> academicTerms = const [],
     List<SupervisorProfile> supervisors = const [],
+    List<WorkOvertimeAdjustment> overtimeAdjustments = const [],
   }) async {
     _validatePassphrase(passphrase);
     if (items.length > maxItems) {
@@ -54,6 +58,7 @@ class ScheduleBackupCodec {
     }
     _checkUniqueIds(items);
     _checkTermReferences(items, academicTerms);
+    _checkOvertimeReferences(items, overtimeAdjustments);
     if (supervisors.length > 1000) {
       throw const FormatException(
         'This schedule contains too many supervisors.',
@@ -93,6 +98,14 @@ class ScheduleBackupCodec {
         'version': _currentVersion,
         'createdAt': (createdAt ?? DateTime.now()).toUtc().toIso8601String(),
         'events': [for (final item in items) _encodeItem(item)],
+        'workOvertimeAdjustments': [
+          for (final adjustment in overtimeAdjustments)
+            {
+              'shiftItemId': adjustment.shiftItemId,
+              'occurrenceDate': adjustment.occurrenceDate.toString(),
+              'minutes': adjustment.minutes,
+            },
+        ],
         'academicTerms': [for (final term in academicTerms) _encodeTerm(term)],
         'workCodeLegends': [
           for (final entry in workCodeLegends)
@@ -237,6 +250,8 @@ class ScheduleBackupCodec {
         payload['version'] != version ||
         payload['createdAt'] is! String ||
         payload['events'] is! List ||
+        (payload['workOvertimeAdjustments'] != null &&
+            payload['workOvertimeAdjustments'] is! List) ||
         (payload['workCodeLegends'] != null &&
             payload['workCodeLegends'] is! List) ||
         (payload['academicTerms'] != null &&
@@ -284,6 +299,30 @@ class ScheduleBackupCodec {
       terms.add(term);
     }
     _checkTermReferences(items, terms);
+    final overtimeAdjustments = <WorkOvertimeAdjustment>[];
+    final rawOvertime = payload['workOvertimeAdjustments'] as List? ?? const [];
+    if (rawOvertime.length > maxItems) {
+      throw const FormatException(
+        'This backup contains too many overtime logs.',
+      );
+    }
+    try {
+      for (final raw in rawOvertime) {
+        final value = _readObject(raw, 'Backup overtime entry is invalid.');
+        overtimeAdjustments.add(
+          WorkOvertimeAdjustment(
+            shiftItemId: _requiredString(value, 'shiftItemId', 256),
+            occurrenceDate: _readDateValue(value['occurrenceDate']),
+            minutes: _requiredInt(value, 'minutes'),
+          ),
+        );
+      }
+      _checkOvertimeReferences(items, overtimeAdjustments);
+    } on FormatException {
+      rethrow;
+    } on Object {
+      throw const FormatException('Backup overtime entries are invalid.');
+    }
     final legends = <WorkCodeLegend>[];
     final rawLegends = payload['workCodeLegends'] as List? ?? const [];
     if (rawLegends.length > maxItems) {
@@ -363,6 +402,7 @@ class ScheduleBackupCodec {
       workCodeLegends: legends,
       academicTerms: terms,
       supervisors: supervisors,
+      overtimeAdjustments: overtimeAdjustments,
     );
   }
 
@@ -382,6 +422,48 @@ class ScheduleBackupCodec {
     for (final item in items) {
       if (!ids.add(item.id)) {
         throw const FormatException('The backup contains duplicate event IDs.');
+      }
+    }
+  }
+
+  static void _checkOvertimeReferences(
+    List<ScheduleItem> items,
+    List<WorkOvertimeAdjustment> adjustments,
+  ) {
+    if (adjustments.length > maxItems) {
+      throw const FormatException(
+        'This schedule contains too many overtime logs.',
+      );
+    }
+    final byId = {for (final item in items) item.id: item};
+    final seen = <String>{};
+    for (final adjustment in adjustments) {
+      final shift = byId[adjustment.shiftItemId];
+      final recurrence = shift?.recurrence;
+      final validOccurrence =
+          shift != null &&
+          (recurrence == null
+              ? adjustment.occurrenceDate == shift.startDate
+              : adjustment.occurrenceDate.compareTo(shift.startDate) >= 0 &&
+                    (recurrence.until == null ||
+                        adjustment.occurrenceDate.compareTo(
+                              recurrence.until!,
+                            ) <=
+                            0) &&
+                    recurrence.weekdays.contains(
+                      adjustment.occurrenceDate.weekday,
+                    ) &&
+                    !recurrence.exceptionDates.contains(
+                      adjustment.occurrenceDate,
+                    ));
+      final key = '${adjustment.shiftItemId}|${adjustment.occurrenceDate}';
+      if (!validOccurrence ||
+          shift.kind != ScheduleKind.work ||
+          shift.workCategory != WorkCategory.shift ||
+          shift.hasNoTime ||
+          shift.intervals.isEmpty ||
+          !seen.add(key)) {
+        throw const FormatException('Backup overtime entries are invalid.');
       }
     }
   }
@@ -429,6 +511,7 @@ class ScheduleBackupCodec {
     'departmentName': item.departmentName,
     'jobRole': item.jobRole,
     'codeMeaning': item.codeMeaning,
+    'coworkers': item.coworkers,
     'location': item.location,
     'notes': item.notes,
     'reportingInstruction': item.reportingInstruction,
@@ -598,6 +681,7 @@ class ScheduleBackupCodec {
       departmentName: _optionalString(json, 'departmentName', 512),
       jobRole: _optionalString(json, 'jobRole', 512),
       codeMeaning: _optionalString(json, 'codeMeaning', 16384),
+      coworkers: _readCoworkers(json['coworkers']),
       location: _optionalString(json, 'location', 16384),
       notes: _optionalString(json, 'notes', 16384),
       reportingInstruction: _optionalString(
@@ -692,6 +776,16 @@ class ScheduleBackupCodec {
       result.add(id);
     }
     return result;
+  }
+
+  static List<String> _readCoworkers(Object? raw) {
+    if (raw == null) return const [];
+    if (raw is! List ||
+        raw.length > 100 ||
+        raw.any((value) => value is! String || value.length > 512)) {
+      throw const FormatException('Backup coworker names are invalid.');
+    }
+    return raw.cast<String>();
   }
 
   static List<WorkCodeTimeWindow> _readTimeWindows(Object? raw) {

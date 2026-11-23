@@ -10,6 +10,7 @@ import '../../data/csv_schedule_import.dart';
 import '../../data/ics_schedule_import.dart';
 import '../../data/ocr_schedule_import.dart';
 import '../../data/roster_grid_import.dart';
+import '../../data/roster_grid_selection_resolver.dart';
 import '../../data/xlsx_schedule_import.dart';
 import '../../data/schedule_import_models.dart';
 import '../../data/schedule_import_history_repository.dart';
@@ -86,6 +87,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   DateTime? _rosterFirstDate;
   Map<int, DateTime> _rosterDateOverrides = const {};
   bool _rosterDatesConfirmed = false;
+  bool _hasRosterBatchRows = false;
   List<String> _unresolvedRosterCells = const [];
 
   static const _tableFields = <String, String>{
@@ -102,6 +104,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     'job_role': 'Job role',
     'code': 'Roster code',
     'code_meaning': 'Code meaning',
+    'coworkers': 'Coworkers (semicolon-separated)',
     'reporting_instruction': 'Reporting instruction',
     'location': 'Location',
     'notes': 'Notes',
@@ -127,6 +130,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _rosterDateOverrides = const {};
       _rosterDatesConfirmed = false;
       _unresolvedRosterCells = const [];
+      _hasRosterBatchRows = false;
     });
     try {
       final selected = await _fileBridge.openCalendar();
@@ -224,6 +228,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       'job_role',
       'code',
       'code_meaning',
+      'coworkers',
       'reporting_instruction',
       'location',
       'notes',
@@ -439,6 +444,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _rosterDateOverrides = const {};
       _rosterDatesConfirmed = false;
       _unresolvedRosterCells = const [];
+      _hasRosterBatchRows = false;
     });
     try {
       final selected = await _fileBridge.openOcrImport();
@@ -494,13 +500,16 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     }
   }
 
-  Future<void> _selectRosterTable() async {
+  Future<void> _selectRosterTable({bool appendToBatch = false}) async {
     if (!await _confirmOcrMetrics()) return;
     setState(() {
       _loading = true;
       _error = null;
-      _rows = const [];
-      _notices = const [];
+      if (!appendToBatch) {
+        _rows = const [];
+        _notices = const [];
+        _hasRosterBatchRows = false;
+      }
       _sourceName = null;
       _recognizedText = null;
       _sourceType = null;
@@ -663,11 +672,14 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     final table = detection.candidates[_selectedRosterTable];
     if (selectedRow < 0 || selectedRow >= table.rows.length) return;
     try {
-      final dates = const RosterGridImportParser().mapDates(
-        table,
-        firstDate,
+      final selection = const RosterGridSelectionResolver().resolve(
+        detection: detection,
+        candidateIndex: _selectedRosterTable,
+        selectedRowIndex: selectedRow,
+        firstDate: firstDate,
         dateOverrides: _rosterDateOverrides,
       );
+      final dates = selection.cells.map((cell) => cell.date).toList();
       final deviceZone = await ref.read(deviceTimeZoneIdProvider.future);
       final legends = await ref
           .read(workCodeLegendRepositoryProvider)
@@ -678,18 +690,68 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       final byId = {for (final item in existingItems) item.id: item};
       final existingOcrItems = existingItems.where(_hasOcrProvenance).toList();
       final matchedIds = <String>{};
-      final row = table.rows[selectedRow];
       final proposals = <_ImportRow>[];
       final unresolved = <String>[];
       for (
         var columnIndex = 0;
-        columnIndex < table.columns.length;
+        columnIndex < selection.cells.length;
         columnIndex++
       ) {
-        final cell = row.cells[columnIndex];
-        if (cell.text.isEmpty || _isOffMarker(cell.text)) continue;
-        final normalizedCell = cell.text.trim().toUpperCase();
-        final matches = cell.isAmbiguous
+        final cell = selection.cells[columnIndex];
+        if (cell.rawCode.isEmpty) continue;
+        if (cell.needsReview) {
+          unresolved.add(
+            '${localizations.formatMediumDate(dates[columnIndex])} · ${cell.rawCode}',
+          );
+          continue;
+        }
+        final normalizedCell = cell.rawCode.trim().toUpperCase();
+        if (_isOffMarker(normalizedCell)) {
+          final sourceText = 'Roster cell ${cell.rawCode}';
+          final key = sha256
+              .convert(
+                utf8.encode(
+                  '$_sourceName\n${table.page}\n$selectedRow\n$columnIndex\n$sourceText',
+                ),
+              )
+              .toString();
+          final item = ScheduleItem(
+            id: 'roster-ocr-$key',
+            kind: ScheduleKind.work,
+            title: 'Day off',
+            startDate: CivilDate(
+              dates[columnIndex].year,
+              dates[columnIndex].month,
+              dates[columnIndex].day,
+            ),
+            intervals: const [],
+            code: normalizedCell,
+            codeMeaning: 'Day off',
+            workCategory: WorkCategory.dayOff,
+            importProvenance: ScheduleImportProvenance(
+              format: _sourceType == ScheduleImportSourceType.imageOcr
+                  ? 'image-ocr'
+                  : 'pdf-ocr',
+              uid: 'roster-cell-$key',
+              sourceName: _sourceName ?? 'schedule.pdf',
+              sourceText: sourceText,
+              importedAt: DateTime.now().toUtc(),
+            ),
+          );
+          final proposal = ScheduleImportProposal(
+            item: item,
+            sourceText: sourceText,
+          );
+          final reviewRow = _ocrReviewRow(
+            proposal,
+            byId: byId,
+            unusedExistingOcrItems: existingOcrItems,
+            matchedOcrIds: matchedIds,
+          );
+          proposals.add(reviewRow.copyWith(included: reviewRow.existing == null));
+          continue;
+        }
+        final matches = cell.needsReview
             ? const <WorkCodeLegend>[]
             : legends.where((legend) {
                 return legend.code.trim().toUpperCase() == normalizedCell;
@@ -700,7 +762,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             : null;
         if (legend == null) {
           unresolved.add(
-            '${localizations.formatMediumDate(dates[columnIndex])} · ${cell.text}',
+            '${localizations.formatMediumDate(dates[columnIndex])} · ${cell.rawCode}',
           );
           continue;
         }
@@ -714,7 +776,14 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
               ),
             )
             .toList(growable: false);
-        final sourceText = 'Roster cell ${cell.text}';
+        final sourceText = 'Roster cell ${cell.rawCode}';
+        final coworkers = const RosterGridImportParser().coworkersForCell(
+          table,
+          selectedRow: selectedRow,
+          columnIndex: columnIndex,
+          code: normalizedCell,
+          legends: legends,
+        );
         final key = sha256
             .convert(
               utf8.encode(
@@ -738,6 +807,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           timeZoneId: deviceZone,
           code: legend.code,
           codeMeaning: legend.assignmentDetails,
+          coworkers: coworkers,
           employerName: legend.employer,
           workCategory: WorkCategory.shift,
           importProvenance: ScheduleImportProvenance(
@@ -764,12 +834,39 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       }
       if (!mounted) return;
       setState(() {
-        _rows = proposals;
+        final currentSource = _sourceName;
+        final retainedRows = [
+          for (final row in _rows)
+            if (row.proposal.item.importProvenance?.sourceName !=
+                currentSource)
+              row,
+        ];
+        final combinedRows = [...retainedRows, ...proposals];
+        final duplicates = _duplicateRosterBatchGroups(combinedRows);
+        final duplicateIndexes = duplicates.values
+            .expand((indexes) => indexes)
+            .toSet();
+        _rows = [
+          for (var index = 0; index < combinedRows.length; index++)
+            if (duplicateIndexes.contains(index))
+              combinedRows[index].copyWith(included: false)
+            else
+              combinedRows[index],
+        ];
+        _hasRosterBatchRows = _rows.any(_isRosterOcrRow);
         _unresolvedRosterCells = unresolved;
         _notices = [
           ScheduleImportNotice(
             'Drafts use only the selected staff row and confirmed date columns. Unmatched or ambiguous cells are kept for manual review and never converted into shifts.',
           ),
+          if (_rosterBatchSourceCount(_rows) > 1)
+            ScheduleImportNotice(
+              'The roster files are staged together. Selected changes are saved in one reviewed import.',
+            ),
+          if (duplicates.isNotEmpty)
+            ScheduleImportNotice(
+              'Matching date, code and time entries from multiple roster files start unchecked. Review the row details and select only the correct version.',
+            ),
         ];
         _error = proposals.isEmpty && unresolved.isEmpty
             ? 'No shift codes were found in the selected row. Check the row choice and date columns.'
@@ -790,6 +887,57 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     'D/O',
     'DO',
   }.contains(raw.trim().toUpperCase());
+
+  bool _isRosterOcrRow(_ImportRow row) {
+    final provenance = row.proposal.item.importProvenance;
+    return row.proposal.item.kind == ScheduleKind.work &&
+        (provenance?.format == 'pdf-ocr' ||
+            provenance?.format == 'image-ocr');
+  }
+
+  int _rosterBatchSourceCount(List<_ImportRow> rows) => {
+    for (final row in rows)
+      if (_isRosterOcrRow(row)) row.proposal.item.importProvenance!.sourceName,
+  }.length;
+
+  Map<String, List<int>> _duplicateRosterBatchGroups(
+    List<_ImportRow> rows,
+  ) {
+    final grouped = <String, List<int>>{};
+    if (_rosterBatchSourceCount(rows) < 2) return const {};
+    for (var index = 0; index < rows.length; index++) {
+      final row = rows[index];
+      if (!_isRosterOcrRow(row)) continue;
+      final item = row.proposal.item;
+      final codeKey = item.workCategory == WorkCategory.dayOff
+          ? 'day-off'
+          : item.code?.trim().toUpperCase() ?? '';
+      final intervalKey = item.intervals
+          .map(
+            (interval) =>
+                '${interval.startDayOffset}:${interval.startMinute}-'
+                '${interval.endDayOffset}:${interval.endMinute}',
+          )
+          .join(',');
+      final key = '${item.startDate}|$codeKey|$intervalKey';
+      grouped.putIfAbsent(key, () => []).add(index);
+    }
+    return {
+      for (final entry in grouped.entries)
+        if (entry.value
+                .map(
+                  (index) => rows[index]
+                      .proposal
+                      .item
+                      .importProvenance!
+                      .sourceName,
+                )
+                .toSet()
+                .length >
+            1)
+          entry.key: entry.value,
+    };
+  }
 
   _ImportRow _ocrReviewRow(
     ScheduleImportProposal proposal, {
@@ -875,6 +1023,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     supervisorPhone: item.supervisorPhone,
     contactName: item.contactName,
     contactPhone: item.contactPhone,
+    coworkers: item.coworkers,
     academicTermId: item.academicTermId,
     recurrence: item.recurrence,
     workCategory: item.workCategory,
@@ -924,6 +1073,17 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     final sourceType = _sourceType;
     if (sourceType == null) {
       setState(() => _error = 'Review an import file before adding events.');
+      return;
+    }
+    final duplicateGroups = _duplicateRosterBatchGroups(_rows);
+    final selectedDuplicate = duplicateGroups.values.any(
+      (indexes) => indexes.where((index) => _rows[index].included).length > 1,
+    );
+    if (selectedDuplicate) {
+      setState(
+        () => _error =
+            'Two roster files contain the same shift date, code and time. Select only the correct version before adding.',
+      );
       return;
     }
     final rejectedCount = _rows
@@ -1000,6 +1160,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         .where((row) => row.included && row.existing != null)
         .length;
     final selectedCount = _rows.where((row) => row.included).length;
+    final rosterBatchCount = _rosterBatchSourceCount(_rows);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Import calendar'),
@@ -1048,14 +1209,15 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Required fields: event date, event or shift name, and category. Timed events also need start and end times; use YYYY-MM-DD dates and 24-hour HH:mm times. Optional fields include end_date, source_id, employer, department,job_role, code, code_meaning, reporting_instruction, location, notes, supervisor_name, supervisor_phone, contact_name and contact_phone. These are the StudyShift field names available in the mapping step. Excel imports read visible worksheets; formulas, hidden rows and hidden worksheets are refused. Categories: shift, overtime, training, class, examination, assignment, rest_day, leave, day_off or personal. Work events with an earlier end time continue the next day; other overnight events need an end date. Every proposed event must be reviewed before saving.',
+                      'Required fields: date, title and category. Timed events also need start and end times. Use YYYY-MM-DD dates and 24-hour HH:mm times. Optional fields: end_date, source_id, time_zone, employer, department, job_role, code, code_meaning, coworkers, reporting_instruction, location, notes, supervisor_name, supervisor_phone, contact_name and contact_phone. Put coworker names in coworkers separated by semicolons. These are the StudyShift field names available in the column-matching step. Use end_date for overnight events; for a split shift, use one row per shift interval and the same source_id so the intervals stay together. Excel imports read visible worksheets; formulas, hidden rows and hidden worksheets are refused. Categories: shift, overtime, training, class, examination, assignment, rest_day, leave, day_off or personal. Review every proposed event before saving.',
                     ),
                   ),
                   const SizedBox(height: 12),
                   SelectableText(
-                    'source_id,date,title,category,start,end,time_zone,employer,department,job_role,code,code_meaning,reporting_instruction,location,notes,supervisor_name,supervisor_phone,contact_name,contact_phone\n'
-                    'SYNTH-001,2026-11-07,Sample work shift,shift,21:00,05:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,S1,Confirmed sample meaning,Sample reporting text,Sample location,,,,\n'
-                    'SYNTH-002,2026-11-08,Sample overtime,overtime,18:00,21:00,America/Barbados,,,,OT,,,,,,,,',
+                    'source_id,date,end_date,title,category,start,end,time_zone,employer,department,job_role,code,code_meaning,coworkers,reporting_instruction,location,notes,supervisor_name,supervisor_phone,contact_name,contact_phone\n'
+                    'SYNTH-001,2026-11-07,2026-11-08,Sample overnight shift,shift,21:00,05:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,S1,Confirmed sample meaning,Sample reporting text,Sample location,,,,\n'
+                    'SYNTH-002,2026-11-08,2026-11-08,Sample split shift,shift,06:00,09:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,A1,Sample duties,Sample reporting text,Sample location,,Synthetic supervisor,+1 246 555 0100,Synthetic contact,+1 246 555 0101\n'
+                    'SYNTH-002,2026-11-08,2026-11-08,Sample split shift,shift,12:00,16:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,A1,Sample duties,Sample reporting text,Sample location,,Synthetic supervisor,+1 246 555 0100,Synthetic contact,+1 246 555 0101',
                     style: Theme.of(context).textTheme.bodySmall
                         ?.copyWith(fontFamily: 'monospace'),
                   ),
@@ -1083,10 +1245,22 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
-              onPressed: _loading || _saving ? null : _selectRosterTable,
+              onPressed: _loading || _saving
+                  ? null
+                  : () => _selectRosterTable(),
               icon: const Icon(Icons.grid_on_outlined),
               label: const Text('Read a roster table'),
             ),
+            if (_hasRosterBatchRows) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _loading || _saving
+                    ? null
+                    : () => _selectRosterTable(appendToBatch: true),
+                icon: const Icon(Icons.playlist_add_rounded),
+                label: const Text('Add another roster to this batch'),
+              ),
+            ],
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: _loading || _saving
@@ -1142,6 +1316,15 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             ],
             if (_rows.isNotEmpty) ...[
               const SizedBox(height: 16),
+              if (rosterBatchCount > 1)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '$rosterBatchCount rosters · one combined review and save',
+                    style: Theme.of(context).textTheme.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                ),
               Text(
                 'Proposed events · $selectedCount selected',
                 style: Theme.of(context).textTheme.titleMedium
@@ -1460,6 +1643,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 labelText: 'Your staff row',
                 border: OutlineInputBorder(),
                 helperText: 'Names are read from the selected document and stay in this review.',
+                helperMaxLines: 2,
               ),
               items: [
                 for (var index = 0; index < selectedTable.rows.length; index++)
@@ -1750,6 +1934,9 @@ class _ImportProposalEditorState extends State<_ImportProposalEditor> {
   late final _contactName = TextEditingController(
     text: widget.item.contactName ?? '',
   );
+  late final _coworkers = TextEditingController(
+    text: widget.item.coworkers.join('\n'),
+  );
   late final _contactPhone = TextEditingController(
     text: widget.item.contactPhone ?? '',
   );
@@ -1786,6 +1973,7 @@ class _ImportProposalEditorState extends State<_ImportProposalEditor> {
     _supervisorName.dispose();
     _supervisorPhone.dispose();
     _contactName.dispose();
+    _coworkers.dispose();
     _contactPhone.dispose();
     _location.dispose();
     _notes.dispose();
@@ -1962,6 +2150,13 @@ class _ImportProposalEditorState extends State<_ImportProposalEditor> {
           contactPhone: kind == ScheduleKind.work
               ? _optional(_contactPhone.text)
               : null,
+          coworkers: kind == ScheduleKind.work
+              ? _coworkers.text
+                    .split(RegExp(r'[\n;]'))
+                    .map((name) => name.trim())
+                    .where((name) => name.isNotEmpty)
+                    .toList(growable: false)
+              : const [],
           location: _optional(_location.text),
           notes: _optional(_notes.text),
           recurrence: widget.item.recurrence,
@@ -2142,6 +2337,19 @@ class _ImportProposalEditorState extends State<_ImportProposalEditor> {
                   ),
                   keyboardType: TextInputType.phone,
                   maxLength: 256,
+                ),
+                TextFormField(
+                  key: const ValueKey('import-coworkers'),
+                  controller: _coworkers,
+                  decoration: const InputDecoration(
+                    labelText: 'Coworkers · optional',
+                    hintText: 'One name per line',
+                    helperText: 'Matching roster rows are added automatically.',
+                    alignLabelWithHint: true,
+                  ),
+                  minLines: 2,
+                  maxLines: 4,
+                  maxLength: 6000,
                 ),
               ],
               TextFormField(
