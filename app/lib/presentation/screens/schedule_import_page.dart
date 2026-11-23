@@ -88,7 +88,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   DateTime? _rosterFirstDate;
   Map<int, DateTime> _rosterDateOverrides = const {};
   bool _rosterDatesConfirmed = false;
-  bool _hasRosterBatchRows = false;
+  bool _appendIncoming = false;
   List<String> _unresolvedRosterCells = const [];
 
   static const _tableFields = <String, String>{
@@ -115,27 +115,34 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     'contact_phone': 'Contact phone',
   };
 
-  Future<void> _selectFile() async {
+  Future<void> _selectFile({bool appendToBatch = false}) async {
+    final append = appendToBatch && _rows.isNotEmpty;
     setState(() {
       _loading = true;
       _error = null;
-      _rows = const [];
-      _notices = const [];
-      _sourceName = null;
-      _recognizedText = null;
-      _sourceType = null;
-      _rosterDetection = null;
-      _selectedRosterTable = 0;
-      _selectedRosterRow = null;
-      _rosterFirstDate = null;
-      _rosterDateOverrides = const {};
-      _rosterDatesConfirmed = false;
-      _unresolvedRosterCells = const [];
-      _hasRosterBatchRows = false;
+      _appendIncoming = append;
+      if (!append) {
+        _rows = const [];
+        _notices = const [];
+        _sourceName = null;
+        _recognizedText = null;
+        _sourceType = null;
+        _rosterDetection = null;
+        _selectedRosterTable = 0;
+        _selectedRosterRow = null;
+        _rosterFirstDate = null;
+        _rosterDateOverrides = const {};
+        _rosterDatesConfirmed = false;
+        _unresolvedRosterCells = const [];
+      }
     });
     try {
       final selected = await _fileBridge.openCalendar();
-      if (selected == null) return;
+      if (selected == null) {
+        if (mounted) setState(() => _appendIncoming = false);
+        return;
+      }
+      final sourceName = _batchSourceName(selected.name, append: append);
       final zone = await ref.read(deviceTimeZoneIdProvider.future);
       final fileName = selected.name.toLowerCase();
       final ScheduleImportPreview preview;
@@ -145,7 +152,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         final text = utf8.decode(selected.bytes!, allowMalformed: false);
         preview = await _parser.parse(
           text,
-          sourceName: selected.name,
+          sourceName: sourceName,
           floatingTimeZoneId: zone,
         );
       } else if (fileName.endsWith('.csv')) {
@@ -156,14 +163,14 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           if (!mounted) return;
           setState(() {
             _pendingTableBytes = selected.bytes;
-            _pendingTableName = selected.name;
+            _pendingTableName = sourceName;
             _pendingTableType = sourceType;
             _tableHeaders = headers;
             _columnSelections = _suggestColumns(headers);
           });
           return;
         }
-        preview = await _csvParser.parse(text, sourceName: selected.name);
+        preview = await _csvParser.parse(text, sourceName: sourceName);
       } else if (fileName.endsWith('.xlsx')) {
         sourceType = ScheduleImportSourceType.xlsx;
         final headers = _xlsxParser.inspectHeaders(selected.bytes!);
@@ -171,7 +178,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           if (!mounted) return;
           setState(() {
             _pendingTableBytes = selected.bytes;
-            _pendingTableName = selected.name;
+            _pendingTableName = sourceName;
             _pendingTableType = sourceType;
             _tableHeaders = headers;
             _columnSelections = _suggestColumns(headers);
@@ -180,7 +187,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         }
         preview = await _xlsxParser.parse(
           selected.bytes!,
-          sourceName: selected.name,
+          sourceName: sourceName,
         );
       } else {
         throw const FormatException('Choose an .ics, .csv or .xlsx file.');
@@ -196,18 +203,22 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           _withLocalLegendMeaning(proposal, localLegends),
       ];
       if (!mounted) return;
-      setState(() {
-        _sourceName = selected.name;
-        _sourceType = sourceType;
-        _rows = _matchExistingRows(reviewedProposals, existingItems);
-        _notices = preview.notices;
-      });
+      final incoming = _matchExistingRows(reviewedProposals, existingItems);
+      _mergeBatchRows(incoming, preview.notices);
+      if (mounted) {
+        setState(() {
+          _sourceName = sourceName;
+          _sourceType = append ? ScheduleImportSourceType.batch : sourceType;
+        });
+      }
       if (preview.proposals.isEmpty && preview.notices.isEmpty) {
         setState(() => _error = 'This calendar has no events to review.');
       }
     } on Object catch (error) {
       if (mounted) {
-        setState(() => _error = _friendlyError(error));
+        setState(() {
+          _error = _friendlyError(error);
+        });
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -243,6 +254,62 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         .toSet();
     return !{'date', 'title', 'category'}.every(normalized.contains) ||
         normalized.any((header) => !canonical.contains(header));
+  }
+
+  void _mergeBatchRows(
+    List<_ImportRow> incoming,
+    List<ScheduleImportNotice> notices,
+  ) {
+    final append = _appendIncoming;
+    final combinedRows = append ? [..._rows, ...incoming] : incoming;
+    final duplicates = _duplicateBatchGroups(combinedRows);
+    final duplicateIndexes = duplicates.values
+        .expand((indexes) => indexes)
+        .toSet();
+    setState(() {
+      _rows = [
+        for (var index = 0; index < combinedRows.length; index++)
+          duplicateIndexes.contains(index)
+              ? combinedRows[index].copyWith(included: false)
+              : combinedRows[index],
+      ];
+      _notices = [
+        if (append) ..._notices,
+        ...notices,
+        if (append && _batchSourceCount(_rows) > 1)
+          const ScheduleImportNotice(
+            'The files are staged together. Selected changes are saved in one reviewed import.',
+          ),
+        if (duplicates.isNotEmpty)
+          const ScheduleImportNotice(
+            'Some shifts appear in more than one file. They are unchecked until you choose the correct version.',
+          ),
+      ];
+      _appendIncoming = false;
+    });
+  }
+
+  String _batchSourceName(String sourceName, {required bool append}) {
+    if (!append) return sourceName;
+    final existing = {
+      for (final row in _rows)
+        if (row.proposal.item.importProvenance case final provenance?)
+          provenance.sourceName,
+    };
+    if (!existing.contains(sourceName)) return sourceName;
+    final extensionIndex = sourceName.lastIndexOf('.');
+    final hasExtension = extensionIndex > 0;
+    final stem = hasExtension
+        ? sourceName.substring(0, extensionIndex)
+        : sourceName;
+    final extension = hasExtension ? sourceName.substring(extensionIndex) : '';
+    var copy = 2;
+    var candidate = '$stem ($copy)$extension';
+    while (existing.contains(candidate)) {
+      copy++;
+      candidate = '$stem ($copy)$extension';
+    }
+    return candidate;
   }
 
   Map<String, String> _suggestColumns(List<String> headers) {
@@ -291,7 +358,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         });
       }
     } on Object catch (error) {
-      if (mounted) setState(() => _error = _friendlyError(error));
+      if (mounted) {
+        setState(() {
+          _error = _friendlyError(error);
+        });
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -311,11 +382,14 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         _withLocalLegendMeaning(proposal, localLegends),
     ];
     if (!mounted) return;
+    final append = _appendIncoming;
+    _mergeBatchRows(
+      _matchExistingRows(reviewedProposals, existingItems),
+      preview.notices,
+    );
     setState(() {
       _sourceName = sourceName;
-      _sourceType = sourceType;
-      _rows = _matchExistingRows(reviewedProposals, existingItems);
-      _notices = preview.notices;
+      _sourceType = append ? ScheduleImportSourceType.batch : sourceType;
       _error = preview.proposals.isEmpty && preview.notices.isEmpty
           ? 'This calendar has no events to review.'
           : null;
@@ -445,7 +519,6 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _rosterDateOverrides = const {};
       _rosterDatesConfirmed = false;
       _unresolvedRosterCells = const [];
-      _hasRosterBatchRows = false;
     });
     try {
       final selected = await _fileBridge.openOcrImport();
@@ -503,17 +576,20 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
 
   Future<void> _selectRosterTable({bool appendToBatch = false}) async {
     if (!await _confirmOcrMetrics()) return;
+    final append = appendToBatch && _rows.isNotEmpty;
     setState(() {
       _loading = true;
       _error = null;
-      if (!appendToBatch) {
+      _appendIncoming = append;
+      if (!append) {
         _rows = const [];
         _notices = const [];
-        _hasRosterBatchRows = false;
       }
-      _sourceName = null;
-      _recognizedText = null;
-      _sourceType = null;
+      if (!append) {
+        _sourceName = null;
+        _recognizedText = null;
+      }
+      if (!append) _sourceType = null;
       _rosterDetection = null;
       _selectedRosterTable = 0;
       _selectedRosterRow = null;
@@ -524,7 +600,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     });
     try {
       final selected = await _fileBridge.openOcrImport(rosterTable: true);
-      if (selected == null) return;
+      if (selected == null) {
+        if (mounted) setState(() => _appendIncoming = false);
+        return;
+      }
+      final sourceName = _batchSourceName(selected.name, append: append);
       final text = selected.extractedText;
       if (text == null) {
         throw const FormatException(
@@ -552,8 +632,10 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           .length;
       if (!mounted) return;
       setState(() {
-        _sourceName = selected.name;
-        _sourceType = selected.name.toLowerCase().endsWith('.pdf')
+        _sourceName = sourceName;
+        _sourceType = append
+            ? ScheduleImportSourceType.batch
+            : sourceName.toLowerCase().endsWith('.pdf')
             ? ScheduleImportSourceType.pdfOcr
             : ScheduleImportSourceType.imageOcr;
         _recognizedText = text;
@@ -567,7 +649,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         }
       });
     } on Object catch (error) {
-      if (mounted) setState(() => _error = _friendlyError(error));
+      if (mounted) {
+        setState(() {
+          _error = _friendlyError(error);
+        });
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -672,6 +758,9 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     final localizations = MaterialLocalizations.of(context);
     final table = detection.candidates[_selectedRosterTable];
     if (selectedRow < 0 || selectedRow >= table.rows.length) return;
+    final ocrFormat = _sourceName?.toLowerCase().endsWith('.pdf') == true
+        ? 'pdf-ocr'
+        : 'image-ocr';
     try {
       final selection = const RosterGridSelectionResolver().resolve(
         detection: detection,
@@ -730,9 +819,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             codeMeaning: 'Day off',
             workCategory: WorkCategory.dayOff,
             importProvenance: ScheduleImportProvenance(
-              format: _sourceType == ScheduleImportSourceType.imageOcr
-                  ? 'image-ocr'
-                  : 'pdf-ocr',
+              format: ocrFormat,
               uid: 'roster-cell-$key',
               sourceName: _sourceName ?? 'schedule.pdf',
               sourceText: sourceText,
@@ -749,7 +836,9 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             unusedExistingOcrItems: existingOcrItems,
             matchedOcrIds: matchedIds,
           );
-          proposals.add(reviewRow.copyWith(included: reviewRow.existing == null));
+          proposals.add(
+            reviewRow.copyWith(included: reviewRow.existing == null),
+          );
           continue;
         }
         final matches = cell.needsReview
@@ -812,9 +901,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           employerName: legend.employer,
           workCategory: WorkCategory.shift,
           importProvenance: ScheduleImportProvenance(
-            format: _sourceType == ScheduleImportSourceType.imageOcr
-                ? 'image-ocr'
-                : 'pdf-ocr',
+            format: ocrFormat,
             uid: 'roster-cell-$key',
             sourceName: _sourceName ?? 'schedule.pdf',
             sourceText: sourceText,
@@ -838,12 +925,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         final currentSource = _sourceName;
         final retainedRows = [
           for (final row in _rows)
-            if (row.proposal.item.importProvenance?.sourceName !=
-                currentSource)
+            if (row.proposal.item.importProvenance?.sourceName != currentSource)
               row,
         ];
         final combinedRows = [...retainedRows, ...proposals];
-        final duplicates = _duplicateRosterBatchGroups(combinedRows);
+        final duplicates = _duplicateBatchGroups(combinedRows);
         final duplicateIndexes = duplicates.values
             .expand((indexes) => indexes)
             .toSet();
@@ -854,15 +940,16 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             else
               combinedRows[index],
         ];
-        _hasRosterBatchRows = _rows.any(_isRosterOcrRow);
+        if (_appendIncoming) _sourceType = ScheduleImportSourceType.batch;
+        _appendIncoming = false;
         _unresolvedRosterCells = unresolved;
         _notices = [
           ScheduleImportNotice(
             'Drafts use only the selected staff row and confirmed date columns. Unmatched or ambiguous cells are kept for manual review and never converted into shifts.',
           ),
-          if (_rosterBatchSourceCount(_rows) > 1)
+          if (_batchSourceCount(_rows) > 1)
             ScheduleImportNotice(
-              'The roster files are staged together. Selected changes are saved in one reviewed import.',
+              'The files are staged together. Selected changes are saved in one reviewed import.',
             ),
           if (duplicates.isNotEmpty)
             ScheduleImportNotice(
@@ -889,30 +976,29 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     'DO',
   }.contains(raw.trim().toUpperCase());
 
-  bool _isRosterOcrRow(_ImportRow row) {
-    final provenance = row.proposal.item.importProvenance;
-    return row.proposal.item.kind == ScheduleKind.work &&
-        (provenance?.format == 'pdf-ocr' ||
-            provenance?.format == 'image-ocr');
+  bool _isImportedWorkRow(_ImportRow row) {
+    final item = row.proposal.item;
+    final sourceName = item.importProvenance?.sourceName.trim() ?? '';
+    return item.kind == ScheduleKind.work && sourceName.isNotEmpty;
   }
 
-  int _rosterBatchSourceCount(List<_ImportRow> rows) => {
+  int _batchSourceCount(List<_ImportRow> rows) => {
     for (final row in rows)
-      if (_isRosterOcrRow(row)) row.proposal.item.importProvenance!.sourceName,
+      if (_isImportedWorkRow(row))
+        row.proposal.item.importProvenance!.sourceName,
   }.length;
 
-  Map<String, List<int>> _duplicateRosterBatchGroups(
-    List<_ImportRow> rows,
-  ) {
+  Map<String, List<int>> _duplicateBatchGroups(List<_ImportRow> rows) {
     final grouped = <String, List<int>>{};
-    if (_rosterBatchSourceCount(rows) < 2) return const {};
+    if (_batchSourceCount(rows) < 2) return const {};
     for (var index = 0; index < rows.length; index++) {
       final row = rows[index];
-      if (!_isRosterOcrRow(row)) continue;
+      if (!_isImportedWorkRow(row)) continue;
       final item = row.proposal.item;
       final codeKey = item.workCategory == WorkCategory.dayOff
           ? 'day-off'
           : item.code?.trim().toUpperCase() ?? '';
+      if (codeKey.isEmpty) continue;
       final intervalKey = item.intervals
           .map(
             (interval) =>
@@ -927,11 +1013,8 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       for (final entry in grouped.entries)
         if (entry.value
                 .map(
-                  (index) => rows[index]
-                      .proposal
-                      .item
-                      .importProvenance!
-                      .sourceName,
+                  (index) =>
+                      rows[index].proposal.item.importProvenance!.sourceName,
                 )
                 .toSet()
                 .length >
@@ -1076,14 +1159,13 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       setState(() => _error = 'Review an import file before adding events.');
       return;
     }
-    final duplicateGroups = _duplicateRosterBatchGroups(_rows);
+    final duplicateGroups = _duplicateBatchGroups(_rows);
     final selectedDuplicate = duplicateGroups.values.any(
       (indexes) => indexes.where((index) => _rows[index].included).length > 1,
     );
     if (selectedDuplicate) {
       setState(
-        () => _error =
-            'Two roster files contain the same shift date, code and time. Select only the correct version before adding.',
+        () => _error = 'Two roster files contain the same shift date, code and time. Select only the correct version before adding.',
       );
       return;
     }
@@ -1161,7 +1243,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         .where((row) => row.included && row.existing != null)
         .length;
     final selectedCount = _rows.where((row) => row.included).length;
-    final rosterBatchCount = _rosterBatchSourceCount(_rows);
+    final rosterBatchCount = _batchSourceCount(_rows);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Import calendar'),
@@ -1261,16 +1343,6 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
               icon: const Icon(Icons.grid_on_outlined),
               label: const Text('Read a roster table'),
             ),
-            if (_hasRosterBatchRows) ...[
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: _loading || _saving
-                    ? null
-                    : () => _selectRosterTable(appendToBatch: true),
-                icon: const Icon(Icons.playlist_add_rounded),
-                label: const Text('Add another roster to this batch'),
-              ),
-            ],
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: _loading || _saving
@@ -1353,6 +1425,35 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                     ];
                   }),
                   onEdit: () => _editRow(i),
+                ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: _loading || _saving
+                    ? null
+                    : () => _selectFile(appendToBatch: true),
+                icon: const Icon(Icons.playlist_add_rounded),
+                label: const Text('Add another calendar file to this batch'),
+              ),
+              if (_rows.any(_isImportedWorkRow)) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _loading || _saving
+                      ? null
+                      : () => _selectRosterTable(appendToBatch: true),
+                  icon: const Icon(Icons.grid_on_outlined),
+                  label: const Text(
+                    'Read another roster table into this batch',
+                  ),
+                ),
+              ],
+              if (rosterBatchCount > 1)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    '$rosterBatchCount files are staged for one review and save.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                    textAlign: TextAlign.center,
+                  ),
                 ),
               if (duplicateCount > 0)
                 Card(
@@ -1576,7 +1677,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                     detection.candidates[_selectedRosterTable],
                   );
                   _selectedRosterRow = null;
-                  _rows = const [];
+                  if (!_appendIncoming) _rows = const [];
                   _unresolvedRosterCells = const [];
                 }),
               ),
@@ -1667,7 +1768,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
               ],
               onChanged: (value) => setState(() {
                 _selectedRosterRow = value;
-                _rows = const [];
+                if (!_appendIncoming) _rows = const [];
                 _unresolvedRosterCells = const [];
               }),
             ),

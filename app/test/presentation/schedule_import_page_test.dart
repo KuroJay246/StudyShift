@@ -8,6 +8,7 @@ import 'package:drift/native.dart';
 import 'package:shift_study/application/dependencies.dart';
 import 'package:shift_study/data/schedule_database.dart';
 import 'package:shift_study/data/schedule_repository.dart';
+import 'package:shift_study/data/schedule_import_history_repository.dart';
 import 'package:shift_study/data/work_code_legend_repository.dart';
 import 'package:shift_study/data/csv_schedule_import.dart';
 import 'package:shift_study/data/preferences_repository.dart';
@@ -116,6 +117,224 @@ END:VCALENDAR''';
     expect(history.read<int>('rejected_count'), 0);
     expect(history.read<int>('skipped_count'), 0);
     expect(history.read<int>('warnings_count'), 0);
+  });
+
+  testWidgets('appends a second roster file to the same reviewed batch', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    const first =
+        'date,title,category,start,end,time_zone,employer,code,coworkers\n'
+        '2026-11-24,Synthetic roster A,shift,09:00,17:00,America/Barbados,Synthetic employer,A1,Synthetic Lee';
+    const second =
+        'date,title,category,start,end,time_zone,employer,code,coworkers\n'
+        '2026-11-25,Synthetic roster B,shift,09:00,17:00,America/Barbados,Synthetic employer,A1,Synthetic Sam';
+    var selectedFile = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(fileChannel, (call) async {
+          expect(call.method, 'openCalendar');
+          selectedFile++;
+          final source = selectedFile == 1 ? first : second;
+          return {
+            'name': 'synthetic-roster.csv',
+            'bytes': Uint8List.fromList(utf8.encode(source)),
+          };
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(fileChannel, null);
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          scheduleDatabaseProvider.overrideWithValue(database),
+          deviceTimeZoneIdProvider.overrideWith(
+            (ref) async => 'America/Barbados',
+          ),
+        ],
+        child: const MaterialApp(
+          home: SettingsPage(mode: ScheduleMode.workAndSchool),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import calendar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -800));
+    await tester.pumpAndSettle();
+    expect(find.text('Synthetic roster A'), findsOneWidget);
+    expect(
+      find.text('Add another calendar file to this batch'),
+      findsOneWidget,
+    );
+    await tester.ensureVisible(
+      find.text('Add another calendar file to this batch'),
+    );
+    await tester.tap(find.text('Add another calendar file to this batch'));
+    await tester.pumpAndSettle();
+    expect(find.text('Synthetic roster A'), findsOneWidget);
+    expect(find.text('Synthetic roster B'), findsOneWidget);
+    await tester.ensureVisible(find.text('Add 2 selected'));
+    await tester.tap(find.text('Add 2 selected'));
+    await tester.pumpAndSettle();
+
+    final items = await ScheduleRepository(database).getItems();
+    expect(items, hasLength(2));
+    expect(items.map((item) => item.startDate.toString()).toSet(), {
+      '2026-11-24',
+      '2026-11-25',
+    });
+    expect(items.map((item) => item.coworkers.single).toSet(), {
+      'Synthetic Lee',
+      'Synthetic Sam',
+    });
+    expect(items.map((item) => item.importProvenance!.sourceName).toSet(), {
+      'synthetic-roster.csv',
+      'synthetic-roster (2).csv',
+    });
+    final history = await ScheduleImportHistoryRepository(database)
+        .getEntries();
+    expect(history.single.sourceType, ScheduleImportSourceType.batch);
+    expect(selectedFile, 2);
+  });
+
+  testWidgets('keeps staged CSV rows while reviewing a roster table', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    const csv =
+        'date,title,category,start,end,time_zone,employer,code,coworkers\n'
+        '2026-11-24,Synthetic CSV shift,shift,09:00,17:00,America/Barbados,Synthetic employer,A1,Synthetic Lee';
+    final dates = [
+      for (var offset = 1; offset <= 3; offset++)
+        DateTime.now().add(Duration(days: offset)),
+    ];
+    final columnLefts = [.16, .41, .66];
+    final tokens = [
+      for (var index = 0; index < dates.length; index++)
+        {
+          'text':
+              '${dates[index].year}-${dates[index].month.toString().padLeft(2, '0')}-${dates[index].day.toString().padLeft(2, '0')}',
+          'left': columnLefts[index],
+          'top': .10,
+          'right': columnLefts[index] + .08,
+          'bottom': .12,
+          'page': 0,
+        },
+      {
+        'text': 'Synthetic staff row',
+        'left': .02,
+        'top': .20,
+        'right': .12,
+        'bottom': .22,
+        'page': 0,
+      },
+      for (final entry in [('A1', .18), ('A1', .43), ('OFF', .68)])
+        {
+          'text': entry.$1,
+          'left': entry.$2,
+          'top': .20,
+          'right': entry.$2 + .04,
+          'bottom': .22,
+          'page': 0,
+        },
+    ];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(fileChannel, (call) async {
+          if (call.method == 'openCalendar') {
+            return {
+              'name': 'synthetic-first.csv',
+              'bytes': Uint8List.fromList(utf8.encode(csv)),
+            };
+          }
+          expect(call.method, 'openOcrImport');
+          expect(call.arguments, {'rosterTable': true});
+          return {
+            'name': 'synthetic-second.pdf',
+            'text': 'Synthetic scanned roster',
+            'tokens': jsonEncode(tokens),
+          };
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(fileChannel, null);
+    });
+    await WorkCodeLegendRepository(database).save(
+      const WorkCodeLegend(
+        id: 'a1',
+        code: 'A1',
+        timeWindows: [WorkCodeTimeWindow(startMinute: 360, endMinute: 540)],
+      ),
+    );
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          scheduleDatabaseProvider.overrideWithValue(database),
+          deviceTimeZoneIdProvider.overrideWith(
+            (ref) async => 'America/Barbados',
+          ),
+        ],
+        child: const MaterialApp(
+          home: SettingsPage(mode: ScheduleMode.workAndSchool),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import calendar'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose .ics, .csv or .xlsx file'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -800));
+    await tester.pumpAndSettle();
+    expect(find.text('Synthetic CSV shift'), findsOneWidget);
+    await tester.drag(find.byType(ListView), const Offset(0, -700));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.text('Read another roster table into this batch'),
+    );
+    await tester.tap(find.text('Read another roster table into this batch'));
+    await tester.pumpAndSettle();
+    await _acceptOcrNotice(tester);
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView), const Offset(0, -700));
+    await tester.pumpAndSettle();
+    expect(find.text('Synthetic CSV shift'), findsOneWidget);
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('confirm-roster-dates')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('confirm-roster-dates')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('roster-staff-row-0')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('roster-staff-row-0')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Synthetic staff row').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Synthetic CSV shift'), findsOneWidget);
+    await tester.ensureVisible(find.text('Build shift review'));
+    await tester.tap(find.text('Build shift review'));
+    await tester.pumpAndSettle();
+    expect(find.text('Synthetic CSV shift'), findsOneWidget);
+    expect(find.textContaining('A1'), findsWidgets);
+    expect(find.text('Proposed events · 4 selected'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Add 4 selected'));
+    await tester.tap(find.text('Add 4 selected'));
+    await tester.pumpAndSettle();
+    final items = await ScheduleRepository(database).getItems();
+    expect(items, hasLength(4));
+    expect(items.map((item) => item.importProvenance!.sourceName).toSet(), {
+      'synthetic-first.csv',
+      'synthetic-second.pdf',
+    });
   });
 
   testWidgets('exam timetable OCR requires review before saving', (

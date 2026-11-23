@@ -9,6 +9,7 @@ enum ScheduleImportSourceType {
   pdfOcr,
   imageOcr,
   examTimetableOcr,
+  batch,
 }
 
 extension ScheduleImportSourceTypeLabel on ScheduleImportSourceType {
@@ -19,6 +20,7 @@ extension ScheduleImportSourceTypeLabel on ScheduleImportSourceType {
     ScheduleImportSourceType.pdfOcr => 'PDF schedule scan',
     ScheduleImportSourceType.imageOcr => 'Schedule image scan',
     ScheduleImportSourceType.examTimetableOcr => 'Exam timetable scan',
+    ScheduleImportSourceType.batch => 'Multiple files',
   };
 
   /// Increment this source-specific value when its parser's output contract
