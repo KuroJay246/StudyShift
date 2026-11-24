@@ -2,16 +2,18 @@
 
 **Updated:** 2026-11-24
 **Repository:** `main`
-**Current review app version:** `0.1.0-visual-review` / version code `28444` (debug build; not a release)
-**Current source version:** `0.1.0+28444` (`app/pubspec.yaml`)
-**Current personal debug APK:** `app/build/app/outputs/flutter-apk/app-personal-debug.apk`, ARM64, Android version code `28444` (debug-signed; 140,799,852 bytes; SHA-256 `217B9A9A69855C20CD74B6E71461ABE367D2350DF2D6A757026C2D216C0359D6`)
-**Current visual-review debug APK:** `app/build/app/outputs/flutter-apk/app-visualreview-debug.apk`, Android version code `28444` (debug-signed; 115,129,903 bytes; SHA-256 `6EF438B37A72B7760983A02AFE837D22D2B8E5C287AA7D5216B69AA8A707EB0F`)
-**Current emulator smoke builds:** visual-review debug `28444` is installed over the existing restored app profile on API 36 `emulator-5554`; personal debug `28444` is installed over the clean personal test profile on API 36 `emulator-5556` (x86_64). Both profiles' original `firstInstallTime` values were preserved (`2026-11-23 14:46:20` and `2026-11-23 17:31:04`, respectively). The ARM64 personal APK was built for phone installation but was not installed on the Galaxy. Neither APK is release-signed.
+**Current review app version:** `0.1.0-visual-review` / version code `28445` (debug build; not a release)
+**Current source version:** `0.1.0+28445` (`app/pubspec.yaml`)
+**Current personal debug APK:** `app/build/app/outputs/flutter-apk/app-personal-debug.apk`, ARM64, version code `28445` (debug-signed; 129,159,657 bytes; SHA-256 `E71CFE78C18838B1CC727064EA3C1E753998458D270AFBFCE7C05D079562C928`)
+**Current visual-review debug APK:** `app/build/app/outputs/flutter-apk/app-visualreview-debug.apk`, Android version code `28445` (debug build; not release-signed)
+**Current emulator smoke builds:** visual-review debug `28445` was installed on isolated API 36 `emulator-5556` for Smart Import and past-overtime runtime checks, then its app data and synthetic import file were cleared. The restored-profile emulator `emulator-5554` and Galaxy were not modified during this turn. The ARM64 personal APK `28445` was built for phone installation but was not installed on the Galaxy. Neither APK is release-signed.
 
 This report distinguishes implementation and emulator evidence from physical-device and release acceptance. Percentages below are planning estimates, not pass rates or a claim that the app is production-ready.
 
 ## Latest verification — 2026-11-24
 
+- A focused search of the connected Gmail account for roster, shift, time-zone and supervisor details returned no matching email. No email content was used; the owner roster therefore remains unavailable through Gmail in this session.
+- On isolated API 36 emulator `emulator-5556`, review APK `0.1.0-review+28445` imported one synthetic ICS shift, saved 1.5 overtime hours, and showed that shift under Work → Overtime → Past overtime with `Rostered: 1h · Extra logged: 1.5h · Total: 2.5h`. This directly verifies the same-day-ended-overtime regression at runtime. The review package data was then cleared and the exact synthetic ICS removed from emulator Downloads; no owner data was used or changed. Screenshots are in ignored `app/build/qa/full-goal-2026-11-24/`.
 - Work → Overtime now retains a shift with recorded extra hours after its final interval ended earlier today, and it shows past overtime alongside future overtime. New widget regressions failed before the fix and pass now. `flutter test --no-pub` passes **556 tests** and `flutter analyze --no-pub` reports no issues. This covers synthetic widget behavior; no Galaxy test was run.
 - CSV matrix roster import now extracts explicitly labeled permanent/acting supervisor sections into the same unsaved review, without creating schedule records before confirmation. The new mixed-roster test passed in the 556-test suite. XLSX mixed-section extraction and CSV/XLSX shift-legend extraction remain open and are not claimed fixed.
 - Smart Import positive-path acceptance passed on the isolated API 36 review app `app.shiftstudy.mobile.review`, build `0.1.0-review+28444`, on `emulator-5556`. A synthetic ICS file was recognized as an ICS calendar, previewed as one event, and explicitly confirmed; the app reported `Added 1, replaced 0, skipped 0`, and Today showed the imported event as the next event on Nov 29 while correctly showing 0 events for Nov 24. A separate Back/cancel check returned without saving. The review app's data and the emulator copy of the synthetic ICS were cleared afterward. Screenshots and UI snapshots remain in ignored `app/build/qa/full-goal-2026-11-24/`. This verifies only the ICS add/review/cancel path, not roster OCR, coworker matching, CSV/XLSX parsing, backup restore, or Galaxy behavior.
