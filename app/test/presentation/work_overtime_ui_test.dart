@@ -501,6 +501,99 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('Overtime filter keeps a shift that ended earlier today', (
+    tester,
+  ) async {
+    final shift = ScheduleItem(
+      id: 'synthetic-same-day-ended-overtime',
+      kind: ScheduleKind.work,
+      title: 'Synthetic shift ended today',
+      employerName: 'Synthetic employer',
+      startDate: CivilDate(2026, 11, 22),
+      timeZoneId: 'America/Halifax',
+      intervals: [EventInterval.sameDay(startMinute: 600, endMinute: 1020)],
+    );
+    await scheduleRepository.save(shift);
+    await overtimeRepository.setForOccurrence(shift, shift.startDate, 60);
+    final container = createContainer();
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: Scaffold(
+            body: WorkPage(clock: () => DateTime(2026, 11, 22, 17, 5)),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Overtime'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).last, const Offset(0, -1200));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Past overtime'), findsOneWidget);
+    expect(find.text('Synthetic shift ended today'), findsOneWidget);
+    expect(find.textContaining('Extra logged: 1h'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Overtime filter keeps past entries beside upcoming overtime', (
+    tester,
+  ) async {
+    final pastShift = ScheduleItem(
+      id: 'synthetic-past-overtime-with-upcoming',
+      kind: ScheduleKind.work,
+      title: 'Synthetic past overtime',
+      startDate: CivilDate(2026, 11, 21),
+      intervals: [EventInterval.sameDay(startMinute: 600, endMinute: 1020)],
+    );
+    final upcomingShift = ScheduleItem(
+      id: 'synthetic-upcoming-overtime-with-past',
+      kind: ScheduleKind.work,
+      title: 'Synthetic upcoming overtime',
+      startDate: CivilDate(2026, 11, 23),
+      intervals: [EventInterval.sameDay(startMinute: 600, endMinute: 1020)],
+    );
+    await scheduleRepository.save(pastShift);
+    await scheduleRepository.save(upcomingShift);
+    await overtimeRepository.setForOccurrence(
+      pastShift,
+      pastShift.startDate,
+      60,
+    );
+    await overtimeRepository.setForOccurrence(
+      upcomingShift,
+      upcomingShift.startDate,
+      60,
+    );
+    final container = createContainer();
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: Scaffold(
+            body: WorkPage(clock: () => DateTime(2026, 11, 22, 8)),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Overtime'));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).last, const Offset(0, -1200));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Synthetic upcoming overtime'), findsOneWidget);
+    expect(find.text('Past overtime'), findsOneWidget);
+    expect(find.text('Synthetic past overtime'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'Overtime shows split-shift hours under its employer daily rule',
     (tester) async {

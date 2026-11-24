@@ -262,6 +262,63 @@ END:VCALENDAR''';
     expect(beforeReview.single.coworkers, isEmpty);
   });
 
+  testWidgets('CSV roster matrix also stages labeled supervisor sections', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    const csv = '''Employee,Nov 23 2026,Nov 24 2026,Nov 25 2026
+Synthetic owner,AV,,
+Synthetic coworker,AV,,
+Permanent Supervisors:
+Synthetic Permanent Lead
+Acting Supervisors:
+Synthetic Acting Lead
+''';
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(fileChannel, (call) async {
+          expect(call.method, 'openImport');
+          return {
+            'name': 'synthetic-mixed-roster.csv',
+            'bytes': Uint8List.fromList(utf8.encode(csv)),
+          };
+        });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(fileChannel, null);
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          scheduleDatabaseProvider.overrideWithValue(database),
+          deviceTimeZoneIdProvider.overrideWith(
+            (ref) async => 'America/Barbados',
+          ),
+        ],
+        child: const MaterialApp(
+          home: SettingsPage(mode: ScheduleMode.workAndSchool),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Smart Import'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose a file'));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+    await tester.drag(find.byType(ListView).first, const Offset(0, -1000));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Confirm roster dates'), findsOneWidget);
+    expect(find.text('Supervisor profiles · 2'), findsOneWidget);
+    expect(find.text('Synthetic Permanent Lead'), findsOneWidget);
+    expect(find.text('Synthetic Acting Lead'), findsOneWidget);
+    expect(await ScheduleRepository(database).getItems(), isEmpty);
+    expect(await SupervisorRepository(database).getItems(), isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('appends a second roster file to the same reviewed batch', (
     tester,
   ) async {

@@ -371,11 +371,16 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         final text = utf8.decode(selected.bytes!, allowMalformed: false);
         final matrix = _csvParser.detectRosterGrid(text);
         if (matrix.candidates.isNotEmpty) {
+          final supervisorProposals = _mergeSupervisorProposals(
+            await _newSupervisorProfiles(text),
+            append: append,
+          );
           _stageRosterGrid(
             matrix,
             sourceName: sourceName,
             sourceType: sourceType,
             append: append,
+            supervisorProposals: supervisorProposals,
           );
           return;
         }
@@ -704,6 +709,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     required String sourceName,
     required ScheduleImportSourceType sourceType,
     required bool append,
+    List<SupervisorProfile> supervisorProposals = const [],
   }) {
     if (!mounted) return;
     setState(() {
@@ -718,6 +724,10 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _rosterDatesConfirmed = false;
       _unresolvedRosterCells = const [];
       _coworkerRosterDetected = false;
+      _supervisorProposals = supervisorProposals;
+      _selectedSupervisorIds = {
+        for (final profile in supervisorProposals) profile.id,
+      };
     });
   }
 

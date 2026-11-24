@@ -2103,8 +2103,22 @@ class _ScheduleCollectionPageState
             };
         bool hasEnded(EventOccurrence occurrence) {
           // This section records roster dates before today. A shift that ended
-          // earlier today remains in today's schedule and is not reclassified.
-          return occurrence.date.compareTo(today) < 0;
+          // earlier today remains in today's schedule unless its overtime was
+          // explicitly logged, in which case it belongs in overtime history.
+          if (occurrence.date.compareTo(today) < 0) return true;
+          if (occurrence.date != today ||
+              activeFilter != 'Overtime' ||
+              !hasOvertime(occurrence)) {
+            return false;
+          }
+          final occurrenceKey = '${occurrence.item.id}|${occurrence.date}';
+          if (activeOccurrenceKeys.contains(occurrenceKey)) return false;
+          final resolution = queries.resolveOccurrence(occurrence);
+          return resolution.issues.isEmpty &&
+              resolution.intervals.isNotEmpty &&
+              resolution.intervals.every(
+                (interval) => !interval.end.isAfter(now),
+              );
         }
 
         final pastShifts =
@@ -2448,38 +2462,8 @@ class _ScheduleCollectionPageState
                 compact: compactLayout,
                 icon: Icons.more_time_rounded,
                 title: 'No upcoming overtime',
-                detail: 'Logged overtime from completed roster dates is below.',
+                detail: 'Logged overtime from completed shifts is below.',
               ),
-              const SizedBox(height: 20),
-              Text(
-                'Past overtime',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 12),
-              for (var index = 0; index < pastShifts.length; index++) ...[
-                ScheduleEventTile(
-                  item: pastShifts[index].item,
-                  use24Hour: use24,
-                  showExtendedWorkDetails: false,
-                  workHoursLabel: overtimeHoursLabel(pastShifts[index]),
-                  conflict: conflicts.contains(pastShifts[index].item.id),
-                  reviewTime: issues.contains(pastShifts[index].item.id),
-                  dateLabel: localizations.formatMediumDate(
-                    DateTime(
-                      pastShifts[index].date.year,
-                      pastShifts[index].date.month,
-                      pastShifts[index].date.day,
-                    ),
-                  ),
-                  onTap: () => showScheduleDetails(
-                    context,
-                    ref,
-                    pastShifts[index].item,
-                    occurrenceDate: pastShifts[index].date,
-                  ),
-                ),
-                if (index < pastShifts.length - 1) const SizedBox(height: 10),
-              ],
             ] else if (upcoming.isEmpty && visibleActiveDuties.isEmpty)
               _buildEmptyPanel(
                 context: context,
@@ -2520,6 +2504,40 @@ class _ScheduleCollectionPageState
                 if (index < visibleUpcoming.length - 1)
                   const SizedBox(height: 10),
               ],
+            if (widget.kind == ScheduleKind.work &&
+                activeFilter == 'Overtime' &&
+                pastShifts.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              Text(
+                'Past overtime',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 12),
+              for (var index = 0; index < pastShifts.length; index++) ...[
+                ScheduleEventTile(
+                  item: pastShifts[index].item,
+                  use24Hour: use24,
+                  showExtendedWorkDetails: false,
+                  workHoursLabel: overtimeHoursLabel(pastShifts[index]),
+                  conflict: conflicts.contains(pastShifts[index].item.id),
+                  reviewTime: issues.contains(pastShifts[index].item.id),
+                  dateLabel: localizations.formatMediumDate(
+                    DateTime(
+                      pastShifts[index].date.year,
+                      pastShifts[index].date.month,
+                      pastShifts[index].date.day,
+                    ),
+                  ),
+                  onTap: () => showScheduleDetails(
+                    context,
+                    ref,
+                    pastShifts[index].item,
+                    occurrenceDate: pastShifts[index].date,
+                  ),
+                ),
+                if (index < pastShifts.length - 1) const SizedBox(height: 10),
+              ],
+            ],
             if (widget.kind == ScheduleKind.work &&
                 pastShifts.isNotEmpty &&
                 activeFilter != 'Overtime') ...[
