@@ -127,6 +127,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Coworkers'));
     await tester.pumpAndSettle();
+    expect(find.text('1 coworker'), findsOneWidget);
+    expect(find.text('Synthetic coworker ×2'), findsNothing);
+    await tester.tap(find.byType(ExpansionTile).first);
+    await tester.pumpAndSettle();
     expect(find.text('Synthetic coworker ×2'), findsOneWidget);
     expect(find.textContaining('Synthetic morning shift'), findsOneWidget);
     expect(find.textContaining('Nov 18'), findsOneWidget);
@@ -182,6 +186,10 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Coworkers'));
     await tester.pumpAndSettle();
+    expect(find.text('1 coworker'), findsOneWidget);
+    expect(find.text('Synthetic roster coworker'), findsNothing);
+    await tester.tap(find.byType(ExpansionTile).first);
+    await tester.pumpAndSettle();
 
     expect(find.text('Synthetic roster coworker'), findsOneWidget);
     expect(
@@ -192,7 +200,7 @@ void main() {
     expect(find.textContaining('A1'), findsOneWidget);
   });
 
-  testWidgets('coworker roster cards stay compact with several names', (
+  testWidgets('coworker names stay collapsed until a shift is opened', (
     tester,
   ) async {
     final semantics = tester.ensureSemantics();
@@ -242,16 +250,7 @@ void main() {
     await tester.tap(find.text('Coworkers'));
     await tester.pumpAndSettle();
 
-    final shiftCard = tester.widgetList<Card>(find.byType(Card)).first;
-    final height = tester.getSize(find.byWidget(shiftCard)).height;
-    expect(height, lessThanOrEqualTo(245));
-    final coworkerSummary = tester.widget<Text>(
-      find.textContaining('Synthetic Alex'),
-    );
-    expect(
-      find.bySemanticsLabel(RegExp('Coworkers assigned to this shift')),
-      findsOneWidget,
-    );
+    expect(find.text('5 coworkers'), findsOneWidget);
     for (final name in [
       'Synthetic Alex',
       'Synthetic Bailey',
@@ -259,7 +258,21 @@ void main() {
       'Synthetic Devon',
       'Synthetic Ellis',
     ]) {
-      expect(coworkerSummary.data, contains(name));
+      expect(find.text(name), findsNothing);
+    }
+    final shiftCard = tester.widgetList<Card>(find.byType(Card)).first;
+    expect(tester.getSize(find.byWidget(shiftCard)).height, lessThan(210));
+
+    await tester.tap(find.byType(ExpansionTile).first);
+    await tester.pumpAndSettle();
+    for (final name in [
+      'Synthetic Alex',
+      'Synthetic Bailey',
+      'Synthetic Casey',
+      'Synthetic Devon',
+      'Synthetic Ellis',
+    ]) {
+      expect(find.text(name), findsOneWidget);
     }
     semantics.dispose();
   });
@@ -459,6 +472,120 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Saved shift codes'), findsOneWidget);
     expect(find.text('From your work roster'), findsNothing);
+  });
+
+  testWidgets('roster code card does not repeat its time windows as meaning', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(scheduleRepositoryProvider)
+        .save(
+          ScheduleItem(
+            id: 'synthetic-split-code-with-repeated-times',
+            kind: ScheduleKind.work,
+            title: 'Synthetic split shift',
+            startDate: CivilDate(2026, 11, 18),
+            intervals: [
+              EventInterval.sameDay(startMinute: 360, endMinute: 540),
+              EventInterval.sameDay(startMinute: 720, endMinute: 960),
+            ],
+            code: 'SYN1',
+            codeMeaning: 'Split shift: 06:00-09:00 and 12:00-16:00',
+            workCategory: WorkCategory.shift,
+          ),
+        );
+    await container
+        .read(scheduleRepositoryProvider)
+        .save(
+          ScheduleItem(
+            id: 'synthetic-split-code-with-different-times',
+            kind: ScheduleKind.work,
+            title: 'Synthetic mismatched split shift',
+            startDate: CivilDate(2026, 11, 19),
+            intervals: [
+              EventInterval.sameDay(startMinute: 360, endMinute: 540),
+              EventInterval.sameDay(startMinute: 720, endMinute: 960),
+            ],
+            code: 'SYN2',
+            codeMeaning: 'Split shift: 06:00-10:00 and 12:00-16:00',
+            workCategory: WorkCategory.shift,
+          ),
+        );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: WorkCodeLegendPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Split shift'), findsOneWidget);
+    final repeatedTimeCard = find.ancestor(
+      of: find.text('SYN1'),
+      matching: find.byType(Card),
+    );
+    final mismatchedTimeCard = find.ancestor(
+      of: find.text('SYN2'),
+      matching: find.byType(Card),
+    );
+    expect(
+      find.descendant(
+        of: mismatchedTimeCard,
+        matching: find.text('Split shift: 06:00-10:00 and 12:00-16:00'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: repeatedTimeCard,
+        matching: find.textContaining('06:00-09:00'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: repeatedTimeCard,
+        matching: find.textContaining('12:00-16:00'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: repeatedTimeCard,
+        matching: find.byIcon(Icons.schedule_rounded),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Split shift'));
+    await tester.pumpAndSettle();
+    expect(find.text('Possible flights'), findsOneWidget);
+    expect(find.byType(Chip), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.textContaining('06:00-09:00'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.textContaining('12:00-16:00'),
+      ),
+      findsNothing,
+    );
   });
 
   testWidgets('grouped time variants show their shared shift description', (
@@ -742,6 +869,13 @@ void main() {
 
     await tester.tap(find.byTooltip('Add shift code'));
     await tester.pumpAndSettle();
+    final employerField = tester.widget<TextField>(
+      find.descendant(
+        of: find.widgetWithText(TextFormField, 'Employer (optional)'),
+        matching: find.byType(TextField),
+      ),
+    );
+    expect(employerField.decoration?.helperMaxLines, 2);
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Shift code'),
       'R1',
@@ -873,5 +1007,109 @@ void main() {
     await tester.tap(find.text('Define shift code'));
     await tester.pumpAndSettle();
     expect(find.text('Add shift code'), findsOneWidget);
+  });
+
+  testWidgets('saved code uses observed windows to avoid repeating times', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+    await container
+        .read(workCodeLegendRepositoryProvider)
+        .save(
+          const WorkCodeLegend(
+            id: 'synthetic-split-code',
+            code: 'SYN3',
+            assignmentDetails: 'Split shift: 06:00-09:00 and 12:00-16:00',
+          ),
+        );
+    await container
+        .read(scheduleRepositoryProvider)
+        .save(
+          ScheduleItem(
+            id: 'synthetic-observed-morning-code',
+            kind: ScheduleKind.work,
+            title: 'Synthetic morning shift',
+            startDate: CivilDate(2026, 11, 18),
+            intervals: [
+              EventInterval.sameDay(startMinute: 360, endMinute: 540),
+            ],
+            code: 'SYN3',
+            codeMeaning: 'Split shift: 06:00-09:00 and 12:00-16:00',
+            workCategory: WorkCategory.shift,
+          ),
+        );
+    await container
+        .read(scheduleRepositoryProvider)
+        .save(
+          ScheduleItem(
+            id: 'synthetic-observed-afternoon-code',
+            kind: ScheduleKind.work,
+            title: 'Synthetic afternoon shift',
+            startDate: CivilDate(2026, 11, 19),
+            intervals: [
+              EventInterval.sameDay(startMinute: 720, endMinute: 960),
+            ],
+            code: 'SYN3',
+            codeMeaning: 'Split shift: 06:00-09:00 and 12:00-16:00',
+            workCategory: WorkCategory.shift,
+          ),
+        );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: WorkCodeLegendPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final codeCard = find.ancestor(
+      of: find.text('SYN3'),
+      matching: find.byType(Card),
+    );
+    expect(
+      find.descendant(of: codeCard, matching: find.text('Split shift')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: codeCard,
+        matching: find.textContaining('06:00-09:00'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: codeCard,
+        matching: find.textContaining('12:00-16:00'),
+      ),
+      findsNothing,
+    );
+
+    await tester.tap(find.text('Split shift'));
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.textContaining('06:00-09:00'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.textContaining('12:00-16:00'),
+      ),
+      findsNothing,
+    );
   });
 }

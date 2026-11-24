@@ -43,7 +43,7 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
   Future<void> _edit([WorkCodeLegend? current]) async {
     await showDialog<void>(
       context: context,
-      builder: (_) => _WorkCodeLegendDialog(current: current),
+      builder: (_) => WorkCodeLegendEditorDialog(current: current),
     );
   }
 
@@ -74,7 +74,7 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
   Future<void> _define(WorkCodeLegend suggestion) async {
     await showDialog<void>(
       context: context,
-      builder: (_) => _WorkCodeLegendDialog(suggestion: suggestion),
+      builder: (_) => WorkCodeLegendEditorDialog(suggestion: suggestion),
     );
   }
 
@@ -447,46 +447,60 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                       );
                     }
                     final names = coworkerCounts.keys.toList()..sort();
-                    final coworkerSummary = names
-                        .map(
-                          (name) => coworkerCounts[name]! > 1
-                              ? '$name ×${coworkerCounts[name]}'
-                              : name,
-                        )
-                        .join(' · ');
                     return Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
+                      child: ExpansionTile(
+                        key: ValueKey(
+                          'coworker-shift-${shift.id}-${entry.date}',
+                        ),
+                        leading: const Icon(Icons.work_outline_rounded),
+                        title: Text(
+                          shift.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                shiftDetails,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${names.length} ${names.length == 1 ? 'coworker' : 'coworkers'}',
+                                style: Theme.of(context).textTheme.labelLarge,
+                              ),
+                            ],
+                          ),
+                        ),
+                        childrenPadding: const EdgeInsets.fromLTRB(
+                          16,
+                          0,
+                          16,
+                          16,
+                        ),
+                        children: [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 4,
                               children: [
-                                const Icon(Icons.work_outline_rounded),
-                                const SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    shift.title,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium,
+                                for (final name in names)
+                                  Chip(
+                                    label: Text(
+                                      coworkerCounts[name]! > 1
+                                          ? '$name ×${coworkerCounts[name]}'
+                                          : name,
+                                    ),
                                   ),
-                                ),
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            Text(shiftDetails),
-                            const SizedBox(height: 8),
-                            Semantics(
-                              label:
-                                  'Coworkers assigned to this shift: $coworkerSummary',
-                              child: Text(
-                                coworkerSummary,
-                                style: Theme.of(context).textTheme.bodyMedium,
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     );
                   },
@@ -701,8 +715,13 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
     for (final definition in definitions) {
       final data = dataFor(definition.code, definition.employer);
       data.definitions.add(definition);
-      final detail = definition.assignmentDetails.trim();
-      if (detail.isNotEmpty) data.details.add(detail);
+      data.details.add(definition.assignmentDetails.trim());
+      if (definition.timeWindows.isNotEmpty) {
+        data.timePatterns.add([
+          for (final window in definition.timeWindows)
+            (window.startMinute, window.endMinute, window.endDayOffset),
+        ]);
+      }
       data.flightIds.addAll(
         definition.flightIds
             .map((id) => id.trim())
@@ -724,6 +743,17 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
             .where((detail) => detail.isNotEmpty),
       );
       for (final pattern in reference.patterns) {
+        data.timePatterns.add(
+          pattern.intervals
+              .map(
+                (interval) => (
+                  interval.startMinute,
+                  interval.endMinute,
+                  interval.endDayOffset,
+                ),
+              )
+              .toList(growable: false),
+        );
         final window = pattern.intervals
             .map((interval) => _formatInterval(context, interval))
             .join(' / ');
@@ -734,6 +764,16 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
           );
         }
       }
+    }
+
+    for (final data in byEmployerAndCode.values) {
+      final cleanedDetails = data.details
+          .map((detail) => _removeRepeatedWindowText(detail, data.timePatterns))
+          .where((detail) => detail.isNotEmpty)
+          .toSet();
+      data.details
+        ..clear()
+        ..addAll(cleanedDetails);
     }
 
     final cards = <_CodeCardData>[];
@@ -841,6 +881,13 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
     final windows = data.sortedWindows;
     final flights = data.flightIds.toList()..sort();
     final summary = _groupSummary(details);
+    final datedDefinitions = data.definitions
+        .where(
+          (definition) =>
+              definition.effectiveStartDate != null ||
+              definition.effectiveEndDate != null,
+        )
+        .toList(growable: false);
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
@@ -936,6 +983,21 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
                   ],
                 ),
               ],
+              if (datedDefinitions.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    datedDefinitions
+                        .map(
+                          (definition) =>
+                              _effectivePeriodLabel(context, definition),
+                        )
+                        .join(' · '),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
               if (flights.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),
@@ -949,6 +1011,21 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
         ),
       ),
     );
+  }
+
+  static String _effectivePeriodLabel(
+    BuildContext context,
+    WorkCodeLegend definition,
+  ) {
+    final localizations = MaterialLocalizations.of(context);
+    final start = definition.effectiveStartDate;
+    final end = definition.effectiveEndDate;
+    if (start == null) {
+      return 'Through ${localizations.formatMediumDate(end!.toDateTime())}';
+    }
+    final startLabel = localizations.formatMediumDate(start.toDateTime());
+    if (end == null) return 'From $startLabel';
+    return '$startLabel – ${localizations.formatMediumDate(end.toDateTime())}';
   }
 
   static String _compactWindowLabel(String label) {
@@ -1104,6 +1181,64 @@ class _WorkCodeLegendPageState extends ConsumerState<WorkCodeLegendPage> {
     return sharedMeaning.length > 2 ? sharedMeaning : summaries.first;
   }
 
+  static final _detailTimeRangePattern = RegExp(
+    r'(?<![A-Z0-9])((?:\d{1,2}:[0-5]\d|\d{3,4})(?:\s*[AP]\.?M\.?)?)\s*[-–]\s*((?:\d{1,2}:[0-5]\d|\d{3,4})(?:\s*[AP]\.?M\.?)?)(?![A-Z0-9])',
+    caseSensitive: false,
+  );
+
+  static String _removeRepeatedWindowText(
+    String source,
+    List<List<(int, int, int)>> patterns,
+  ) {
+    final matches = _detailTimeRangePattern.allMatches(source).toList();
+    if (matches.isEmpty || patterns.isEmpty) return source.trim();
+
+    final parsedRanges = <(int, int, int)>[];
+    for (final match in matches) {
+      final start = _parseDetailClock(match.group(1)!);
+      final end = _parseDetailClock(match.group(2)!);
+      if (start == null || end == null || start == end) return source.trim();
+      parsedRanges.add((start, end, end <= start ? 1 : 0));
+    }
+    final knownWindows = patterns.expand((pattern) => pattern).toSet();
+    final repeatsKnownWindows = parsedRanges.every(knownWindows.contains);
+    if (!repeatsKnownWindows) return source.trim();
+
+    var result = source;
+    for (final match in matches.reversed) {
+      result = result.replaceRange(match.start, match.end, ' ');
+    }
+    return result
+        .replaceAll(RegExp(r'\b(?:and|or)\b', caseSensitive: false), ' ')
+        .replaceAll(RegExp(r'[\s,;:·|/–-]+'), ' ')
+        .trim();
+  }
+
+  static int? _parseDetailClock(String raw) {
+    final match = RegExp(
+      r'^(?:(\d{1,2}):([0-5]\d)|(\d{3,4}))(?:\s*([AP])\.?M\.?)?$',
+      caseSensitive: false,
+    ).firstMatch(raw.trim());
+    if (match == null) return null;
+    final colonHour = match.group(1);
+    final colonMinute = match.group(2);
+    final compact = match.group(3);
+    var hour = colonHour != null
+        ? int.parse(colonHour)
+        : int.parse(compact!.substring(0, compact.length - 2));
+    final minute = colonMinute != null
+        ? int.parse(colonMinute)
+        : int.parse(compact!.substring(compact.length - 2));
+    final meridiem = match.group(4)?.toUpperCase();
+    if (meridiem != null) {
+      if (hour < 1 || hour > 12) return null;
+      hour = (hour % 12) + (meridiem == 'P' ? 12 : 0);
+    } else if (hour > 23) {
+      return null;
+    }
+    return hour * 60 + minute;
+  }
+
   Widget _emptyReferenceCard(BuildContext context) => Card(
     child: Padding(
       padding: const EdgeInsets.all(StudyShiftSpacing.cardPadding),
@@ -1142,6 +1277,7 @@ class _CodeCardData {
   final String? employerName;
   final definitions = <WorkCodeLegend>[];
   final details = <String>{};
+  final timePatterns = <List<(int, int, int)>>[];
   final windows = <String, int>{};
   final flightIds = <String>{};
   bool hasRosterObservation = false;
@@ -1166,18 +1302,25 @@ class _CodeCardData {
   }
 }
 
-class _WorkCodeLegendDialog extends ConsumerStatefulWidget {
-  const _WorkCodeLegendDialog({this.current, this.suggestion});
+class WorkCodeLegendEditorDialog extends ConsumerStatefulWidget {
+  const WorkCodeLegendEditorDialog({
+    super.key,
+    this.current,
+    this.suggestion,
+    this.persistOnSave = true,
+  });
 
   final WorkCodeLegend? current;
   final WorkCodeLegend? suggestion;
+  final bool persistOnSave;
 
   @override
-  ConsumerState<_WorkCodeLegendDialog> createState() =>
-      _WorkCodeLegendDialogState();
+  ConsumerState<WorkCodeLegendEditorDialog> createState() =>
+      _WorkCodeLegendEditorDialogState();
 }
 
-class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
+class _WorkCodeLegendEditorDialogState
+    extends ConsumerState<WorkCodeLegendEditorDialog> {
   final _formKey = GlobalKey<FormState>();
   WorkCodeLegend? get _initial => widget.current ?? widget.suggestion;
   late final _code = TextEditingController(text: _initial?.code ?? '');
@@ -1188,6 +1331,8 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
   late final _flightIds = TextEditingController(
     text: _initial?.flightIds.join(', ') ?? '',
   );
+  CivilDate? _effectiveStartDate;
+  CivilDate? _effectiveEndDate;
   late final List<TimeOfDay?> _starts = _initial?.timeWindows.isNotEmpty == true
       ? _initial!.timeWindows
             .map((window) => _toTime(window.startMinute))
@@ -1202,6 +1347,13 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
       ? _initial!.timeWindows.map((window) => window.endDayOffset).toList()
       : [0];
   String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _effectiveStartDate = _initial?.effectiveStartDate;
+    _effectiveEndDate = _initial?.effectiveEndDate;
+  }
 
   @override
   void dispose() {
@@ -1237,34 +1389,41 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
       setState(() => _error = 'Each interval must end after its start.');
       return;
     }
+    if (_effectiveStartDate != null &&
+        _effectiveEndDate != null &&
+        _effectiveStartDate!.compareTo(_effectiveEndDate!) > 0) {
+      setState(() => _error = 'The effective end date must follow the start.');
+      return;
+    }
     if (windows.isEmpty && _meaning.text.trim().isEmpty) {
       setState(
         () => _error = 'Add the flight or duty details, or enter a time range.',
       );
       return;
     }
+    final definition = WorkCodeLegend(
+      id:
+          widget.current?.id ??
+          widget.suggestion?.id ??
+          'legend-${DateTime.now().microsecondsSinceEpoch}',
+      employer: _employer.text,
+      code: _code.text,
+      assignmentDetails: _meaning.text,
+      timeWindows: windows,
+      effectiveStartDate: _effectiveStartDate,
+      effectiveEndDate: _effectiveEndDate,
+      flightIds: _flightIds.text
+          .split(',')
+          .map((flight) => flight.trim())
+          .where((flight) => flight.isNotEmpty)
+          .toSet()
+          .toList(),
+    );
     try {
-      await ref
-          .read(workCodeLegendRepositoryProvider)
-          .save(
-            WorkCodeLegend(
-              id:
-                  widget.current?.id ??
-                  widget.suggestion?.id ??
-                  'legend-${DateTime.now().microsecondsSinceEpoch}',
-              employer: _employer.text,
-              code: _code.text,
-              assignmentDetails: _meaning.text,
-              timeWindows: windows,
-              flightIds: _flightIds.text
-                  .split(',')
-                  .map((flight) => flight.trim())
-                  .where((flight) => flight.isNotEmpty)
-                  .toSet()
-                  .toList(),
-            ),
-          );
-      if (mounted) Navigator.pop(context);
+      if (widget.persistOnSave) {
+        await ref.read(workCodeLegendRepositoryProvider).save(definition);
+      }
+      if (mounted) Navigator.pop(context, definition);
     } catch (exception) {
       if (!mounted) return;
       setState(
@@ -1274,9 +1433,72 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
     }
   }
 
+  Future<void> _pickEffectiveDate({required bool start}) async {
+    final current = start ? _effectiveStartDate : _effectiveEndDate;
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: current?.toDateTime() ?? DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+      helpText: start
+          ? 'Choose when this code starts'
+          : 'Choose when this code ends',
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      final date = CivilDate.fromDateTime(selected);
+      if (start) {
+        _effectiveStartDate = date;
+      } else {
+        _effectiveEndDate = date;
+      }
+      _error = null;
+    });
+  }
+
+  Widget _effectiveDateRow({required bool start}) {
+    final date = start ? _effectiveStartDate : _effectiveEndDate;
+    final label = start ? 'Effective from' : 'Effective through';
+    final value = date == null
+        ? 'Any date'
+        : MaterialLocalizations.of(context).formatMediumDate(date.toDateTime());
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      title: Text(label),
+      subtitle: Text(value),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextButton(
+            onPressed: () => _pickEffectiveDate(start: start),
+            child: Text(date == null ? 'Choose' : 'Change'),
+          ),
+          if (date != null)
+            IconButton(
+              tooltip: 'Clear $label date',
+              onPressed: () => setState(() {
+                if (start) {
+                  _effectiveStartDate = null;
+                } else {
+                  _effectiveEndDate = null;
+                }
+              }),
+              icon: const Icon(Icons.close_rounded),
+            ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: Text(widget.current == null ? 'Add shift code' : 'Edit shift code'),
+    title: Text(
+      !widget.persistOnSave && widget.suggestion != null
+          ? 'Review shift code'
+          : widget.current == null
+          ? 'Add shift code'
+          : 'Edit shift code',
+    ),
     content: Form(
       key: _formKey,
       child: SingleChildScrollView(
@@ -1297,8 +1519,19 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
               decoration: const InputDecoration(
                 labelText: 'Employer (optional)',
                 helperText: 'Use this only when a code differs by employer.',
+                helperMaxLines: 2,
               ),
             ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Use dates when a code changes between roster periods.',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+            _effectiveDateRow(start: true),
+            _effectiveDateRow(start: false),
             const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerLeft,
@@ -1423,7 +1656,10 @@ class _WorkCodeLegendDialogState extends ConsumerState<_WorkCodeLegendDialog> {
         onPressed: () => Navigator.pop(context),
         child: const Text('Cancel'),
       ),
-      FilledButton(onPressed: _save, child: const Text('Save shift code')),
+      FilledButton(
+        onPressed: _save,
+        child: Text(widget.persistOnSave ? 'Save shift code' : 'Use in import'),
+      ),
     ],
   );
 
