@@ -1116,7 +1116,7 @@ END:VCALENDAR''';
     expect(imported.last.title, 'BIOL1100 Different title');
   });
 
-  testWidgets('canceling OCR privacy notice never opens the file picker', (
+  testWidgets('canceling OCR privacy notice skips extraction after selection', (
     tester,
   ) async {
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
