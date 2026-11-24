@@ -47,7 +47,9 @@ void main() {
     // waiting for the whole app to become idle.
     await tester.pump(const Duration(milliseconds: 32));
 
-    final swipeHandle = find.byKey(const Key('schedule-main-pages'));
+    // Destination swipes use the app bar handle so Calendar's own schedule
+    // gestures stay local to its week/month controls.
+    final swipeHandle = find.byKey(const Key('schedule-primary-swipe-handle'));
     final navigation = find.byType(NavigationBar);
     final destinations = <(String, int, Offset)>[
       ('Week', 1, const Offset(-320, 0)),
