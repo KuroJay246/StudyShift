@@ -2,9 +2,88 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shift_study/data/schedule_database.dart';
 import 'package:shift_study/data/work_code_legend_repository.dart';
+import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/domain/work_code_legend.dart';
 
 void main() {
+  test('same roster code can have non-overlapping dated variants', () async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    final repository = WorkCodeLegendRepository(database);
+
+    await repository.save(
+      const WorkCodeLegend(
+        id: 'al-summer',
+        employer: 'Synthetic Airport Services',
+        code: 'AL',
+        assignmentDetails: 'Synthetic earlier-season flight duties',
+        effectiveStartDate: CivilDate(2026, 11, 1),
+        effectiveEndDate: CivilDate(2026, 11, 15),
+        timeWindows: [
+          WorkCodeTimeWindow(startMinute: 360, endMinute: 540),
+          WorkCodeTimeWindow(startMinute: 780, endMinute: 960),
+        ],
+      ),
+    );
+    await repository.save(
+      const WorkCodeLegend(
+        id: 'al-winter',
+        employer: 'Synthetic Airport Services',
+        code: 'AL',
+        assignmentDetails: 'Synthetic winter-season flight duties',
+        effectiveStartDate: CivilDate(2026, 11, 16),
+        effectiveEndDate: CivilDate(2026, 11, 30),
+        timeWindows: [
+          WorkCodeTimeWindow(startMinute: 255, endMinute: 435),
+          WorkCodeTimeWindow(startMinute: 720, endMinute: 960),
+        ],
+      ),
+    );
+
+    final entries = await repository.getItems();
+    expect(entries, hasLength(2));
+    expect(entries.map((entry) => entry.effectiveStartDate), [
+      const CivilDate(2026, 11, 1),
+      const CivilDate(2026, 11, 16),
+    ]);
+    expect(entries.last.timeWindows.first.startMinute, 255);
+  });
+
+  test('same roster code rejects overlapping effective periods', () async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    final repository = WorkCodeLegendRepository(database);
+
+    await repository.save(
+      const WorkCodeLegend(
+        id: 'a1-period-one',
+        employer: 'Synthetic Airport Services',
+        code: 'A1',
+        assignmentDetails: 'Synthetic first period',
+        effectiveStartDate: CivilDate(2026, 11, 1),
+        effectiveEndDate: CivilDate(2026, 11, 20),
+        startMinute: 360,
+        endMinute: 540,
+      ),
+    );
+
+    await expectLater(
+      repository.save(
+        const WorkCodeLegend(
+          id: 'a1-overlap',
+          employer: 'Synthetic Airport Services',
+          code: 'A1',
+          assignmentDetails: 'Synthetic overlapping period',
+          effectiveStartDate: CivilDate(2026, 11, 20),
+          effectiveEndDate: CivilDate(2026, 12, 5),
+          startMinute: 400,
+          endMinute: 600,
+        ),
+      ),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
   test('legend stores multiple time windows with overnight offsets', () async {
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
     addTearDown(database.close);

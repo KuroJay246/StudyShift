@@ -12,6 +12,7 @@ import 'schedule_import_page.dart';
 import 'calendar_export_page.dart';
 import 'about_page.dart';
 import 'weather_settings_page.dart';
+import 'work_overtime_settings_page.dart';
 import '../widgets/shift_icon.dart';
 import '../design/studyshift_spacing.dart';
 
@@ -209,6 +210,17 @@ class SettingsPage extends ConsumerWidget {
               subtitle: Text(_modeName(mode)),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () => _showModes(context, ref),
+            ),
+            ListTile(
+              leading: const Icon(Icons.work_outline_rounded),
+              title: const Text('Work overtime rules'),
+              subtitle: const Text('Daily standard hours by employer'),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const WorkOvertimeSettingsPage(),
+                ),
+              ),
             ),
           ],
         ),

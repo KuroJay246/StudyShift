@@ -14,6 +14,7 @@ import 'package:shift_study/domain/supervisor_profile.dart';
 import 'package:shift_study/domain/work_code_legend.dart';
 import 'package:shift_study/platform/device_time_zone.dart';
 import 'package:shift_study/platform/local_reminders.dart';
+import 'package:shift_study/presentation/app_theme.dart';
 import 'package:shift_study/presentation/screens/event_editor_page.dart';
 
 class _TestTimeZone implements DeviceTimeZone {
@@ -264,6 +265,58 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Time zone'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('work time zone label sits clear of the input border', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const EventEditorPage(kind: ScheduleKind.work),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final advancedHeading = find.text('Advanced');
+    await tester.scrollUntilVisible(
+      advancedHeading,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(advancedHeading);
+    await tester.pumpAndSettle();
+
+    final label = find.text('Time zone');
+    expect(label, findsOneWidget);
+    expect(
+      find.ancestor(of: label, matching: find.byType(TextFormField)),
+      findsNothing,
+    );
+    final semantics = tester.ensureSemantics();
+    expect(
+      tester
+          .getSemantics(find.byKey(const ValueKey('event-time-zone-field')))
+          .label,
+      contains('Time zone'),
+    );
+    semantics.dispose();
     expect(tester.takeException(), isNull);
   });
 
@@ -940,10 +993,7 @@ void main() {
     expect(find.text('Time zone'), findsOneWidget);
     expect(find.text('Time zone · IANA ID'), findsNothing);
     final timeZoneField = tester.widget<TextFormField>(
-      find.ancestor(
-        of: find.text('Time zone'),
-        matching: find.byType(TextFormField),
-      ),
+      find.byKey(const ValueKey('event-time-zone-field')),
     );
     expect(timeZoneField.controller!.text, isEmpty);
 
@@ -1361,7 +1411,11 @@ void main() {
     final tuesday = find.byType(FilterChip).at(1);
     await tester.tap(tuesday);
     final endDate = find.text('End date · optional');
-    await tester.ensureVisible(endDate);
+    await Scrollable.ensureVisible(
+      tester.element(endDate),
+      alignment: 0.5,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(endDate);
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Next month'));

@@ -46,6 +46,9 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
       final occurrenceCoworkers = await ref
           .read(workOccurrenceCoworkerRepositoryProvider)
           .getAll();
+      final preferences = await ref
+          .read(scheduleDatabaseProvider)
+          .getPreferences();
       final bytes = await _codec.encode(
         items,
         passphrase: passphrase,
@@ -54,6 +57,7 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
         supervisors: supervisors,
         overtimeAdjustments: overtimeAdjustments,
         occurrenceCoworkers: occurrenceCoworkers,
+        preferences: preferences,
       );
       final now = DateTime.now();
       final saved = await _files.save(
@@ -103,6 +107,7 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
         backup.supervisors.length,
         backup.overtimeAdjustments.length,
         backup.occurrenceCoworkers.length,
+        backup.preferences.length,
         backup.createdAt,
       );
       if (choice == null || !mounted) return;
@@ -152,6 +157,19 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
               backup.occurrenceCoworkers,
               replaceExisting: choice == _RestoreChoice.replace,
             );
+        final database = ref.read(scheduleDatabaseProvider);
+        final existingPreferences = await database.getPreferences();
+        if (choice == _RestoreChoice.replace) {
+          for (final key in existingPreferences.keys) {
+            await database.deletePreference(key);
+          }
+        }
+        for (final entry in backup.preferences.entries) {
+          if (choice == _RestoreChoice.replace ||
+              !existingPreferences.containsKey(entry.key)) {
+            await database.setPreference(entry.key, entry.value);
+          }
+        }
       });
       ref.invalidate(scheduleItemsProvider);
       ref.invalidate(workCodeLegendsProvider);
@@ -159,8 +177,11 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
       ref.invalidate(supervisorProfilesProvider);
       ref.invalidate(workOvertimeAdjustmentsProvider);
       ref.invalidate(workOccurrenceCoworkersProvider);
+      ref.invalidate(appPreferencesProvider);
       if (mounted) {
-        _showMessage(_restoreSummary(result, choice));
+        _showMessage(
+          _restoreSummary(result, choice, backup.preferences.length),
+        );
       }
     } on Object catch (error) {
       if (mounted) _showMessage(_safeError(error), isError: true);
@@ -247,6 +268,7 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
     int supervisorCount,
     int overtimeCount,
     int coworkerCount,
+    int preferenceCount,
     DateTime createdAt,
   ) => showDialog<_RestoreChoice>(
     context: context,
@@ -256,7 +278,7 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
       return AlertDialog(
         title: const Text('Review this backup'),
         content: Text(
-          'Created $date · $count ${count == 1 ? 'event' : 'events'} · $termCount ${termCount == 1 ? 'academic term' : 'academic terms'} · $legendCount ${legendCount == 1 ? 'roster code' : 'roster codes'} · $supervisorCount ${supervisorCount == 1 ? 'supervisor' : 'supervisors'} · $overtimeCount ${overtimeCount == 1 ? 'overtime entry' : 'overtime entries'} · $coworkerCount ${coworkerCount == 1 ? 'shift coworker list' : 'shift coworker lists'}. Nothing changes until you choose.\n\nMerge adds new IDs and keeps anything already saved. Replace deletes every event, academic term, roster code, supervisor contact, shift coworker list and overtime entry on this device, then installs the backup. This cannot be undone in the app.',
+          'Created $date · $count ${count == 1 ? 'event' : 'events'} · $termCount ${termCount == 1 ? 'academic term' : 'academic terms'} · $legendCount ${legendCount == 1 ? 'roster code' : 'roster codes'} · $supervisorCount ${supervisorCount == 1 ? 'supervisor' : 'supervisors'} · $overtimeCount ${overtimeCount == 1 ? 'overtime entry' : 'overtime entries'} · $coworkerCount ${coworkerCount == 1 ? 'shift coworker list' : 'shift coworker lists'} · $preferenceCount ${preferenceCount == 1 ? 'app setting' : 'app settings'}. Nothing changes until you choose.\n\nMerge adds new IDs, adds missing settings, and keeps anything already saved. Replace deletes the saved schedule, reference data, overtime and settings on this device, then installs the backup. This cannot be undone in the app.',
         ),
         actions: [
           TextButton(
@@ -294,11 +316,15 @@ class _BackupRestorePageState extends ConsumerState<BackupRestorePage> {
     return 'The backup could not be completed. Your saved schedule is unchanged.';
   }
 
-  String _restoreSummary(ScheduleRestoreResult result, _RestoreChoice choice) {
+  String _restoreSummary(
+    ScheduleRestoreResult result,
+    _RestoreChoice choice,
+    int preferenceCount,
+  ) {
     if (choice == _RestoreChoice.replace) {
-      return 'Schedule replaced: ${result.inserted} ${result.inserted == 1 ? 'event' : 'events'} restored.';
+      return 'Schedule replaced: ${result.inserted} ${result.inserted == 1 ? 'event' : 'events'} and $preferenceCount ${preferenceCount == 1 ? 'setting' : 'settings'} restored.';
     }
-    return 'Backup merged: ${result.inserted} added; ${result.skipped} already saved and kept unchanged.';
+    return 'Backup merged: ${result.inserted} added; ${result.skipped} already saved and kept unchanged. App settings in backup: $preferenceCount.';
   }
 
   @override
@@ -524,6 +550,7 @@ class _PassphraseDialogState extends State<_PassphraseDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
+    scrollable: true,
     title: Text(widget.confirm ? 'Protect your backup' : 'Unlock your backup'),
     content: Form(
       key: _formKey,

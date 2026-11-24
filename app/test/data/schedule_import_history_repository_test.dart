@@ -139,11 +139,18 @@ void main() {
       final occurrenceCoworkers = await database
           .customSelect('SELECT * FROM work_occurrence_coworker_rows')
           .get();
+      final legendColumns = await database
+          .customSelect('PRAGMA table_info(work_code_legend_rows)')
+          .get();
 
-      expect(version.read<int>('user_version'), 25);
+      expect(version.read<int>('user_version'), 26);
       expect(preserved.read<String>('title'), 'Existing record');
       expect(history, isEmpty);
       expect(occurrenceCoworkers, isEmpty);
+      expect(
+        legendColumns.map((row) => row.read<String>('name')),
+        containsAll(['effective_start_date', 'effective_end_date']),
+      );
     },
   );
 }

@@ -5,12 +5,75 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shift_study/application/dependencies.dart';
 import 'package:shift_study/data/schedule_database.dart';
 import 'package:shift_study/data/schedule_repository.dart';
+import 'package:shift_study/data/preferences_repository.dart';
 import 'package:shift_study/data/work_overtime_repository.dart';
 import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/domain/work_occurrence_coworkers.dart';
 import 'package:shift_study/presentation/widgets/schedule_details_sheet.dart';
 
 void main() {
+  testWidgets('split shift details show the full daily overtime total', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final repository = ScheduleRepository(database);
+    final preferences = PreferencesRepository(database);
+    await preferences.setOvertimeThreshold('Synthetic airport', 8 * 60);
+    final morning = ScheduleItem(
+      id: 'synthetic-split-morning',
+      kind: ScheduleKind.work,
+      title: 'Synthetic morning block',
+      startDate: const CivilDate(2026, 11, 22),
+      intervals: [EventInterval.sameDay(startMinute: 360, endMinute: 540)],
+      workCategory: WorkCategory.shift,
+      employerName: 'Synthetic airport',
+    );
+    final afternoon = ScheduleItem(
+      id: 'synthetic-split-afternoon',
+      kind: ScheduleKind.work,
+      title: 'Synthetic afternoon block',
+      startDate: morning.startDate,
+      intervals: [EventInterval.sameDay(startMinute: 720, endMinute: 960)],
+      workCategory: WorkCategory.shift,
+      employerName: 'Synthetic airport',
+    );
+    await repository.save(morning);
+    await repository.save(afternoon);
+    await WorkOvertimeRepository(database)
+        .setForOccurrence(afternoon, afternoon.startDate, 4 * 60);
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: Consumer(
+            builder: (context, ref, _) => Scaffold(
+              body: TextButton(
+                onPressed: () => showScheduleDetails(context, ref, afternoon),
+                child: const Text('Open split shift'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open split shift'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Total 11h'), findsOneWidget);
+    expect(find.textContaining('above threshold 3h'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('shift details show coworkers for the selected occurrence', (
     tester,
   ) async {
@@ -259,6 +322,12 @@ void main() {
     await tester.tap(find.text('Open populated shift'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Synthetic roster description'), findsOneWidget);
+    expect(
+      find.textContaining('Opens a draft for you to review and save.'),
+      findsNothing,
+    );
+    expect(find.textContaining('Opens a one-time alarm draft'), findsNothing);
     expect(tester.getRect(find.text('Finish shift')).bottom, lessThan(800));
     expect(tester.getRect(find.text('Delete')).bottom, lessThan(800));
   });

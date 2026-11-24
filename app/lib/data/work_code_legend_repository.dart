@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart' show Value;
 
+import '../domain/schedule.dart';
 import '../domain/work_code_legend.dart';
 import 'schedule_database.dart';
 
@@ -25,6 +26,7 @@ class WorkCodeLegendRepository {
         code.isEmpty ||
         windows.length > 2 ||
         windows.any((window) => !window.isValid) ||
+        !_validEffectivePeriod(entry) ||
         (windows.isEmpty &&
             ((entry.startMinute == null) != (entry.endMinute == null))) ||
         (windows.isEmpty && assignmentDetails.isEmpty)) {
@@ -41,11 +43,13 @@ class WorkCodeLegendRepository {
     final flightIds = _normalizeFlightIds(entry.flightIds);
 
     final rows = await database.select(database.workCodeLegendRows).get();
-    final duplicate = rows.any(
-      (row) =>
-          row.id != entry.id &&
-          row.employer.trim().toLowerCase() == employer.toLowerCase() &&
-          row.code.trim().toUpperCase() == code.toUpperCase(),
+    final existingItems = rows.map(_fromRow).toList(growable: false);
+    final duplicate = existingItems.any(
+      (existing) =>
+          existing.id != entry.id &&
+          existing.employer.trim().toLowerCase() == employer.toLowerCase() &&
+          existing.code.trim().toUpperCase() == code.toUpperCase() &&
+          existing.overlapsEffectivePeriod(entry),
     );
     if (duplicate) {
       throw const FormatException(
@@ -64,6 +68,8 @@ class WorkCodeLegendRepository {
             endMinute: Value(entry.endMinute),
             flightIdsJson: Value(jsonEncode(flightIds)),
             timeWindowsJson: Value(_encodeTimeWindows(windows)),
+            effectiveStartDate: Value(entry.effectiveStartDate?.toString()),
+            effectiveEndDate: Value(entry.effectiveEndDate?.toString()),
           ),
         );
   }
@@ -78,9 +84,7 @@ class WorkCodeLegendRepository {
   }) async {
     // Validate the complete set before writing any restored rows.
     final seenIds = <String>{};
-    final seenCodes = <String>{};
     for (final entry in entries) {
-      final employer = entry.employer.trim().toLowerCase();
       final code = entry.code.trim().toUpperCase();
       final windows = entry.timeWindows;
       if (entry.id.trim().isEmpty ||
@@ -90,12 +94,24 @@ class WorkCodeLegendRepository {
               entry.flightIds.length ||
           windows.length > 2 ||
           windows.any((window) => !window.isValid) ||
+          !_validEffectivePeriod(entry) ||
           (windows.isEmpty &&
               ((entry.startMinute == null) != (entry.endMinute == null))) ||
           (entry.assignmentDetails.trim().isEmpty && windows.isEmpty) ||
-          !seenIds.add(entry.id) ||
-          !seenCodes.add('$employer\u0000$code')) {
+          !seenIds.add(entry.id)) {
         throw const FormatException('Backup roster codes are invalid.');
+      }
+    }
+    for (var index = 0; index < entries.length; index++) {
+      for (var other = index + 1; other < entries.length; other++) {
+        final left = entries[index];
+        final right = entries[other];
+        if (left.employer.trim().toLowerCase() ==
+                right.employer.trim().toLowerCase() &&
+            left.code.trim().toUpperCase() == right.code.trim().toUpperCase() &&
+            left.overlapsEffectivePeriod(right)) {
+          throw const FormatException('Backup roster codes are invalid.');
+        }
       }
     }
     await database.transaction(() async {
@@ -104,15 +120,17 @@ class WorkCodeLegendRepository {
       }
       for (final entry in entries) {
         final windows = entry.timeWindows;
-        final existing = await database
+        final existingRows = await database
             .select(database.workCodeLegendRows)
             .get();
+        final existing = existingRows.map(_fromRow).toList(growable: false);
         final duplicate = existing.any(
           (row) =>
               row.id == entry.id ||
               (row.employer.toLowerCase() ==
                       entry.employer.trim().toLowerCase() &&
-                  row.code.toUpperCase() == entry.code.trim().toUpperCase()),
+                  row.code.toUpperCase() == entry.code.trim().toUpperCase() &&
+                  row.overlapsEffectivePeriod(entry)),
         );
         if (duplicate) continue;
         await database
@@ -129,6 +147,8 @@ class WorkCodeLegendRepository {
                   jsonEncode(_normalizeFlightIds(entry.flightIds)),
                 ),
                 timeWindowsJson: Value(_encodeTimeWindows(windows)),
+                effectiveStartDate: Value(entry.effectiveStartDate?.toString()),
+                effectiveEndDate: Value(entry.effectiveEndDate?.toString()),
               ),
             );
       }
@@ -136,28 +156,49 @@ class WorkCodeLegendRepository {
   }
 
   List<WorkCodeLegend> _sorted(List<WorkCodeLegendRow> rows) =>
-      rows
-          .map(
-            (row) => WorkCodeLegend(
-              id: row.id,
-              employer: row.employer,
-              code: row.code,
-              assignmentDetails: row.meaning,
-              startMinute: row.startMinute,
-              endMinute: row.endMinute,
-              flightIds: _decodeFlightIds(row.flightIdsJson),
-              timeWindows: _decodeTimeWindows(row.timeWindowsJson),
-            ),
-          )
-          .toList()
-        ..sort((a, b) {
-          final employer = a.employer.toLowerCase().compareTo(
-            b.employer.toLowerCase(),
-          );
-          return employer != 0
-              ? employer
-              : a.code.toLowerCase().compareTo(b.code.toLowerCase());
-        });
+      rows.map(_fromRow).toList()..sort((a, b) {
+        final employer = a.employer.toLowerCase().compareTo(
+          b.employer.toLowerCase(),
+        );
+        if (employer != 0) return employer;
+        final code = a.code.toLowerCase().compareTo(b.code.toLowerCase());
+        if (code != 0) return code;
+        final aStart = a.effectiveStartDate;
+        final bStart = b.effectiveStartDate;
+        if (aStart == null) return bStart == null ? 0 : -1;
+        if (bStart == null) return 1;
+        return aStart.compareTo(bStart);
+      });
+
+  WorkCodeLegend _fromRow(WorkCodeLegendRow row) => WorkCodeLegend(
+    id: row.id,
+    employer: row.employer,
+    code: row.code,
+    assignmentDetails: row.meaning,
+    startMinute: row.startMinute,
+    endMinute: row.endMinute,
+    flightIds: _decodeFlightIds(row.flightIdsJson),
+    timeWindows: _decodeTimeWindows(row.timeWindowsJson),
+    effectiveStartDate: _readDate(row.effectiveStartDate),
+    effectiveEndDate: _readDate(row.effectiveEndDate),
+  );
+
+  static bool _validEffectivePeriod(WorkCodeLegend entry) {
+    final start = entry.effectiveStartDate;
+    final end = entry.effectiveEndDate;
+    return (start == null || start.isValid) &&
+        (end == null || end.isValid) &&
+        (start == null || end == null || start.compareTo(end) <= 0);
+  }
+
+  CivilDate? _readDate(String? value) {
+    if (value == null || !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(value)) {
+      return null;
+    }
+    final parts = value.split('-').map(int.parse).toList(growable: false);
+    final date = CivilDate(parts[0], parts[1], parts[2]);
+    return date.isValid ? date : null;
+  }
 
   static List<String> _normalizeFlightIds(List<String> values) {
     final result = <String>[];

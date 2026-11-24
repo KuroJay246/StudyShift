@@ -38,6 +38,35 @@ void main() {
     expect(loaded.use24HourTime, isNull);
   });
 
+  test('overtime thresholds persist separately for each employer', () async {
+    await preferences.setOvertimeThreshold('Synthetic Ramp Co', 8 * 60);
+    await preferences.setOvertimeThreshold('Synthetic Campus', 7 * 60);
+
+    final loaded = await preferences.load();
+
+    expect(loaded.overtimeThresholdForEmployer(' synthetic  ramp co '), 8 * 60);
+    expect(loaded.overtimeThresholdForEmployer('Synthetic Campus'), 7 * 60);
+    expect(loaded.overtimeThresholdForEmployer('Another Employer'), isNull);
+    expect(
+      loaded.overtimeEmployerLabel('synthetic ramp co'),
+      'Synthetic Ramp Co',
+    );
+  });
+
+  test(
+    'overtime thresholds can be cleared without affecting other employers',
+    () async {
+      await preferences.setOvertimeThreshold('Synthetic Ramp Co', 8 * 60);
+      await preferences.setOvertimeThreshold('Synthetic Campus', 7 * 60);
+
+      await preferences.clearOvertimeThreshold('SYNTHETIC RAMP CO');
+      final loaded = await preferences.load();
+
+      expect(loaded.overtimeThresholdForEmployer('Synthetic Ramp Co'), isNull);
+      expect(loaded.overtimeThresholdForEmployer('Synthetic Campus'), 7 * 60);
+    },
+  );
+
   test(
     'calendar color choices persist independently from the app accent',
     () async {

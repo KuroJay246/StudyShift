@@ -8,6 +8,26 @@ import 'package:shift_study/data/xlsx_schedule_import.dart';
 void main() {
   const parser = XlsxScheduleImportParser();
 
+  test('detects a date-across-columns roster matrix in XLSX', () {
+    final detection = parser.detectRosterGrid(
+      Uint8List.fromList(
+        _workbook(
+          matrixRows: [
+            ['Employee', 'Nov 23 2026', 'Nov 24 2026', 'Nov 25 2026'],
+            ['Synthetic owner', 'AV', 'OFF', 'VC'],
+            ['Synthetic coworker', 'AV', 'A1', 'OFF'],
+          ],
+        ),
+      ),
+    );
+
+    expect(detection.candidates, hasLength(1));
+    expect(detection.candidates.single.rows.map((row) => row.label), [
+      'Synthetic owner',
+      'Synthetic coworker',
+    ]);
+  });
+
   test('parses documented inline-string schedule rows for review', () async {
     final preview = await parser.parse(
       Uint8List.fromList(_workbook()),
@@ -29,6 +49,81 @@ void main() {
     );
   });
 
+  test(
+    'event rows keep only coworkers whose paired code matches the shift',
+    () async {
+      final preview = await parser.parse(
+        Uint8List.fromList(
+          _workbook(
+            headers: [
+              'date',
+              'title',
+              'category',
+              'start',
+              'end',
+              'time_zone',
+              'code',
+              'coworkers',
+              'coworker_codes',
+            ],
+            values: [
+              '2026-11-25',
+              'Afternoon shift',
+              'shift',
+              '12:00',
+              '20:00',
+              'America/Barbados',
+              'AV',
+              'Synthetic Same Code;Synthetic Other Code',
+              'AV;PM',
+            ],
+          ),
+        ),
+        sourceName: 'mixed-roster.xlsx',
+      );
+
+      expect(preview.proposals, hasLength(1));
+      expect(preview.proposals.single.item.coworkers, ['Synthetic Same Code']);
+      expect(preview.notices, hasLength(1));
+      expect(preview.notices.single.message, contains('1 coworker'));
+    },
+  );
+
+  test('event rows do not attach unverified coworker names', () async {
+    final preview = await parser.parse(
+      Uint8List.fromList(
+        _workbook(
+          headers: [
+            'date',
+            'title',
+            'category',
+            'start',
+            'end',
+            'time_zone',
+            'code',
+            'coworkers',
+          ],
+          values: [
+            '2026-11-25',
+            'Afternoon shift',
+            'shift',
+            '12:00',
+            '20:00',
+            'America/Barbados',
+            'AV',
+            'Synthetic coworker',
+          ],
+        ),
+      ),
+      sourceName: 'unverified-coworkers.xlsx',
+    );
+
+    expect(preview.proposals, hasLength(1));
+    expect(preview.proposals.single.item.coworkers, isEmpty);
+    expect(preview.notices, hasLength(1));
+    expect(preview.notices.single.message, contains('codes are missing'));
+  });
+
   test('parses coworker-only roster columns without event fields', () async {
     final preview = parser.parseCoworkerRoster(
       Uint8List.fromList(
@@ -46,6 +141,27 @@ void main() {
       'Synthetic Sam',
       'Synthetic Lee',
     ]);
+  });
+
+  test('keeps only coworkers with the selected shift code', () async {
+    final preview = parser.parseCoworkerRoster(
+      Uint8List.fromList(
+        _workbook(
+          headers: ['date', 'roster_code', 'coworkers', 'coworker_codes'],
+          values: [
+            '2026-11-24',
+            'A1',
+            'Synthetic Same Code;Synthetic Other Code',
+            'A1;VC',
+          ],
+        ),
+      ),
+    );
+
+    expect(preview.assignments, hasLength(1));
+    expect(preview.assignments.single.coworkers, ['Synthetic Same Code']);
+    expect(preview.assignments.single.sameRosterCodeVerified, isTrue);
+    expect(preview.notices.join(' '), contains('1 coworker'));
   });
 
   test('coworker roster workbook rejects formulas before parsing names', () {
@@ -185,6 +301,7 @@ List<int> _workbook({
   bool hiddenRow = false,
   List<String>? headers,
   List<String>? values,
+  List<List<String>>? matrixRows,
 }) {
   final archive = Archive();
   void add(String name, String contents) {
@@ -202,27 +319,31 @@ List<int> _workbook({
     '''<?xml version="1.0" encoding="UTF-8"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>''',
   );
-  final columns =
-      headers ?? ['date', 'title', 'category', 'start', 'end', 'time_zone'];
-  final rowValues =
-      values ??
+  final rowsToEncode =
+      matrixRows ??
       [
-        '2026-11-07',
-        'Synthetic ramp shift',
-        'shift',
-        '22:00',
-        '06:00',
-        'America/Barbados',
+        headers ?? ['date', 'title', 'category', 'start', 'end', 'time_zone'],
+        values ??
+            [
+              '2026-11-07',
+              'Synthetic ramp shift',
+              'shift',
+              '22:00',
+              '06:00',
+              'America/Barbados',
+            ],
       ];
   final rows = <String>[];
-  for (var rowIndex = 0; rowIndex < 2; rowIndex++) {
+  for (var rowIndex = 0; rowIndex < rowsToEncode.length; rowIndex++) {
     final cells = <String>[];
-    for (var columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+    for (
+      var columnIndex = 0;
+      columnIndex < rowsToEncode[rowIndex].length;
+      columnIndex++
+    ) {
       final reference =
           '${String.fromCharCode(65 + columnIndex)}${rowIndex + 1}';
-      final value = rowIndex == 0
-          ? columns[columnIndex]
-          : rowValues[columnIndex];
+      final value = rowsToEncode[rowIndex][columnIndex];
       final formulaNode = formula && rowIndex == 1 && columnIndex == 1
           ? '<f>"Synthetic ramp shift"</f><v>Synthetic ramp shift</v>'
           : '<is><t>$value</t></is>';

@@ -71,6 +71,41 @@ void main() {
     expect(find.text('Smart Import'), findsOneWidget);
     expect(find.text('Export as an iCalendar file'), findsOneWidget);
     expect(find.text('Location and Today’s forecast'), findsOneWidget);
+    expect(find.text('Daily standard hours by employer'), findsOneWidget);
+  });
+
+  testWidgets('More opens employer-specific overtime rules', (tester) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const Scaffold(
+            body: SettingsPage(mode: ScheduleMode.workAndSchool),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Work overtime rules'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Work overtime rules'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No employer rules saved'), findsOneWidget);
+    expect(find.text('Add employer rule'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('More opens the privacy-limited import history page', (

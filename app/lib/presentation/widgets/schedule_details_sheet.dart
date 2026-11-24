@@ -411,15 +411,69 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
       }
     }
     final overtimeMinutes = overtimeAdjustment?.minutes ?? 0;
+    String? overtimeEmployerFor(ScheduleItem item) =>
+        preferences?.overtimeEmployerFor(
+          employer: item.employerName,
+          title: item.title,
+        ) ??
+        item.employerName?.trim();
+    final detailEmployer = overtimeEmployerFor(detailItem);
+    final overtimeThreshold = preferences?.overtimeThresholdForEmployer(
+      detailEmployer,
+    );
+    final sameEmployerShifts = ref
+        .read(scheduleQueriesProvider)
+        .forRange(savedItems ?? const <ScheduleItem>[], detailDate, detailDate)
+        .where((entry) {
+          final candidate = entry.item;
+          return candidate.kind == ScheduleKind.work &&
+              candidate.workCategory == WorkCategory.shift &&
+              overtimeEmployerFor(candidate)?.toLowerCase() ==
+                  detailEmployer?.toLowerCase();
+        })
+        .toList();
+    final sameEmployerShiftIds = sameEmployerShifts
+        .map((entry) => entry.item.id)
+        .toSet();
+    final dailyHoursSummary = overtimeThreshold == null
+        ? null
+        : WorkHoursSummary.fromMinutes(
+            scheduledMinutes: sameEmployerShifts.fold<int>(0, (total, entry) {
+              final hasLoggedExtra = overtimeAdjustments.any(
+                (adjustment) =>
+                    adjustment.occurrenceDate == detailDate &&
+                    adjustment.shiftItemId == entry.item.id &&
+                    adjustment.minutes > 0,
+              );
+              return total +
+                  WorkHoursSummary.sumIntervalMinutes(
+                    hasLoggedExtra
+                        ? entry.item.intervals
+                        : entry.item.actualIntervals ?? entry.item.intervals,
+                  );
+            }),
+            overtimeMinutes: overtimeAdjustments
+                .where(
+                  (adjustment) =>
+                      adjustment.occurrenceDate == detailDate &&
+                      sameEmployerShiftIds.contains(adjustment.shiftItemId),
+                )
+                .fold<int>(
+                  0,
+                  (total, adjustment) => total + adjustment.minutes,
+                ),
+            standardDayMinutes: overtimeThreshold,
+          );
     final occurrenceCompleted =
         detailItem.isCompleted || overtimeAdjustment?.isCompleted == true;
     final hoursSummary = detailItem.workCategory == WorkCategory.shift
-        ? WorkHoursSummary.forIntervals(
-            intervals: overtimeMinutes > 0
-                ? detailItem.intervals
-                : detailItem.actualIntervals ?? detailItem.intervals,
-            overtimeMinutes: overtimeMinutes,
-          )
+        ? dailyHoursSummary ??
+              WorkHoursSummary.forIntervals(
+                intervals: overtimeMinutes > 0
+                    ? detailItem.intervals
+                    : detailItem.actualIntervals ?? detailItem.intervals,
+                overtimeMinutes: overtimeMinutes,
+              )
         : null;
     final startDate = DateTime(
       detailDate.year,
@@ -682,16 +736,31 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
                           '  ·  Total ${_hoursText(hoursSummary.totalMinutes)}',
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          'Premium-eligible after 8h: '
-                          '${_hoursText(hoursSummary.premiumEligibleMinutes)}',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
-                              ),
-                        ),
+                        if (dailyHoursSummary != null)
+                          Text(
+                            'Configured daily rule (${_hoursText(overtimeThreshold!)}): '
+                            'standard-rate top-up '
+                            '${_hoursText(dailyHoursSummary.standardRateTopUpMinutes)}'
+                            ' · above threshold '
+                            '${_hoursText(dailyHoursSummary.premiumEligibleMinutes)}',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                          )
+                        else
+                          Text(
+                            'No daily threshold is set for this employer. '
+                            'Extra hours are recorded without a premium estimate.',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                          ),
                         const SizedBox(height: 10),
                         SizedBox(
                           width: double.infinity,
@@ -753,13 +822,6 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
                   eventStart: nextClockAlarm.start,
                   label: detailItem.title,
                 ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: Text(
-                    'Opens a one-time alarm draft for the next 24 hours. Confirm it in your Clock app.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ),
               ],
               if (detailItem.reminderMinutesBefore case final minutes?)
                 _DetailRow(
@@ -775,11 +837,6 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
                     ScheduleKind.deadline => 'Course code: ${detailItem.code!}',
                     ScheduleKind.personal => 'Code: ${detailItem.code!}',
                   },
-                ),
-              if (detailItem.codeMeaning?.isNotEmpty ?? false)
-                _DetailRow(
-                  icon: Icons.menu_book_outlined,
-                  text: detailItem.codeMeaning!,
                 ),
               if (detailItem.location?.isNotEmpty ?? false)
                 _DetailRow(

@@ -102,26 +102,13 @@ class DeviceCalendarAction extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      SizedBox(
-        width: double.infinity,
-        child: OutlinedButton.icon(
-          onPressed: () => _add(context),
-          icon: const Icon(Icons.event_available_outlined),
-          label: const Text('Add to device calendar'),
-        ),
-      ),
-      const SizedBox(height: 8),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        child: Text(
-          'Opens a draft for you to review and save. StudyShift does not read, change or remove existing calendar events.',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ),
-    ],
+  Widget build(BuildContext context) => SizedBox(
+    width: double.infinity,
+    child: OutlinedButton.icon(
+      onPressed: () => _add(context),
+      icon: const Icon(Icons.event_available_outlined),
+      label: const Text('Add to device calendar'),
+    ),
   );
 }
 

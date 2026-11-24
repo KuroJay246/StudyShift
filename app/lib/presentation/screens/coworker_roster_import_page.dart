@@ -72,7 +72,11 @@ class _CoworkerRosterImportPageState
 
   Future<void> _save() async {
     final eligible = _matches
-        .where((match) => match.status == CoworkerRosterMatchStatus.matched)
+        .where(
+          (match) =>
+              match.status == CoworkerRosterMatchStatus.matched &&
+              match.assignment.sameRosterCodeVerified,
+        )
         .toList(growable: false);
     if (eligible.isEmpty) return;
     final confirmed = await showDialog<bool>(
@@ -156,6 +160,18 @@ class _CoworkerRosterImportPageState
     final ambiguous = _matches
         .where((match) => match.status == CoworkerRosterMatchStatus.ambiguous)
         .length;
+    final verifiedMatched = _matches
+        .where(
+          (match) =>
+              match.status == CoworkerRosterMatchStatus.matched &&
+              match.assignment.sameRosterCodeVerified,
+        )
+        .length;
+    final hasUnverifiedMatches = _matches.any(
+      (match) =>
+          match.status == CoworkerRosterMatchStatus.matched &&
+          !match.assignment.sameRosterCodeVerified,
+    );
     return Scaffold(
       appBar: AppBar(title: const Text('Import coworkers')),
       body: SafeArea(
@@ -219,7 +235,7 @@ class _CoworkerRosterImportPageState
               ],
               const SizedBox(height: 16),
               FilledButton.icon(
-                onPressed: matched == 0 || _saving ? null : _save,
+                onPressed: verifiedMatched == 0 || _saving ? null : _save,
                 icon: _saving
                     ? const SizedBox.square(
                         dimension: 18,
@@ -229,7 +245,11 @@ class _CoworkerRosterImportPageState
                 label: Text(
                   _saving
                       ? 'Saving…'
-                      : 'Update coworkers on $matched ${matched == 1 ? 'shift' : 'shifts'}',
+                      : verifiedMatched > 0
+                      ? 'Update coworkers on $verifiedMatched ${verifiedMatched == 1 ? 'shift' : 'shifts'}'
+                      : hasUnverifiedMatches
+                      ? 'Verify coworker codes first'
+                      : 'No verified shift matches',
                 ),
               ),
             ],
@@ -284,6 +304,13 @@ class _MatchCard extends StatelessWidget {
               if (match.assignment.employer != null)
                 Text('Employer: ${match.assignment.employer}'),
               Text('Coworkers: ${match.updatedCoworkers.join(', ')}'),
+            ],
+            if (match.status == CoworkerRosterMatchStatus.matched &&
+                !match.assignment.sameRosterCodeVerified) ...[
+              const SizedBox(height: 6),
+              const Text(
+                'Coworker codes are missing. Add one code per name in Smart Import before applying this roster.',
+              ),
             ],
           ],
         ),

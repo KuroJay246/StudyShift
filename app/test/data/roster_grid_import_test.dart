@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shift_study/data/roster_grid_import.dart';
+import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/domain/work_code_legend.dart';
 
 void main() {
@@ -59,7 +60,7 @@ void main() {
     );
   });
 
-  test('finds roster coworkers by overlapping shift times, not code alone', () {
+  test('defaults to coworkers with the same roster code', () {
     const table = RosterGridCandidate(
       page: 0,
       headerTop: .1,
@@ -67,6 +68,10 @@ void main() {
       rows: [
         RosterGridRow(
           label: 'Selected person',
+          cells: [RosterGridCell(text: 'A1', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Same code coworker',
           cells: [RosterGridCell(text: 'A1', isAmbiguous: false)],
         ),
         RosterGridRow(
@@ -109,7 +114,200 @@ void main() {
         code: 'A1',
         legends: legends,
       ),
-      ['Overlapping coworker'],
+      ['Same code coworker'],
+    );
+  });
+
+  test('can include coworkers whose shift times overlap when selected', () {
+    const table = RosterGridCandidate(
+      page: 0,
+      headerTop: .1,
+      columns: [RosterGridColumn(dayNumber: 18)],
+      rows: [
+        RosterGridRow(
+          label: 'Selected person',
+          cells: [RosterGridCell(text: 'A1', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Same code coworker',
+          cells: [RosterGridCell(text: 'A1', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Overlapping coworker',
+          cells: [RosterGridCell(text: 'B1', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Different time coworker',
+          cells: [RosterGridCell(text: 'C1', isAmbiguous: false)],
+        ),
+      ],
+    );
+    const legends = [
+      WorkCodeLegend(
+        id: 'a1',
+        code: 'A1',
+        timeWindows: [WorkCodeTimeWindow(startMinute: 360, endMinute: 540)],
+      ),
+      WorkCodeLegend(
+        id: 'b1',
+        code: 'B1',
+        timeWindows: [WorkCodeTimeWindow(startMinute: 510, endMinute: 720)],
+      ),
+      WorkCodeLegend(
+        id: 'c1',
+        code: 'C1',
+        timeWindows: [WorkCodeTimeWindow(startMinute: 780, endMinute: 960)],
+      ),
+    ];
+
+    expect(
+      parser.coworkersForCell(
+        table,
+        selectedRow: 0,
+        columnIndex: 0,
+        code: 'A1',
+        legends: legends,
+        coworkerScope: RosterCoworkerScope.overlappingShiftTimes,
+      ),
+      ['Same code coworker', 'Overlapping coworker'],
+    );
+  });
+
+  test('overnight overlap uses the shift date as the interval anchor', () {
+    const table = RosterGridCandidate(
+      page: 0,
+      headerTop: .1,
+      columns: [RosterGridColumn(dayNumber: 18)],
+      rows: [
+        RosterGridRow(
+          label: 'Selected person',
+          cells: [RosterGridCell(text: 'N1', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Earlier same-day shift',
+          cells: [RosterGridCell(text: 'M1', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Overlapping night shift',
+          cells: [RosterGridCell(text: 'N2', isAmbiguous: false)],
+        ),
+      ],
+    );
+    const legends = [
+      WorkCodeLegend(
+        id: 'n1',
+        code: 'N1',
+        timeWindows: [
+          WorkCodeTimeWindow(
+            startMinute: 1320,
+            endMinute: 360,
+            endDayOffset: 1,
+          ),
+        ],
+      ),
+      WorkCodeLegend(
+        id: 'm1',
+        code: 'M1',
+        timeWindows: [WorkCodeTimeWindow(startMinute: 300, endMinute: 600)],
+      ),
+      WorkCodeLegend(
+        id: 'n2',
+        code: 'N2',
+        timeWindows: [
+          WorkCodeTimeWindow(
+            startMinute: 1380,
+            endMinute: 120,
+            endDayOffset: 1,
+          ),
+        ],
+      ),
+    ];
+
+    expect(
+      parser.coworkersForCell(
+        table,
+        selectedRow: 0,
+        columnIndex: 0,
+        code: 'N1',
+        legends: legends,
+        coworkerScope: RosterCoworkerScope.overlappingShiftTimes,
+      ),
+      ['Overlapping night shift'],
+    );
+  });
+
+  test('uses the code definition effective on the roster occurrence date', () {
+    const table = RosterGridCandidate(
+      page: 0,
+      headerTop: .1,
+      columns: [RosterGridColumn(dayNumber: 20)],
+      rows: [
+        RosterGridRow(
+          label: 'Selected person',
+          cells: [RosterGridCell(text: 'A1', isAmbiguous: false)],
+        ),
+        RosterGridRow(
+          label: 'Coworker on matching winter interval',
+          cells: [RosterGridCell(text: 'B1', isAmbiguous: false)],
+        ),
+      ],
+    );
+    const legends = [
+      WorkCodeLegend(
+        id: 'a1-old',
+        code: 'A1',
+        effectiveStartDate: CivilDate(2026, 11, 1),
+        effectiveEndDate: CivilDate(2026, 11, 15),
+        startMinute: 360,
+        endMinute: 540,
+      ),
+      WorkCodeLegend(
+        id: 'a1-current',
+        code: 'A1',
+        effectiveStartDate: CivilDate(2026, 11, 16),
+        effectiveEndDate: CivilDate(2026, 11, 30),
+        startMinute: 720,
+        endMinute: 960,
+      ),
+      WorkCodeLegend(
+        id: 'b1-old',
+        code: 'B1',
+        effectiveStartDate: CivilDate(2026, 11, 1),
+        effectiveEndDate: CivilDate(2026, 11, 15),
+        startMinute: 720,
+        endMinute: 960,
+      ),
+      WorkCodeLegend(
+        id: 'b1-current',
+        code: 'B1',
+        effectiveStartDate: CivilDate(2026, 11, 16),
+        effectiveEndDate: CivilDate(2026, 11, 30),
+        startMinute: 720,
+        endMinute: 960,
+      ),
+    ];
+
+    expect(
+      parser.coworkersForCell(
+        table,
+        selectedRow: 0,
+        columnIndex: 0,
+        code: 'A1',
+        date: const CivilDate(2026, 11, 20),
+        legends: legends,
+      ),
+      isEmpty,
+    );
+    expect(
+      parser.coworkersForCell(
+        table,
+        selectedRow: 0,
+        columnIndex: 0,
+        code: 'A1',
+        date: const CivilDate(2026, 11, 10),
+        legends: legends,
+      ),
+      isEmpty,
     );
   });
 
@@ -130,6 +328,26 @@ void main() {
       'OFF',
       'VS',
     ]);
+  });
+
+  test('detects date-across-columns CSV and spreadsheet matrices', () {
+    final result = parser.detectMatrix(const [
+      ['Employee', 'Nov 23 2026', 'Nov 24 2026', 'Nov 25 2026'],
+      ['Synthetic owner', 'A1', 'OFF', 'VC'],
+      ['Synthetic coworker', 'A1', 'B1', 'OFF'],
+    ]);
+
+    expect(result.candidates, hasLength(1));
+    final grid = result.candidates.single;
+    expect(grid.columns.map((column) => column.dayNumber), [23, 24, 25]);
+    expect(grid.columns.every((column) => column.month == 11), isTrue);
+    expect(grid.columns.every((column) => column.year == 2026), isTrue);
+    expect(grid.rows.map((row) => row.label), [
+      'Synthetic owner',
+      'Synthetic coworker',
+    ]);
+    expect(grid.rows.first.cells.map((cell) => cell.text), ['A1', 'OFF', 'VC']);
+    expect(grid.rows.last.cells.map((cell) => cell.text), ['A1', 'B1', 'OFF']);
   });
 
   test('keeps final date cells when roster columns are unevenly spaced', () {

@@ -114,6 +114,8 @@ class WorkCodeLegendRows extends Table {
   IntColumn get endMinute => integer().nullable()();
   TextColumn get flightIdsJson => text().withDefault(const Constant('[]'))();
   TextColumn get timeWindowsJson => text().withDefault(const Constant('[]'))();
+  TextColumn get effectiveStartDate => text().nullable()();
+  TextColumn get effectiveEndDate => text().nullable()();
 
   @override
   Set<Column<Object>> get primaryKey => {id};
@@ -155,7 +157,7 @@ class ScheduleDatabase extends _$ScheduleDatabase {
   ScheduleDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 25;
+  int get schemaVersion => 26;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -259,6 +261,16 @@ class ScheduleDatabase extends _$ScheduleDatabase {
         await m.addColumn(workOvertimeRows, workOvertimeRows.isCompleted);
       }
       if (from < 25) await m.createTable(workOccurrenceCoworkerRows);
+      if (from >= 13 && from < 26) {
+        await m.addColumn(
+          workCodeLegendRows,
+          workCodeLegendRows.effectiveStartDate,
+        );
+        await m.addColumn(
+          workCodeLegendRows,
+          workCodeLegendRows.effectiveEndDate,
+        );
+      }
     },
     beforeOpen: (details) async {
       await customStatement('PRAGMA foreign_keys = ON');

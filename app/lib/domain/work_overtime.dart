@@ -51,39 +51,57 @@ class WorkHoursSummary {
     required this.overtimeMinutes,
     required this.regularMinutes,
     required this.premiumEligibleMinutes,
+    required this.standardDayMinutes,
   });
-
-  static const standardShiftMinutes = 8 * 60;
 
   factory WorkHoursSummary.fromMinutes({
     required int scheduledMinutes,
     required int overtimeMinutes,
+    int? standardDayMinutes,
   }) {
-    if (scheduledMinutes < 0 || overtimeMinutes < 0) {
-      throw ArgumentError('Worked-time durations cannot be negative.');
+    if (scheduledMinutes < 0 ||
+        overtimeMinutes < 0 ||
+        (standardDayMinutes != null &&
+            (standardDayMinutes <= 0 || standardDayMinutes > 24 * 60))) {
+      throw ArgumentError('Work durations and daily thresholds are invalid.');
     }
     final total = scheduledMinutes + overtimeMinutes;
-    final regular = total < standardShiftMinutes ? total : standardShiftMinutes;
+    final regular = standardDayMinutes == null
+        ? total
+        : total < standardDayMinutes
+        ? total
+        : standardDayMinutes;
     return WorkHoursSummary(
       scheduledMinutes: scheduledMinutes,
       overtimeMinutes: overtimeMinutes,
       regularMinutes: regular,
       premiumEligibleMinutes: total - regular,
+      standardDayMinutes: standardDayMinutes,
     );
   }
 
   factory WorkHoursSummary.forIntervals({
     required List<EventInterval> intervals,
     int overtimeMinutes = 0,
+    int? standardDayMinutes,
   }) => WorkHoursSummary.fromMinutes(
     scheduledMinutes: sumIntervalMinutes(intervals),
     overtimeMinutes: overtimeMinutes,
+    standardDayMinutes: standardDayMinutes,
   );
 
   final int scheduledMinutes;
   final int overtimeMinutes;
   final int regularMinutes;
   final int premiumEligibleMinutes;
+  final int? standardDayMinutes;
+
+  int get standardRateTopUpMinutes {
+    final threshold = standardDayMinutes;
+    if (threshold == null || scheduledMinutes >= threshold) return 0;
+    final remaining = threshold - scheduledMinutes;
+    return overtimeMinutes < remaining ? overtimeMinutes : remaining;
+  }
 
   int get totalMinutes => scheduledMinutes + overtimeMinutes;
 

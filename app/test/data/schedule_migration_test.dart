@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:drift/drift.dart' show Variable;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shift_study/data/schedule_database.dart';
@@ -9,6 +10,51 @@ import 'package:shift_study/domain/schedule.dart';
 import 'package:shift_study/domain/work_code_legend.dart';
 
 void main() {
+  test(
+    'version 25 adds effective roster-code dates without data loss',
+    () async {
+      final database = ScheduleDatabase.forTesting(
+        NativeDatabase.memory(
+          setup: (db) {
+            db.execute(
+              'CREATE TABLE schedule_rows (id TEXT NOT NULL PRIMARY KEY)',
+            );
+            db.execute('''
+            CREATE TABLE work_code_legend_rows (
+              id TEXT NOT NULL PRIMARY KEY,
+              employer TEXT NOT NULL,
+              code TEXT NOT NULL,
+              meaning TEXT NOT NULL,
+              start_minute INTEGER,
+              end_minute INTEGER,
+              flight_ids_json TEXT NOT NULL DEFAULT '[]',
+              time_windows_json TEXT NOT NULL DEFAULT '[]'
+            )
+          ''');
+            db.execute('''
+            INSERT INTO work_code_legend_rows
+              (id, employer, code, meaning, start_minute, end_minute,
+               flight_ids_json, time_windows_json)
+            VALUES ('legacy-a1', 'Synthetic Airport', 'A1',
+              'Synthetic assignment', 360, 540, '["AA100"]',
+              '[{"startMinute":360,"endMinute":540,"endDayOffset":0}]')
+          ''');
+            db.execute('PRAGMA user_version = 25');
+          },
+        ),
+      );
+      addTearDown(database.close);
+
+      final entries = await WorkCodeLegendRepository(database).getItems();
+      expect(entries, hasLength(1));
+      expect(entries.single.code, 'A1');
+      expect(entries.single.flightIds, ['AA100']);
+      expect(entries.single.timeWindows.single.startMinute, 360);
+      expect(entries.single.effectiveStartDate, isNull);
+      expect(entries.single.effectiveEndDate, isNull);
+    },
+  );
+
   test(
     'version 20 preserves existing code fields during time-window migration',
     () async {
@@ -50,6 +96,120 @@ void main() {
       expect(saved.timeWindows, const [
         WorkCodeTimeWindow(startMinute: 360, endMinute: 540),
       ]);
+    },
+  );
+
+  test(
+    'version 22 migration adds overtime rows without losing shifts',
+    () async {
+      final database = ScheduleDatabase.forTesting(
+        NativeDatabase.memory(
+          setup: (db) {
+            db.execute(
+              'CREATE TABLE schedule_rows (id TEXT NOT NULL PRIMARY KEY)',
+            );
+            db.execute(
+              "INSERT INTO schedule_rows (id) VALUES ('synthetic-shift')",
+            );
+            db.execute('''
+              CREATE TABLE work_code_legend_rows (
+                id TEXT NOT NULL PRIMARY KEY,
+                employer TEXT NOT NULL,
+                code TEXT NOT NULL,
+                meaning TEXT NOT NULL,
+                start_minute INTEGER,
+                end_minute INTEGER,
+                flight_ids_json TEXT NOT NULL DEFAULT '[]',
+                time_windows_json TEXT NOT NULL DEFAULT '[]'
+              )
+            ''');
+            db.execute('PRAGMA user_version = 22');
+          },
+        ),
+      );
+      addTearDown(database.close);
+
+      final keptShift = await database
+          .customSelect(
+            'SELECT id FROM schedule_rows WHERE id = ?',
+            variables: [Variable.withString('synthetic-shift')],
+          )
+          .getSingle();
+      final overtimeColumns = await database
+          .customSelect('PRAGMA table_info(work_overtime_rows)')
+          .get();
+      final coworkerColumns = await database
+          .customSelect('PRAGMA table_info(work_occurrence_coworker_rows)')
+          .get();
+
+      expect(keptShift.read<String>('id'), 'synthetic-shift');
+      expect(overtimeColumns.map((row) => row.read<String>('name')), [
+        'shift_item_id',
+        'occurrence_date',
+        'minutes',
+        'is_completed',
+      ]);
+      expect(coworkerColumns.map((row) => row.read<String>('name')), [
+        'shift_item_id',
+        'occurrence_date',
+        'roster_code',
+        'employer_name',
+        'coworkers_json',
+      ]);
+    },
+  );
+
+  test(
+    'version 23 migration preserves overtime and defaults completion false',
+    () async {
+      final database = ScheduleDatabase.forTesting(
+        NativeDatabase.memory(
+          setup: (db) {
+            db.execute(
+              'CREATE TABLE schedule_rows (id TEXT NOT NULL PRIMARY KEY)',
+            );
+            db.execute(
+              "INSERT INTO schedule_rows (id) VALUES ('synthetic-shift')",
+            );
+            db.execute('''
+              CREATE TABLE work_code_legend_rows (
+                id TEXT NOT NULL PRIMARY KEY,
+                employer TEXT NOT NULL,
+                code TEXT NOT NULL,
+                meaning TEXT NOT NULL,
+                start_minute INTEGER,
+                end_minute INTEGER,
+                flight_ids_json TEXT NOT NULL DEFAULT '[]',
+                time_windows_json TEXT NOT NULL DEFAULT '[]'
+              )
+            ''');
+            db.execute('''
+            CREATE TABLE work_overtime_rows (
+              shift_item_id TEXT NOT NULL,
+              occurrence_date TEXT NOT NULL,
+              minutes INTEGER NOT NULL,
+              PRIMARY KEY (shift_item_id, occurrence_date),
+              FOREIGN KEY (shift_item_id) REFERENCES schedule_rows (id) ON DELETE CASCADE
+            )
+          ''');
+            db.execute('''
+            INSERT INTO work_overtime_rows (shift_item_id, occurrence_date, minutes)
+            VALUES ('synthetic-shift', '2026-11-23', 90)
+          ''');
+            db.execute('PRAGMA user_version = 23');
+          },
+        ),
+      );
+      addTearDown(database.close);
+
+      final overtime = await database
+          .customSelect('SELECT * FROM work_overtime_rows')
+          .getSingle();
+
+      expect(overtime.read<String>('shift_item_id'), 'synthetic-shift');
+      expect(overtime.read<String>('occurrence_date'), '2026-11-23');
+      expect(overtime.read<int>('minutes'), 90);
+      expect(overtime.read<bool>('is_completed'), isFalse);
     },
   );
 

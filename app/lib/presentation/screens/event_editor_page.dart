@@ -173,7 +173,10 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
     final code = _code.text.trim().toLowerCase();
     if (code.isEmpty) return;
     final matches = legends
-        .where((entry) => entry.code.trim().toLowerCase() == code)
+        .where(
+          (entry) =>
+              entry.code.trim().toLowerCase() == code && entry.appliesOn(_date),
+        )
         .toList();
     WorkCodeLegend? suggestion;
     if (employer.isEmpty) {
@@ -230,7 +233,9 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
   WorkCodeLegend? _legendForCode(List<WorkCodeLegend> legends) {
     if (_selectedLegendId != null) {
       for (final legend in legends) {
-        if (legend.id == _selectedLegendId) return legend;
+        if (legend.id == _selectedLegendId && legend.appliesOn(_date)) {
+          return legend;
+        }
       }
     }
     final code = _code.text.trim().toLowerCase();
@@ -238,10 +243,15 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
     final employer = _employer.text.trim().toLowerCase();
     final matches = legends.where((legend) {
       if (legend.code.trim().toLowerCase() != code) return false;
+      if (!legend.appliesOn(_date)) return false;
       final entryEmployer = legend.employer.trim().toLowerCase();
       return employer.isEmpty
           ? legends
-                    .where((item) => item.code.trim().toLowerCase() == code)
+                    .where(
+                      (item) =>
+                          item.code.trim().toLowerCase() == code &&
+                          item.appliesOn(_date),
+                    )
                     .length ==
                 1
           : entryEmployer == employer || entryEmployer.isEmpty;
@@ -253,6 +263,7 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
   List<WorkCodeLegend> _legendOptions(List<WorkCodeLegend> legends) {
     final employer = _employer.text.trim().toLowerCase();
     return legends.where((legend) {
+      if (!legend.appliesOn(_date)) return false;
       final entryEmployer = legend.employer.trim().toLowerCase();
       return employer.isEmpty ||
           entryEmployer.isEmpty ||
@@ -308,7 +319,11 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                   .inDays;
         }
         _date = nextDate;
+        _selectedLegendId = null;
       });
+      _applyLegendSuggestion(
+        ref.read(workCodeLegendsProvider).asData?.value ?? const [],
+      );
     }
   }
 
@@ -1450,23 +1465,37 @@ class _EventEditorPageState extends ConsumerState<EventEditorPage> {
                 tilePadding: EdgeInsets.zero,
                 childrenPadding: const EdgeInsets.only(bottom: 12),
                 children: [
-                  TextFormField(
-                    controller: _timeZone,
-                    decoration: InputDecoration(
-                      labelText: 'Time zone',
-                      hintText: deviceZone ?? 'e.g. America/Barbados',
-                      helperText:
-                          widget.existing?.timeZoneId == null &&
-                              widget.existing != null
-                          ? 'This older event needs a time zone before you save it.'
-                          : 'Normally this is set automatically from your device.',
-                      helperMaxLines: 2,
-                    ),
-                    keyboardType: TextInputType.url,
-                    autocorrect: false,
-                    validator: (value) => value == null || value.trim().isEmpty
-                        ? 'Enter a time zone.'
-                        : null,
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Time zone',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                      const SizedBox(height: 8),
+                      Semantics(
+                        label: 'Time zone',
+                        child: TextFormField(
+                          key: const ValueKey('event-time-zone-field'),
+                          controller: _timeZone,
+                          decoration: InputDecoration(
+                            hintText: deviceZone ?? 'e.g. America/Barbados',
+                            helperText:
+                                widget.existing?.timeZoneId == null &&
+                                    widget.existing != null
+                                ? 'This older event needs a time zone before you save it.'
+                                : 'Normally this is set automatically from your device.',
+                            helperMaxLines: 2,
+                          ),
+                          keyboardType: TextInputType.url,
+                          autocorrect: false,
+                          validator: (value) =>
+                              value == null || value.trim().isEmpty
+                              ? 'Enter a time zone.'
+                              : null,
+                        ),
+                      ),
+                    ],
                   ),
                   if (widget.existing?.timeZoneId == null &&
                       widget.existing != null &&

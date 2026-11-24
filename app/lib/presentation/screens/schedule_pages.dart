@@ -1146,18 +1146,10 @@ class WeekPage extends ConsumerStatefulWidget {
     super.key,
     required this.focusDate,
     required this.onFocusDateChanged,
-    this.onDestinationDragStart,
-    this.onDestinationDragUpdate,
-    this.onDestinationDragEnd,
-    this.onDestinationDragCancel,
   });
 
   final CivilDate focusDate;
   final ValueChanged<CivilDate> onFocusDateChanged;
-  final VoidCallback? onDestinationDragStart;
-  final ValueChanged<double>? onDestinationDragUpdate;
-  final VoidCallback? onDestinationDragEnd;
-  final VoidCallback? onDestinationDragCancel;
 
   @override
   ConsumerState<WeekPage> createState() => _WeekPageState();
@@ -1165,15 +1157,6 @@ class WeekPage extends ConsumerStatefulWidget {
 
 class _WeekPageState extends ConsumerState<WeekPage> {
   bool _monthView = false;
-  int? _destinationSwipePointer;
-  Offset? _destinationSwipeStart;
-  bool _destinationSwipeHorizontal = false;
-
-  void _clearDestinationSwipe() {
-    _destinationSwipePointer = null;
-    _destinationSwipeStart = null;
-    _destinationSwipeHorizontal = false;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -1364,99 +1347,48 @@ class _WeekPageState extends ConsumerState<WeekPage> {
                 ),
               ),
             Expanded(
-              child: Listener(
-                key: const ValueKey('calendar-destination-swipe-area'),
-                onPointerDown: widget.onDestinationDragStart == null
-                    ? null
-                    : (event) {
-                        _destinationSwipePointer = event.pointer;
-                        _destinationSwipeStart = event.position;
-                        _destinationSwipeHorizontal = false;
-                      },
-                onPointerMove: widget.onDestinationDragUpdate == null
-                    ? null
-                    : (event) {
-                        final start = _destinationSwipeStart;
-                        if (event.pointer != _destinationSwipePointer ||
-                            start == null) {
-                          return;
-                        }
-                        final delta = event.position - start;
-                        if (!_destinationSwipeHorizontal) {
-                          if (delta.dx.abs() < 12 && delta.dy.abs() < 12) {
-                            return;
-                          }
-                          if (delta.dy.abs() >= delta.dx.abs()) {
-                            _clearDestinationSwipe();
-                            return;
-                          }
-                          _destinationSwipeHorizontal = true;
-                          widget.onDestinationDragStart?.call();
-                        }
-                        widget.onDestinationDragUpdate?.call(delta.dx);
-                      },
-                onPointerUp: widget.onDestinationDragEnd == null
-                    ? null
-                    : (event) {
-                        if (event.pointer != _destinationSwipePointer) return;
-                        final wasHorizontal = _destinationSwipeHorizontal;
-                        _clearDestinationSwipe();
-                        if (wasHorizontal) {
-                          widget.onDestinationDragEnd?.call();
-                        }
-                      },
-                onPointerCancel: (event) {
-                  if (event.pointer != _destinationSwipePointer) return;
-                  final wasHorizontal = _destinationSwipeHorizontal;
-                  _clearDestinationSwipe();
-                  if (wasHorizontal) widget.onDestinationDragCancel?.call();
-                },
-                child: _monthView
-                    ? _MonthCalendar(
-                        firstDay: monthGridStart,
-                        month: monthStart,
+              child: _monthView
+                  ? _MonthCalendar(
+                      firstDay: monthGridStart,
+                      month: monthStart,
+                      focusDate: focusDate,
+                      occurrences: occurrences,
+                      selectedOccurrences: queries.forDay(allItems, focusDate),
+                      conflictedIds: conflicts,
+                      use24Hour: use24,
+                      onSelectDate: widget.onFocusDateChanged,
+                      onSelectEvent: (occurrence) => showScheduleDetails(
+                        context,
+                        ref,
+                        occurrence.item,
+                        occurrenceDate: occurrence.date,
+                      ),
+                    )
+                  : AnimatedSwitcher(
+                      duration: AppMotion.duration(context, AppMotion.change),
+                      reverseDuration: AppMotion.duration(
+                        context,
+                        AppMotion.exit,
+                      ),
+                      switchInCurve: Curves.easeInOutCubic,
+                      switchOutCurve: Curves.easeInOutCubic,
+                      transitionBuilder: AppMotion.sharedFadeSlide,
+                      child: WeekGrid(
+                        key: ValueKey(weekStart),
+                        weekStart: weekStart,
                         focusDate: focusDate,
                         occurrences: occurrences,
-                        selectedOccurrences: queries.forDay(
-                          allItems,
-                          focusDate,
-                        ),
                         conflictedIds: conflicts,
                         use24Hour: use24,
-                        onSelectDate: widget.onFocusDateChanged,
-                        onSelectEvent: (occurrence) => showScheduleDetails(
+                        onFocusDateChanged: widget.onFocusDateChanged,
+                        onSelect: (occurrence) => showScheduleDetails(
                           context,
                           ref,
                           occurrence.item,
                           occurrenceDate: occurrence.date,
                         ),
-                      )
-                    : AnimatedSwitcher(
-                        duration: AppMotion.duration(context, AppMotion.change),
-                        reverseDuration: AppMotion.duration(
-                          context,
-                          AppMotion.exit,
-                        ),
-                        switchInCurve: Curves.easeInOutCubic,
-                        switchOutCurve: Curves.easeInOutCubic,
-                        transitionBuilder: AppMotion.sharedFadeSlide,
-                        child: WeekGrid(
-                          key: ValueKey(weekStart),
-                          weekStart: weekStart,
-                          focusDate: focusDate,
-                          occurrences: occurrences,
-                          conflictedIds: conflicts,
-                          use24Hour: use24,
-                          onFocusDateChanged: widget.onFocusDateChanged,
-                          onSelect: (occurrence) => showScheduleDetails(
-                            context,
-                            ref,
-                            occurrence.item,
-                            occurrenceDate: occurrence.date,
-                          ),
-                        ),
                       ),
-              ),
+                    ),
             ),
             if (analysis.timeIssues.isNotEmpty)
               Padding(
@@ -1845,6 +1777,36 @@ class _ScheduleCollectionPageState
     ScheduleKind? addKind;
     DeadlineType? deadlineType;
 
+    if (widget.kind == ScheduleKind.work && activeFilter != null) {
+      final workEmptyState = switch (activeFilter) {
+        'Shifts' => (
+          'No upcoming shifts',
+          'Your next work shifts will appear here.',
+        ),
+        'Days Off' => (
+          'No days off scheduled',
+          'Scheduled rest days and days off will appear here.',
+        ),
+        'Overtime' => (
+          'No overtime entries yet',
+          'Overtime entries appear here when you record extra hours.',
+        ),
+        'Leave' => (
+          'No leave scheduled',
+          'Your upcoming leave will appear here.',
+        ),
+        'Training' => (
+          'No training scheduled',
+          'Your upcoming training sessions will appear here.',
+        ),
+        _ => null,
+      };
+      if (workEmptyState != null) {
+        title = workEmptyState.$1;
+        detail = workEmptyState.$2;
+      }
+    }
+
     if (widget.kind == ScheduleKind.classSession) {
       switch (activeFilter) {
         case 'Classes':
@@ -1917,12 +1879,75 @@ class _ScheduleCollectionPageState
             occurrence.item.workCategory == WorkCategory.overtime ||
             (occurrence.item.workCategory == WorkCategory.shift &&
                 overtimeFor(occurrence) > 0);
+        final queries = ref.read(scheduleQueriesProvider);
+        String? overtimeHoursLabel(EventOccurrence occurrence) {
+          if (_selectedFilter != 'Overtime' ||
+              occurrence.item.workCategory != WorkCategory.shift) {
+            return null;
+          }
+          final employer =
+              preferences?.overtimeEmployerFor(
+                employer: occurrence.item.employerName,
+                title: occurrence.item.title,
+              ) ??
+              occurrence.item.employerName?.trim();
+          final sameDayRows = queries.forRange(
+            allItems,
+            occurrence.date,
+            occurrence.date,
+          );
+          final dailyShifts = sameDayRows
+              .where((entry) {
+                if (entry.date != occurrence.date ||
+                    entry.item.kind != ScheduleKind.work ||
+                    entry.item.workCategory != WorkCategory.shift) {
+                  return false;
+                }
+                if (employer == null || employer.isEmpty) {
+                  return entry.item.id == occurrence.item.id;
+                }
+                final rowEmployer =
+                    preferences?.overtimeEmployerFor(
+                      employer: entry.item.employerName,
+                      title: entry.item.title,
+                    ) ??
+                    entry.item.employerName?.trim();
+                return rowEmployer?.toLowerCase() == employer.toLowerCase();
+              })
+              .toList(growable: false);
+          final extraMinutes = dailyShifts.fold<int>(
+            0,
+            (total, entry) => total + overtimeFor(entry),
+          );
+          if (extraMinutes <= 0) return null;
+          final rosteredMinutes = dailyShifts.fold<int>(
+            0,
+            (total, entry) =>
+                total +
+                WorkHoursSummary.sumIntervalMinutes(entry.item.intervals),
+          );
+          final threshold = preferences?.overtimeThresholdForEmployer(employer);
+          final summary = WorkHoursSummary.fromMinutes(
+            scheduledMinutes: rosteredMinutes,
+            overtimeMinutes: extraMinutes,
+            standardDayMinutes: threshold,
+          );
+          final totals =
+              'Rostered: ${_hoursLabel(rosteredMinutes)} · '
+              'Extra logged: ${_hoursLabel(extraMinutes)} · '
+              'Total: ${_hoursLabel(summary.totalMinutes)}';
+          if (threshold == null) return totals;
+          return '$totals · Top-up to standard: '
+              '${_hoursLabel(summary.standardRateTopUpMinutes)}'
+              ' · Above threshold: '
+              '${_hoursLabel(summary.premiumEligibleMinutes)}';
+        }
+
         final now = _now();
         final today = CivilDate.fromDateTime(now);
         final through = today.addDays(90);
         final weekStart = today.addDays(1 - today.weekday);
         final weekThrough = weekStart.addDays(6);
-        final queries = ref.read(scheduleQueriesProvider);
         final showOvertimeByOccurrence =
             widget.kind == ScheduleKind.work && _selectedFilter == 'Overtime';
         final occurrences = queries
@@ -2124,45 +2149,98 @@ class _ScheduleCollectionPageState
         final use24 = preferenceUses24Hour(preferences, context);
         final localizations = MaterialLocalizations.of(context);
         final compactLayout = MediaQuery.sizeOf(context).height < 500;
-        final weekItems = queries
-            .forRange(allItems, weekStart, weekThrough)
-            .where((entry) => entry.item.kind == ScheduleKind.work)
-            .toList();
+        final monthStart = CivilDate(now.year, now.month, 1);
+        final monthThrough = today.addDays(-1);
+        final monthItems = monthThrough.compareTo(monthStart) < 0
+            ? <EventOccurrence>[]
+            : queries
+                  .forRange(allItems, monthStart, monthThrough)
+                  .where((entry) => entry.item.kind == ScheduleKind.work)
+                  .toList();
         var scheduledMinutes = 0;
         var overtimeMinutes = 0;
         var premiumEligibleMinutes = 0;
-        for (final entry in weekItems) {
+        var standardRateTopUpMinutes = 0;
+        var shiftCount = 0;
+        var trainingCount = 0;
+        var trainingMinutes = 0;
+        final countedShiftOccurrences = <String>{};
+        final dailyShiftMinutes = <String, List<int>>{};
+        final dailyEmployerNames = <String, String>{};
+        String overtimeEmployerFor(EventOccurrence entry) =>
+            preferences?.overtimeEmployerFor(
+              employer: entry.item.employerName,
+              title: entry.item.title,
+            ) ??
+            (entry.item.employerName?.trim() ?? '');
+        String dailyEmployerKey(EventOccurrence entry) {
+          final employer = overtimeEmployerFor(entry);
+          final normalizedEmployer = employer.toLowerCase().replaceAll(
+            RegExp(r'\s+'),
+            ' ',
+          );
+          return '${entry.date}|$normalizedEmployer';
+        }
+
+        final daysWithLoggedOvertime = {
+          for (final entry in monthItems)
+            if (entry.item.workCategory == WorkCategory.shift &&
+                overtimeFor(entry) > 0)
+              dailyEmployerKey(entry),
+        };
+        for (final entry in monthItems) {
           final category = entry.item.workCategory;
           if (category == WorkCategory.shift) {
+            final employer = overtimeEmployerFor(entry);
+            final normalizedEmployer = employer.toLowerCase().replaceAll(
+              RegExp(r'\s+'),
+              ' ',
+            );
+            final code = entry.item.code?.trim().toUpperCase() ?? '';
+            final occurrenceKey = code.isEmpty
+                ? '${entry.date}|$normalizedEmployer|${entry.item.id}'
+                : '${entry.date}|$normalizedEmployer|$code';
+            if (countedShiftOccurrences.add(occurrenceKey)) shiftCount++;
             final loggedOvertime = overtimeFor(entry);
-            final intervals = loggedOvertime > 0
+            final dailyKey = dailyEmployerKey(entry);
+            final intervals = daysWithLoggedOvertime.contains(dailyKey)
                 ? entry.item.intervals
                 : entry.item.actualIntervals ?? entry.item.intervals;
             final baseMinutes = WorkHoursSummary.sumIntervalMinutes(intervals);
             scheduledMinutes += baseMinutes;
             overtimeMinutes += loggedOvertime;
-            premiumEligibleMinutes += WorkHoursSummary.fromMinutes(
-              scheduledMinutes: baseMinutes,
-              overtimeMinutes: loggedOvertime,
-            ).premiumEligibleMinutes;
-          } else if (category == WorkCategory.overtime ||
-              category == WorkCategory.training) {
-            scheduledMinutes += WorkHoursSummary.sumIntervalMinutes(
+            final dailyMinutes = dailyShiftMinutes.putIfAbsent(
+              dailyKey,
+              () => [0, 0],
+            );
+            dailyMinutes[0] += baseMinutes;
+            dailyMinutes[1] += loggedOvertime;
+            dailyEmployerNames[dailyKey] = employer;
+          } else if (category == WorkCategory.overtime) {
+            overtimeMinutes += WorkHoursSummary.sumIntervalMinutes(
               entry.item.actualIntervals ?? entry.item.intervals,
+            );
+          } else if (category == WorkCategory.training) {
+            trainingCount++;
+            trainingMinutes += WorkHoursSummary.sumIntervalMinutes(
+              entry.item.intervals,
             );
           }
         }
+        for (final entry in dailyShiftMinutes.entries) {
+          final employer = dailyEmployerNames[entry.key] ?? '';
+          final dailySummary = WorkHoursSummary.fromMinutes(
+            scheduledMinutes: entry.value[0],
+            overtimeMinutes: entry.value[1],
+            standardDayMinutes: preferences?.overtimeThresholdForEmployer(
+              employer,
+            ),
+          );
+          premiumEligibleMinutes += dailySummary.premiumEligibleMinutes;
+          standardRateTopUpMinutes += dailySummary.standardRateTopUpMinutes;
+        }
         final totalWorkMinutes = scheduledMinutes + overtimeMinutes;
-        final shiftCount = weekItems
-            .where(
-              (entry) =>
-                  entry.item.workCategory == WorkCategory.shift ||
-                  entry.item.workCategory == WorkCategory.overtime,
-            )
-            .length;
-        final trainingCount = weekItems
-            .where((entry) => entry.item.workCategory == WorkCategory.training)
-            .length;
+        final monthTitle = localizations.formatMonthYear(now);
         return ListView(
           padding: const EdgeInsets.fromLTRB(
             StudyShiftSpacing.pageMargin,
@@ -2173,7 +2251,7 @@ class _ScheduleCollectionPageState
           children: [
             if (widget.kind == ScheduleKind.work) ...[
               Text(
-                'Work overview (This week)',
+                'Work overview · $monthTitle',
                 style: Theme.of(context).textTheme.titleLarge
                     ?.copyWith(fontWeight: FontWeight.w700),
               ),
@@ -2182,7 +2260,7 @@ class _ScheduleCollectionPageState
                 children: [
                   Expanded(
                     child: _WorkSummary(
-                      label: 'Total hours',
+                      label: 'Hours + extra',
                       value: (totalWorkMinutes / 60).toStringAsFixed(
                         totalWorkMinutes % 60 == 0 ? 0 : 1,
                       ),
@@ -2196,16 +2274,21 @@ class _ScheduleCollectionPageState
                   Expanded(
                     child: _WorkSummary(
                       label: 'Training',
-                      value: '$trainingCount',
+                      value: _hoursLabel(trainingMinutes),
+                      detail:
+                          '$trainingCount '
+                          '${trainingCount == 1 ? 'session' : 'sessions'}',
                     ),
                   ),
                 ],
               ),
-              if (overtimeMinutes > 0 || premiumEligibleMinutes > 0) ...[
-                const SizedBox(height: 6),
+              if (activeFilter == 'Overtime' &&
+                  (standardRateTopUpMinutes > 0 ||
+                      premiumEligibleMinutes > 0)) ...[
+                const SizedBox(height: 8),
                 Text(
-                  'Extra hours: ${_hoursLabel(overtimeMinutes)} · '
-                  'Over 8h per shift: ${_hoursLabel(premiumEligibleMinutes)}',
+                  'Top-up to standard: ${_hoursLabel(standardRateTopUpMinutes)}'
+                  ' · Above threshold: ${_hoursLabel(premiumEligibleMinutes)}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
@@ -2276,6 +2359,9 @@ class _ScheduleCollectionPageState
                   use24Hour: use24,
                   showExtendedWorkDetails: widget.kind != ScheduleKind.work,
                   statusLabel: 'HAPPENING NOW',
+                  workHoursLabel: overtimeHoursLabel(
+                    visibleActiveDuties[index].occurrence,
+                  ),
                   conflict: conflicts.contains(
                     visibleActiveDuties[index].occurrence.item.id,
                   ),
@@ -2354,7 +2440,47 @@ class _ScheduleCollectionPageState
               ),
               const SizedBox(height: 12),
             ],
-            if (upcoming.isEmpty && visibleActiveDuties.isEmpty)
+            if (upcoming.isEmpty &&
+                visibleActiveDuties.isEmpty &&
+                activeFilter == 'Overtime' &&
+                pastShifts.isNotEmpty) ...[
+              _EmptyPanel(
+                compact: compactLayout,
+                icon: Icons.more_time_rounded,
+                title: 'No upcoming overtime',
+                detail: 'Logged overtime from completed roster dates is below.',
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Past overtime',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 12),
+              for (var index = 0; index < pastShifts.length; index++) ...[
+                ScheduleEventTile(
+                  item: pastShifts[index].item,
+                  use24Hour: use24,
+                  showExtendedWorkDetails: false,
+                  workHoursLabel: overtimeHoursLabel(pastShifts[index]),
+                  conflict: conflicts.contains(pastShifts[index].item.id),
+                  reviewTime: issues.contains(pastShifts[index].item.id),
+                  dateLabel: localizations.formatMediumDate(
+                    DateTime(
+                      pastShifts[index].date.year,
+                      pastShifts[index].date.month,
+                      pastShifts[index].date.day,
+                    ),
+                  ),
+                  onTap: () => showScheduleDetails(
+                    context,
+                    ref,
+                    pastShifts[index].item,
+                    occurrenceDate: pastShifts[index].date,
+                  ),
+                ),
+                if (index < pastShifts.length - 1) const SizedBox(height: 10),
+              ],
+            ] else if (upcoming.isEmpty && visibleActiveDuties.isEmpty)
               _buildEmptyPanel(
                 context: context,
                 ref: ref,
@@ -2369,6 +2495,7 @@ class _ScheduleCollectionPageState
                   item: visibleUpcoming[index].item,
                   use24Hour: use24,
                   showExtendedWorkDetails: widget.kind != ScheduleKind.work,
+                  workHoursLabel: overtimeHoursLabel(visibleUpcoming[index]),
                   staggerIndex: index,
                   countdownLabel: deadlineCountdownLabel(
                     visibleUpcoming[index].item,
@@ -2393,13 +2520,17 @@ class _ScheduleCollectionPageState
                 if (index < visibleUpcoming.length - 1)
                   const SizedBox(height: 10),
               ],
-            if (widget.kind == ScheduleKind.work && pastShifts.isNotEmpty) ...[
+            if (widget.kind == ScheduleKind.work &&
+                pastShifts.isNotEmpty &&
+                activeFilter != 'Overtime') ...[
               const SizedBox(height: 24),
               Row(
                 children: [
                   Expanded(
                     child: Text(
-                      'Past shifts',
+                      activeFilter == 'Overtime'
+                          ? 'Past overtime'
+                          : 'Past shifts',
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                   ),
@@ -2418,7 +2549,9 @@ class _ScheduleCollectionPageState
               ),
               const SizedBox(height: 4),
               Text(
-                'Dates alone do not mark a shift as completed.',
+                activeFilter == 'Overtime'
+                    ? 'Logged extra hours are shown separately from rostered shift times.'
+                    : 'Dates alone do not mark a shift as completed.',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
@@ -2429,6 +2562,7 @@ class _ScheduleCollectionPageState
                   item: pastShifts[index].item,
                   use24Hour: use24,
                   showExtendedWorkDetails: false,
+                  workHoursLabel: overtimeHoursLabel(pastShifts[index]),
                   conflict: conflicts.contains(pastShifts[index].item.id),
                   reviewTime: issues.contains(pastShifts[index].item.id),
                   dateLabel: localizations.formatMediumDate(
@@ -2499,35 +2633,50 @@ class _ScheduleCollectionPageState
 }
 
 class _WorkSummary extends StatelessWidget {
-  const _WorkSummary({required this.label, required this.value});
+  const _WorkSummary({required this.label, required this.value, this.detail});
 
   final String label;
   final String value;
+  final String? detail;
 
   @override
-  Widget build(BuildContext context) => Card(
-    child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              fontFeatures: const [FontFeature.tabularFigures()],
+  Widget build(BuildContext context) => SizedBox(
+    height: 100,
+    child: Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                color: Theme.of(context).colorScheme.primary,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
             ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            label,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
+            const SizedBox(height: 2),
+            Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            if (detail != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                detail!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     ),
   );

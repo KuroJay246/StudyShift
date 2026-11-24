@@ -131,6 +131,8 @@ void main() {
             id: 'synthetic-legend-qx',
             employer: 'Synthetic Air',
             code: 'QX',
+            effectiveStartDate: CivilDate(2026, 11, 1),
+            effectiveEndDate: CivilDate(2026, 11, 30),
             meaning: 'Synthetic ramp duty',
             timeWindows: [
               WorkCodeTimeWindow(startMinute: 360, endMinute: 540),
@@ -174,6 +176,30 @@ void main() {
             coworkers: const ['Synthetic Ramp Team'],
           ),
         ],
+        preferences: const {
+          'schedule_mode': 'workAndSchool',
+          'use_24_hour_time': 'true',
+          'theme': 'dark',
+          'accent_theme': 'red',
+          'calendar_color_work': 'ff123456',
+          'calendar_color_training': 'ff234567',
+          'calendar_color_school': 'ff345678',
+          'calendar_color_deadline': 'ff456789',
+          'calendar_color_personal': 'ff56789a',
+          'weather_enabled': 'true',
+          'weather_location': '{"name":"Synthetic City"}',
+          'weather_locations': '[{"name":"Sample City"}]',
+          'weather_snapshot': '{"temperatureC":22}',
+          'weather_layout': 'moreDetails',
+          'weather_metric_location': 'true',
+          'weather_metric_feels_like': 'true',
+          'weather_metric_rain_chance': 'false',
+          'weather_metric_wind_speed': 'true',
+          'weather_metric_sunrise_sunset': 'true',
+          'weather_metric_last_updated': 'false',
+          'overtime_threshold_minutes:synthetic%20air': '480',
+          'overtime_threshold_employer:synthetic%20air': 'Synthetic Air',
+        },
       );
 
       expect(utf8.decode(bytes), isNot(contains('Synthetic recurring class')));
@@ -204,6 +230,14 @@ void main() {
       expect(decoded.items.first.jobRole, 'Ramp agent');
       expect(decoded.items.first.coworkers, ['Synthetic teammate']);
       expect(decoded.workCodeLegends.single.code, 'QX');
+      expect(
+        decoded.workCodeLegends.single.effectiveStartDate,
+        const CivilDate(2026, 11, 1),
+      );
+      expect(
+        decoded.workCodeLegends.single.effectiveEndDate,
+        const CivilDate(2026, 11, 30),
+      );
       expect(decoded.workCodeLegends.single.flightIds, ['AA100', 'LI200']);
       expect(decoded.workCodeLegends.single.timeWindows, const [
         WorkCodeTimeWindow(startMinute: 360, endMinute: 540),
@@ -230,6 +264,30 @@ void main() {
       expect(decoded.occurrenceCoworkers.single.coworkers, [
         'Synthetic Ramp Team',
       ]);
+      expect(decoded.preferences, {
+        'schedule_mode': 'workAndSchool',
+        'use_24_hour_time': 'true',
+        'theme': 'dark',
+        'accent_theme': 'red',
+        'calendar_color_work': 'ff123456',
+        'calendar_color_training': 'ff234567',
+        'calendar_color_school': 'ff345678',
+        'calendar_color_deadline': 'ff456789',
+        'calendar_color_personal': 'ff56789a',
+        'weather_enabled': 'true',
+        'weather_location': '{"name":"Synthetic City"}',
+        'weather_locations': '[{"name":"Sample City"}]',
+        'weather_snapshot': '{"temperatureC":22}',
+        'weather_layout': 'moreDetails',
+        'weather_metric_location': 'true',
+        'weather_metric_feels_like': 'true',
+        'weather_metric_rain_chance': 'false',
+        'weather_metric_wind_speed': 'true',
+        'weather_metric_sunrise_sunset': 'true',
+        'weather_metric_last_updated': 'false',
+        'overtime_threshold_minutes:synthetic%20air': '480',
+        'overtime_threshold_employer:synthetic%20air': 'Synthetic Air',
+      });
       expect(decoded.items[1].academicTermId, 'synthetic-term-1');
       expect(
         decoded.items.first.reportingInstruction,
@@ -274,10 +332,10 @@ void main() {
     },
   );
 
-  test('new backup envelope uses version 3 for occurrence coworkers', () async {
+  test('new backup envelope uses version 4 for app preferences', () async {
     final bytes = await codec.encode(const [], passphrase: passphrase);
     final envelope = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
-    expect(envelope['version'], 3);
+    expect(envelope['version'], 4);
   });
 
   test(

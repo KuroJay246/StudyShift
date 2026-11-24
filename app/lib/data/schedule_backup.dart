@@ -20,6 +20,7 @@ class ScheduleBackup {
     this.supervisors = const [],
     this.overtimeAdjustments = const [],
     this.occurrenceCoworkers = const [],
+    this.preferences = const {},
   });
 
   final DateTime createdAt;
@@ -29,6 +30,7 @@ class ScheduleBackup {
   final List<SupervisorProfile> supervisors;
   final List<WorkOvertimeAdjustment> overtimeAdjustments;
   final List<WorkOccurrenceCoworkers> occurrenceCoworkers;
+  final Map<String, String> preferences;
 }
 
 /// A portable, authenticated, passphrase-encrypted schedule backup.
@@ -41,8 +43,8 @@ class ScheduleBackupCodec {
   static const _saltBytes = 16;
   static const _format = 'shift-study-encrypted-backup';
   static const _payloadFormat = 'shift-study-schedule';
-  static const _currentVersion = 3;
-  static const _supportedVersions = {1, 2, _currentVersion};
+  static const _currentVersion = 4;
+  static const _supportedVersions = {1, 2, 3, _currentVersion};
 
   static String _aadFor(int version) => 'ShiftStudy.ScheduleBackup.v$version';
 
@@ -55,6 +57,7 @@ class ScheduleBackupCodec {
     List<SupervisorProfile> supervisors = const [],
     List<WorkOvertimeAdjustment> overtimeAdjustments = const [],
     List<WorkOccurrenceCoworkers> occurrenceCoworkers = const [],
+    Map<String, String> preferences = const {},
   }) async {
     _validatePassphrase(passphrase);
     if (items.length > maxItems) {
@@ -64,6 +67,7 @@ class ScheduleBackupCodec {
     _checkTermReferences(items, academicTerms);
     _checkOvertimeReferences(items, overtimeAdjustments);
     _checkOccurrenceCoworkerReferences(items, occurrenceCoworkers);
+    _validatePreferences(preferences);
     if (supervisors.length > 1000) {
       throw const FormatException(
         'This schedule contains too many supervisors.',
@@ -92,6 +96,14 @@ class ScheduleBackupCodec {
           entry.assignmentDetails.trim().length > 4000 ||
           windows.length > 2 ||
           windows.any((window) => !window.isValid) ||
+          (entry.effectiveStartDate != null &&
+              !entry.effectiveStartDate!.isValid) ||
+          (entry.effectiveEndDate != null &&
+              !entry.effectiveEndDate!.isValid) ||
+          (entry.effectiveStartDate != null &&
+              entry.effectiveEndDate != null &&
+              entry.effectiveStartDate!.compareTo(entry.effectiveEndDate!) >
+                  0) ||
           (windows.isEmpty && entry.assignmentDetails.trim().isEmpty) ||
           ((entry.startMinute == null) != (entry.endMinute == null))) {
         throw const FormatException('Roster-code definitions are invalid.');
@@ -102,6 +114,7 @@ class ScheduleBackupCodec {
         'format': _payloadFormat,
         'version': _currentVersion,
         'createdAt': (createdAt ?? DateTime.now()).toUtc().toIso8601String(),
+        'preferences': preferences,
         'events': [for (final item in items) _encodeItem(item)],
         'workOvertimeAdjustments': [
           for (final adjustment in overtimeAdjustments)
@@ -129,6 +142,8 @@ class ScheduleBackupCodec {
               'id': entry.id,
               'employer': entry.employer,
               'code': entry.code,
+              'effectiveStartDate': entry.effectiveStartDate?.toString(),
+              'effectiveEndDate': entry.effectiveEndDate?.toString(),
               'meaning': entry.assignmentDetails,
               'assignmentDetails': entry.assignmentDetails,
               'startMinute': entry.startMinute,
@@ -274,7 +289,8 @@ class ScheduleBackupCodec {
             payload['academicTerms'] is! List) ||
         (payload['supervisors'] != null && payload['supervisors'] is! List) ||
         (payload['workOccurrenceCoworkers'] != null &&
-            payload['workOccurrenceCoworkers'] is! List)) {
+            payload['workOccurrenceCoworkers'] is! List) ||
+        (payload['preferences'] != null && payload['preferences'] is! Map)) {
       throw const FormatException('Backup contents are not supported.');
     }
     final createdAt = DateTime.tryParse(payload['createdAt']! as String);
@@ -387,7 +403,6 @@ class ScheduleBackupCodec {
       );
     }
     final legendIds = <String>{};
-    final legendKeys = <String>{};
     for (final raw in rawLegends) {
       final value = _readObject(raw, 'Backup roster code is invalid.');
       final entry = WorkCodeLegend(
@@ -403,22 +418,38 @@ class ScheduleBackupCodec {
         endMinute: value['endMinute'] as int?,
         timeWindows: _readTimeWindows(value['timeWindows']),
         flightIds: _readFlightIds(value['flightIds']),
+        effectiveStartDate: _optionalDate(value['effectiveStartDate']),
+        effectiveEndDate: _optionalDate(value['effectiveEndDate']),
       );
       final windows = entry.timeWindows;
-      final key =
-          '${entry.employer.toLowerCase()}\u0000${entry.code.toLowerCase()}';
       if (entry.employer.isEmpty ||
           entry.code.isEmpty ||
           (entry.assignmentDetails.isEmpty && windows.isEmpty) ||
           windows.length > 2 ||
           windows.any((window) => !window.isValid) ||
-          !legendIds.add(entry.id) ||
-          !legendKeys.add(key)) {
+          (entry.effectiveStartDate != null &&
+              entry.effectiveEndDate != null &&
+              entry.effectiveStartDate!.compareTo(entry.effectiveEndDate!) >
+                  0) ||
+          !legendIds.add(entry.id)) {
         throw const FormatException(
           'Backup roster codes contain invalid or duplicate entries.',
         );
       }
       legends.add(entry);
+    }
+    for (var index = 0; index < legends.length; index++) {
+      for (var other = index + 1; other < legends.length; other++) {
+        final left = legends[index];
+        final right = legends[other];
+        if (left.employer.toLowerCase() == right.employer.toLowerCase() &&
+            left.code.toUpperCase() == right.code.toUpperCase() &&
+            left.overlapsEffectivePeriod(right)) {
+          throw const FormatException(
+            'Backup roster codes contain invalid or duplicate entries.',
+          );
+        }
+      }
     }
     final supervisors = <SupervisorProfile>[];
     final rawSupervisors = payload['supervisors'] as List? ?? const [];
@@ -452,6 +483,15 @@ class ScheduleBackupCodec {
       }
       supervisors.add(profile);
     }
+    final preferences = <String, String>{};
+    final rawPreferences = payload['preferences'] as Map? ?? const {};
+    for (final entry in rawPreferences.entries) {
+      if (entry.key is! String || entry.value is! String) {
+        throw const FormatException('Backup preferences are invalid.');
+      }
+      preferences[entry.key as String] = entry.value as String;
+    }
+    _validatePreferences(preferences);
     return ScheduleBackup(
       createdAt: createdAt,
       items: items,
@@ -460,7 +500,20 @@ class ScheduleBackupCodec {
       supervisors: supervisors,
       overtimeAdjustments: overtimeAdjustments,
       occurrenceCoworkers: occurrenceCoworkers,
+      preferences: preferences,
     );
+  }
+
+  static void _validatePreferences(Map<String, String> preferences) {
+    if (preferences.length > 1000 ||
+        preferences.entries.any(
+          (entry) =>
+              entry.key.trim().isEmpty ||
+              entry.key.length > 256 ||
+              entry.value.length > 100000,
+        )) {
+      throw const FormatException('Backup preferences are invalid.');
+    }
   }
 
   static final _cipher = AesGcm.with256bits();

@@ -286,6 +286,9 @@ class _WeekGridState extends State<WeekGrid> {
             : weekDayColumnWidth(constraints.maxWidth);
         final selectedDayWidth = constraints.maxWidth - labelWidth;
         final selectedDayEvents = _eventsForDay(widget.focusDate);
+        final selectedDayAllDayEvents = selectedDayEvents
+            .where((event) => event.item.hasNoTime)
+            .toList(growable: false);
         return Column(
           children: [
             SizedBox(
@@ -434,6 +437,70 @@ class _WeekGridState extends State<WeekGrid> {
                     '${MaterialLocalizations.of(context).formatFullDate(DateTime(widget.focusDate.year, widget.focusDate.month, widget.focusDate.day))} · ${selectedDayEvents.length} ${selectedDayEvents.length == 1 ? 'event' : 'events'}',
                     key: const Key('week-selected-day-summary'),
                     style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+              ),
+            if (selectedDayView && selectedDayAllDayEvents.isNotEmpty)
+              Padding(
+                key: const Key('week-selected-day-all-day'),
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'All day',
+                        style: Theme.of(context).textTheme.labelMedium,
+                      ),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
+                        children: [
+                          for (final occurrence in selectedDayAllDayEvents)
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: constraints.maxWidth - 32,
+                              ),
+                              child: Semantics(
+                                button: true,
+                                label:
+                                    '${scheduleKindName(occurrence.item.kind)}: '
+                                    '${occurrence.item.title}, '
+                                    '${MaterialLocalizations.of(context).formatFullDate(DateTime(widget.focusDate.year, widget.focusDate.month, widget.focusDate.day))}, all day',
+                                child: Material(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.secondaryContainer,
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: InkWell(
+                                    key: ValueKey(
+                                      'week-all-day-${occurrence.item.id}',
+                                    ),
+                                    onTap: () => widget.onSelect(occurrence),
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 6,
+                                      ),
+                                      child: Text(
+                                        occurrence.item.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.labelLarge,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ),

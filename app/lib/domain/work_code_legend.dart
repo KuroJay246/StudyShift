@@ -1,3 +1,5 @@
+import 'schedule.dart';
+
 class WorkCodeTimeWindow {
   const WorkCodeTimeWindow({
     required this.startMinute,
@@ -40,6 +42,8 @@ class WorkCodeLegend {
     int? endMinute,
     this.flightIds = const [],
     List<WorkCodeTimeWindow> timeWindows = const [],
+    this.effectiveStartDate,
+    this.effectiveEndDate,
   }) : assignmentDetails = assignmentDetails ?? meaning ?? '',
        _legacyStartMinute = startMinute,
        _legacyEndMinute = endMinute,
@@ -50,6 +54,8 @@ class WorkCodeLegend {
   final String id;
   final String employer;
   final String code;
+  final CivilDate? effectiveStartDate;
+  final CivilDate? effectiveEndDate;
 
   /// Flight, movement, crew or other roster assignment described by the code.
   final String assignmentDetails;
@@ -78,6 +84,19 @@ class WorkCodeLegend {
     ];
   }
 
+  bool appliesOn(CivilDate date) =>
+      (effectiveStartDate == null ||
+          effectiveStartDate!.compareTo(date) <= 0) &&
+      (effectiveEndDate == null || effectiveEndDate!.compareTo(date) >= 0);
+
+  bool overlapsEffectivePeriod(WorkCodeLegend other) =>
+      !(effectiveEndDate != null &&
+          other.effectiveStartDate != null &&
+          effectiveEndDate!.compareTo(other.effectiveStartDate!) < 0) &&
+      !(other.effectiveEndDate != null &&
+          effectiveStartDate != null &&
+          other.effectiveEndDate!.compareTo(effectiveStartDate!) < 0);
+
   /// Compatibility with older single-window call sites and backups.
   int? get startMinute => timeWindows.length == 1
       ? timeWindows.single.startMinute
@@ -105,11 +124,20 @@ class WorkCodeLegend {
     int? endMinute,
     List<String>? flightIds,
     List<WorkCodeTimeWindow>? timeWindows,
+    CivilDate? effectiveStartDate,
+    CivilDate? effectiveEndDate,
+    bool clearEffectivePeriod = false,
     bool clearTimeRange = false,
   }) => WorkCodeLegend(
     id: id,
     employer: employer ?? this.employer,
     code: code ?? this.code,
+    effectiveStartDate: clearEffectivePeriod
+        ? null
+        : effectiveStartDate ?? this.effectiveStartDate,
+    effectiveEndDate: clearEffectivePeriod
+        ? null
+        : effectiveEndDate ?? this.effectiveEndDate,
     assignmentDetails: assignmentDetails ?? meaning ?? this.assignmentDetails,
     startMinute: clearTimeRange ? null : startMinute ?? this.startMinute,
     endMinute: clearTimeRange ? null : endMinute ?? this.endMinute,

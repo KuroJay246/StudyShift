@@ -3120,6 +3120,28 @@ class $WorkCodeLegendRowsTable extends WorkCodeLegendRows
     requiredDuringInsert: false,
     defaultValue: const Constant('[]'),
   );
+  static const VerificationMeta _effectiveStartDateMeta =
+      const VerificationMeta('effectiveStartDate');
+  @override
+  late final GeneratedColumn<String> effectiveStartDate =
+      GeneratedColumn<String>(
+        'effective_start_date',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _effectiveEndDateMeta = const VerificationMeta(
+    'effectiveEndDate',
+  );
+  @override
+  late final GeneratedColumn<String> effectiveEndDate = GeneratedColumn<String>(
+    'effective_end_date',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -3130,6 +3152,8 @@ class $WorkCodeLegendRowsTable extends WorkCodeLegendRows
     endMinute,
     flightIdsJson,
     timeWindowsJson,
+    effectiveStartDate,
+    effectiveEndDate,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -3205,6 +3229,24 @@ class $WorkCodeLegendRowsTable extends WorkCodeLegendRows
         ),
       );
     }
+    if (data.containsKey('effective_start_date')) {
+      context.handle(
+        _effectiveStartDateMeta,
+        effectiveStartDate.isAcceptableOrUnknown(
+          data['effective_start_date']!,
+          _effectiveStartDateMeta,
+        ),
+      );
+    }
+    if (data.containsKey('effective_end_date')) {
+      context.handle(
+        _effectiveEndDateMeta,
+        effectiveEndDate.isAcceptableOrUnknown(
+          data['effective_end_date']!,
+          _effectiveEndDateMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -3246,6 +3288,14 @@ class $WorkCodeLegendRowsTable extends WorkCodeLegendRows
         DriftSqlType.string,
         data['${effectivePrefix}time_windows_json'],
       )!,
+      effectiveStartDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}effective_start_date'],
+      ),
+      effectiveEndDate: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}effective_end_date'],
+      ),
     );
   }
 
@@ -3265,6 +3315,8 @@ class WorkCodeLegendRow extends DataClass
   final int? endMinute;
   final String flightIdsJson;
   final String timeWindowsJson;
+  final String? effectiveStartDate;
+  final String? effectiveEndDate;
   const WorkCodeLegendRow({
     required this.id,
     required this.employer,
@@ -3274,6 +3326,8 @@ class WorkCodeLegendRow extends DataClass
     this.endMinute,
     required this.flightIdsJson,
     required this.timeWindowsJson,
+    this.effectiveStartDate,
+    this.effectiveEndDate,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -3290,6 +3344,12 @@ class WorkCodeLegendRow extends DataClass
     }
     map['flight_ids_json'] = Variable<String>(flightIdsJson);
     map['time_windows_json'] = Variable<String>(timeWindowsJson);
+    if (!nullToAbsent || effectiveStartDate != null) {
+      map['effective_start_date'] = Variable<String>(effectiveStartDate);
+    }
+    if (!nullToAbsent || effectiveEndDate != null) {
+      map['effective_end_date'] = Variable<String>(effectiveEndDate);
+    }
     return map;
   }
 
@@ -3307,6 +3367,12 @@ class WorkCodeLegendRow extends DataClass
           : Value(endMinute),
       flightIdsJson: Value(flightIdsJson),
       timeWindowsJson: Value(timeWindowsJson),
+      effectiveStartDate: effectiveStartDate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(effectiveStartDate),
+      effectiveEndDate: effectiveEndDate == null && nullToAbsent
+          ? const Value.absent()
+          : Value(effectiveEndDate),
     );
   }
 
@@ -3324,6 +3390,10 @@ class WorkCodeLegendRow extends DataClass
       endMinute: serializer.fromJson<int?>(json['endMinute']),
       flightIdsJson: serializer.fromJson<String>(json['flightIdsJson']),
       timeWindowsJson: serializer.fromJson<String>(json['timeWindowsJson']),
+      effectiveStartDate: serializer.fromJson<String?>(
+        json['effectiveStartDate'],
+      ),
+      effectiveEndDate: serializer.fromJson<String?>(json['effectiveEndDate']),
     );
   }
   @override
@@ -3338,6 +3408,8 @@ class WorkCodeLegendRow extends DataClass
       'endMinute': serializer.toJson<int?>(endMinute),
       'flightIdsJson': serializer.toJson<String>(flightIdsJson),
       'timeWindowsJson': serializer.toJson<String>(timeWindowsJson),
+      'effectiveStartDate': serializer.toJson<String?>(effectiveStartDate),
+      'effectiveEndDate': serializer.toJson<String?>(effectiveEndDate),
     };
   }
 
@@ -3350,6 +3422,8 @@ class WorkCodeLegendRow extends DataClass
     Value<int?> endMinute = const Value.absent(),
     String? flightIdsJson,
     String? timeWindowsJson,
+    Value<String?> effectiveStartDate = const Value.absent(),
+    Value<String?> effectiveEndDate = const Value.absent(),
   }) => WorkCodeLegendRow(
     id: id ?? this.id,
     employer: employer ?? this.employer,
@@ -3359,6 +3433,12 @@ class WorkCodeLegendRow extends DataClass
     endMinute: endMinute.present ? endMinute.value : this.endMinute,
     flightIdsJson: flightIdsJson ?? this.flightIdsJson,
     timeWindowsJson: timeWindowsJson ?? this.timeWindowsJson,
+    effectiveStartDate: effectiveStartDate.present
+        ? effectiveStartDate.value
+        : this.effectiveStartDate,
+    effectiveEndDate: effectiveEndDate.present
+        ? effectiveEndDate.value
+        : this.effectiveEndDate,
   );
   WorkCodeLegendRow copyWithCompanion(WorkCodeLegendRowsCompanion data) {
     return WorkCodeLegendRow(
@@ -3376,6 +3456,12 @@ class WorkCodeLegendRow extends DataClass
       timeWindowsJson: data.timeWindowsJson.present
           ? data.timeWindowsJson.value
           : this.timeWindowsJson,
+      effectiveStartDate: data.effectiveStartDate.present
+          ? data.effectiveStartDate.value
+          : this.effectiveStartDate,
+      effectiveEndDate: data.effectiveEndDate.present
+          ? data.effectiveEndDate.value
+          : this.effectiveEndDate,
     );
   }
 
@@ -3389,7 +3475,9 @@ class WorkCodeLegendRow extends DataClass
           ..write('startMinute: $startMinute, ')
           ..write('endMinute: $endMinute, ')
           ..write('flightIdsJson: $flightIdsJson, ')
-          ..write('timeWindowsJson: $timeWindowsJson')
+          ..write('timeWindowsJson: $timeWindowsJson, ')
+          ..write('effectiveStartDate: $effectiveStartDate, ')
+          ..write('effectiveEndDate: $effectiveEndDate')
           ..write(')'))
         .toString();
   }
@@ -3404,6 +3492,8 @@ class WorkCodeLegendRow extends DataClass
     endMinute,
     flightIdsJson,
     timeWindowsJson,
+    effectiveStartDate,
+    effectiveEndDate,
   );
   @override
   bool operator ==(Object other) =>
@@ -3416,7 +3506,9 @@ class WorkCodeLegendRow extends DataClass
           other.startMinute == this.startMinute &&
           other.endMinute == this.endMinute &&
           other.flightIdsJson == this.flightIdsJson &&
-          other.timeWindowsJson == this.timeWindowsJson);
+          other.timeWindowsJson == this.timeWindowsJson &&
+          other.effectiveStartDate == this.effectiveStartDate &&
+          other.effectiveEndDate == this.effectiveEndDate);
 }
 
 class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
@@ -3428,6 +3520,8 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
   final Value<int?> endMinute;
   final Value<String> flightIdsJson;
   final Value<String> timeWindowsJson;
+  final Value<String?> effectiveStartDate;
+  final Value<String?> effectiveEndDate;
   final Value<int> rowid;
   const WorkCodeLegendRowsCompanion({
     this.id = const Value.absent(),
@@ -3438,6 +3532,8 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
     this.endMinute = const Value.absent(),
     this.flightIdsJson = const Value.absent(),
     this.timeWindowsJson = const Value.absent(),
+    this.effectiveStartDate = const Value.absent(),
+    this.effectiveEndDate = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   WorkCodeLegendRowsCompanion.insert({
@@ -3449,6 +3545,8 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
     this.endMinute = const Value.absent(),
     this.flightIdsJson = const Value.absent(),
     this.timeWindowsJson = const Value.absent(),
+    this.effectiveStartDate = const Value.absent(),
+    this.effectiveEndDate = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : id = Value(id),
        employer = Value(employer),
@@ -3463,6 +3561,8 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
     Expression<int>? endMinute,
     Expression<String>? flightIdsJson,
     Expression<String>? timeWindowsJson,
+    Expression<String>? effectiveStartDate,
+    Expression<String>? effectiveEndDate,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -3474,6 +3574,9 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
       if (endMinute != null) 'end_minute': endMinute,
       if (flightIdsJson != null) 'flight_ids_json': flightIdsJson,
       if (timeWindowsJson != null) 'time_windows_json': timeWindowsJson,
+      if (effectiveStartDate != null)
+        'effective_start_date': effectiveStartDate,
+      if (effectiveEndDate != null) 'effective_end_date': effectiveEndDate,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -3487,6 +3590,8 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
     Value<int?>? endMinute,
     Value<String>? flightIdsJson,
     Value<String>? timeWindowsJson,
+    Value<String?>? effectiveStartDate,
+    Value<String?>? effectiveEndDate,
     Value<int>? rowid,
   }) {
     return WorkCodeLegendRowsCompanion(
@@ -3498,6 +3603,8 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
       endMinute: endMinute ?? this.endMinute,
       flightIdsJson: flightIdsJson ?? this.flightIdsJson,
       timeWindowsJson: timeWindowsJson ?? this.timeWindowsJson,
+      effectiveStartDate: effectiveStartDate ?? this.effectiveStartDate,
+      effectiveEndDate: effectiveEndDate ?? this.effectiveEndDate,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -3529,6 +3636,12 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
     if (timeWindowsJson.present) {
       map['time_windows_json'] = Variable<String>(timeWindowsJson.value);
     }
+    if (effectiveStartDate.present) {
+      map['effective_start_date'] = Variable<String>(effectiveStartDate.value);
+    }
+    if (effectiveEndDate.present) {
+      map['effective_end_date'] = Variable<String>(effectiveEndDate.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -3546,6 +3659,8 @@ class WorkCodeLegendRowsCompanion extends UpdateCompanion<WorkCodeLegendRow> {
           ..write('endMinute: $endMinute, ')
           ..write('flightIdsJson: $flightIdsJson, ')
           ..write('timeWindowsJson: $timeWindowsJson, ')
+          ..write('effectiveStartDate: $effectiveStartDate, ')
+          ..write('effectiveEndDate: $effectiveEndDate, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -7385,6 +7500,8 @@ typedef $$WorkCodeLegendRowsTableCreateCompanionBuilder =
       Value<int?> endMinute,
       Value<String> flightIdsJson,
       Value<String> timeWindowsJson,
+      Value<String?> effectiveStartDate,
+      Value<String?> effectiveEndDate,
       Value<int> rowid,
     });
 typedef $$WorkCodeLegendRowsTableUpdateCompanionBuilder =
@@ -7397,6 +7514,8 @@ typedef $$WorkCodeLegendRowsTableUpdateCompanionBuilder =
       Value<int?> endMinute,
       Value<String> flightIdsJson,
       Value<String> timeWindowsJson,
+      Value<String?> effectiveStartDate,
+      Value<String?> effectiveEndDate,
       Value<int> rowid,
     });
 
@@ -7446,6 +7565,16 @@ class $$WorkCodeLegendRowsTableFilterComposer
 
   ColumnFilters<String> get timeWindowsJson => $composableBuilder(
     column: $table.timeWindowsJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get effectiveStartDate => $composableBuilder(
+    column: $table.effectiveStartDate,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get effectiveEndDate => $composableBuilder(
+    column: $table.effectiveEndDate,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -7498,6 +7627,16 @@ class $$WorkCodeLegendRowsTableOrderingComposer
     column: $table.timeWindowsJson,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<String> get effectiveStartDate => $composableBuilder(
+    column: $table.effectiveStartDate,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get effectiveEndDate => $composableBuilder(
+    column: $table.effectiveEndDate,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$WorkCodeLegendRowsTableAnnotationComposer
@@ -7536,6 +7675,16 @@ class $$WorkCodeLegendRowsTableAnnotationComposer
 
   GeneratedColumn<String> get timeWindowsJson => $composableBuilder(
     column: $table.timeWindowsJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get effectiveStartDate => $composableBuilder(
+    column: $table.effectiveStartDate,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get effectiveEndDate => $composableBuilder(
+    column: $table.effectiveEndDate,
     builder: (column) => column,
   );
 }
@@ -7588,6 +7737,8 @@ class $$WorkCodeLegendRowsTableTableManager
                 Value<int?> endMinute = const Value.absent(),
                 Value<String> flightIdsJson = const Value.absent(),
                 Value<String> timeWindowsJson = const Value.absent(),
+                Value<String?> effectiveStartDate = const Value.absent(),
+                Value<String?> effectiveEndDate = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => WorkCodeLegendRowsCompanion(
                 id: id,
@@ -7598,6 +7749,8 @@ class $$WorkCodeLegendRowsTableTableManager
                 endMinute: endMinute,
                 flightIdsJson: flightIdsJson,
                 timeWindowsJson: timeWindowsJson,
+                effectiveStartDate: effectiveStartDate,
+                effectiveEndDate: effectiveEndDate,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -7610,6 +7763,8 @@ class $$WorkCodeLegendRowsTableTableManager
                 Value<int?> endMinute = const Value.absent(),
                 Value<String> flightIdsJson = const Value.absent(),
                 Value<String> timeWindowsJson = const Value.absent(),
+                Value<String?> effectiveStartDate = const Value.absent(),
+                Value<String?> effectiveEndDate = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => WorkCodeLegendRowsCompanion.insert(
                 id: id,
@@ -7620,6 +7775,8 @@ class $$WorkCodeLegendRowsTableTableManager
                 endMinute: endMinute,
                 flightIdsJson: flightIdsJson,
                 timeWindowsJson: timeWindowsJson,
+                effectiveStartDate: effectiveStartDate,
+                effectiveEndDate: effectiveEndDate,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0

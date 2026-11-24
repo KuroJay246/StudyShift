@@ -22,7 +22,7 @@ void main() {
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
 
   testWidgets(
-    'calendar action helper has readable separation from its button',
+    'calendar action shows one clear action without duplicate helper copy',
     (tester) async {
       final item = ScheduleItem(
         id: 'synthetic-calendar-spacing',
@@ -53,11 +53,12 @@ void main() {
         ),
       );
 
-      final button = tester.getRect(find.byType(OutlinedButton));
-      final helper = tester.getRect(
+      expect(find.text('Add to device calendar'), findsOneWidget);
+      expect(
         find.textContaining('Opens a draft for you to review and save.'),
+        findsNothing,
       );
-      expect(helper.top - button.bottom, greaterThanOrEqualTo(8));
+      expect(tester.getRect(find.byType(OutlinedButton)).width, greaterThan(0));
     },
   );
 

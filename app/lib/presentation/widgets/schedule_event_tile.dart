@@ -17,6 +17,7 @@ class ScheduleEventTile extends StatefulWidget {
     this.dateLabel,
     this.countdownLabel,
     this.statusLabel,
+    this.workHoursLabel,
     this.staggerIndex = 0,
     this.showExtendedWorkDetails = false,
   });
@@ -28,6 +29,7 @@ class ScheduleEventTile extends StatefulWidget {
   final String? dateLabel;
   final String? countdownLabel;
   final String? statusLabel;
+  final String? workHoursLabel;
   final int staggerIndex;
   final bool showExtendedWorkDetails;
   final VoidCallback onTap;
@@ -126,6 +128,7 @@ class _ScheduleEventTileState extends State<ScheduleEventTile> {
       if (code?.isNotEmpty == true) '$codeLabel $code',
       if (codeMeaning?.isNotEmpty == true) 'code assignment $codeMeaning',
       timeText,
+      if (widget.workHoursLabel != null) widget.workHoursLabel!,
       if (widget.item.kind == ScheduleKind.deadline)
         widget.item.isCompleted ? 'Completed' : 'Not completed',
       if (widget.countdownLabel != null) widget.countdownLabel!,
@@ -312,6 +315,18 @@ class _ScheduleEventTileState extends State<ScheduleEventTile> {
                                     ],
                                   ),
                                 ),
+                                if (widget.workHoursLabel != null) ...[
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    widget.workHoursLabel!,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
                               ] else if (code?.isNotEmpty == true) ...[
                                 const SizedBox(height: 2),
                                 Row(
@@ -373,6 +388,18 @@ class _ScheduleEventTileState extends State<ScheduleEventTile> {
                                     ],
                                   ),
                                 ),
+                                if (widget.workHoursLabel != null) ...[
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    widget.workHoursLabel!,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
                               ],
                               if (!compactWork &&
                                   (widget.item.location?.isNotEmpty ??

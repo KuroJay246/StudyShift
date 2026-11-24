@@ -1,4 +1,5 @@
 import '../domain/work_code_legend.dart';
+import '../domain/schedule.dart';
 
 /// Text recognized from one word in a document, with its page-relative bounds.
 /// Coordinates are normalized to 0..1 by the Android OCR bridge.
@@ -65,6 +66,8 @@ class RosterGridRow {
   final String label;
   final List<RosterGridCell> cells;
 }
+
+enum RosterCoworkerScope { sameRosterCode, overlappingShiftTimes }
 
 class RosterGridCandidate {
   const RosterGridCandidate({
@@ -193,12 +196,53 @@ class RosterGridImportParser {
     return RosterGridDetection(List.unmodifiable(_deduplicate(candidates)));
   }
 
+  /// Detects a roster table whose dates run across columns and staff names
+  /// run down rows. CSV/XLSX callers pass their decoded cell matrix here so
+  /// the same date/code review and ambiguity rules apply as for OCR tokens.
+  RosterGridDetection detectMatrix(List<List<String>> matrix) {
+    if (matrix.isEmpty || matrix.length > 500) {
+      throw const FormatException(
+        'This roster table is empty or has too many rows to review.',
+      );
+    }
+    final columnCount = matrix.fold<int>(
+      0,
+      (maximum, row) => row.length > maximum ? row.length : maximum,
+    );
+    if (columnCount < 4 || columnCount > 32) {
+      throw const FormatException(
+        'This roster table needs one staff column and between 3 and 31 date columns.',
+      );
+    }
+    final rowCount = matrix.length;
+    final tokens = <OcrTextToken>[];
+    for (var rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+      final row = matrix[rowIndex];
+      for (var columnIndex = 0; columnIndex < row.length; columnIndex++) {
+        final text = row[columnIndex].trim();
+        if (text.isEmpty) continue;
+        tokens.add(
+          OcrTextToken(
+            text: text,
+            left: columnIndex / columnCount,
+            top: rowIndex / rowCount,
+            right: (columnIndex + 1) / columnCount,
+            bottom: (rowIndex + 1) / rowCount,
+          ),
+        );
+      }
+    }
+    return detect(tokens);
+  }
+
   List<String> coworkersForCell(
     RosterGridCandidate table, {
     required int selectedRow,
     required int columnIndex,
     required String code,
+    CivilDate? date,
     List<WorkCodeLegend>? legends,
+    RosterCoworkerScope coworkerScope = RosterCoworkerScope.sameRosterCode,
   }) {
     if (selectedRow < 0 ||
         selectedRow >= table.rows.length ||
@@ -215,7 +259,7 @@ class RosterGridImportParser {
     }
     final selectedDefinition = legends == null
         ? null
-        : _uniqueDefinition(legends, target);
+        : _uniqueDefinition(legends, target, date: date);
     final names = <String>[];
     for (var index = 0; index < table.rows.length; index++) {
       if (index == selectedRow ||
@@ -240,27 +284,37 @@ class RosterGridImportParser {
           name.isEmpty) {
         continue;
       }
-      if (legends == null) {
-        if (normalized != target) continue;
-      } else if (normalized == target) {
-        // A matching code in the same date column is the strongest roster
-        // assignment signal even before that code's time legend is defined.
-      } else {
-        final coworkerDefinition = _uniqueDefinition(legends, normalized);
-        if (selectedDefinition == null ||
-            coworkerDefinition == null ||
-            !_definitionsOverlap(selectedDefinition, coworkerDefinition)) {
-          continue;
-        }
+      if (normalized == target) {
+        names.add(name);
+        continue;
+      }
+      if (coworkerScope != RosterCoworkerScope.overlappingShiftTimes ||
+          legends == null) {
+        continue;
+      }
+      final coworkerDefinition = _uniqueDefinition(
+        legends,
+        normalized,
+        date: date,
+      );
+      if (selectedDefinition == null ||
+          coworkerDefinition == null ||
+          !_definitionsOverlap(selectedDefinition, coworkerDefinition)) {
+        continue;
       }
       names.add(name);
     }
     return List.unmodifiable(names);
   }
 
-  WorkCodeLegend? _uniqueDefinition(List<WorkCodeLegend> legends, String code) {
+  WorkCodeLegend? _uniqueDefinition(
+    List<WorkCodeLegend> legends,
+    String code, {
+    CivilDate? date,
+  }) {
     final matches = legends
         .where((legend) => legend.code.trim().toUpperCase() == code)
+        .where((legend) => date == null || legend.appliesOn(date))
         .toList(growable: false);
     return matches.length == 1 && matches.single.timeWindows.isNotEmpty
         ? matches.single

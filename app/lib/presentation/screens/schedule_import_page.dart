@@ -11,17 +11,21 @@ import '../../data/ics_schedule_import.dart';
 import '../../data/ocr_schedule_import.dart';
 import '../../data/roster_grid_import.dart';
 import '../../data/roster_grid_selection_resolver.dart';
+import '../../data/roster_legend_import.dart';
 import '../../data/xlsx_schedule_import.dart';
 import '../../data/schedule_import_models.dart';
 import '../../data/schedule_import_history_repository.dart';
 import '../../domain/civil_time_resolver.dart';
 import '../../domain/schedule.dart';
+import '../../domain/supervisor_profile.dart';
+import '../../domain/supervisor_roster_parser.dart';
 import '../../domain/work_occurrence_coworkers.dart';
 import '../../domain/work_code_legend.dart';
 import '../../platform/schedule_import_file_bridge.dart';
 import '../design/studyshift_spacing.dart';
 import '../schedule_format.dart';
 import 'schedule_import_history_page.dart';
+import 'work_code_legend_page.dart';
 
 enum _ImportCategory {
   personal,
@@ -34,6 +38,31 @@ enum _ImportCategory {
   restDay,
   leave,
   dayOff,
+}
+
+String _rosterEventTitle(WorkCodeLegend legend) {
+  var title = legend.assignmentDetails;
+  for (final flightId in legend.flightIds) {
+    title = title.replaceAll(
+      RegExp(RegExp.escape(flightId), caseSensitive: false),
+      ' ',
+    );
+  }
+  title = title.replaceAll(
+    RegExp(r'\b[A-Z]{1,3}\s*\d{2,5}(?:/\d{1,4})?\b', caseSensitive: false),
+    ' ',
+  );
+  if (legend.code.trim().isNotEmpty) {
+    title = title.replaceAll(
+      RegExp(
+        '\\b${RegExp.escape(legend.code.trim())}\\b',
+        caseSensitive: false,
+      ),
+      ' ',
+    );
+  }
+  title = title.replaceAll(RegExp(r'[\s,;|/·–—-]+'), ' ').trim();
+  return title.isEmpty ? 'Work shift' : title;
 }
 
 class ScheduleImportPage extends ConsumerStatefulWidget {
@@ -94,6 +123,8 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   final _csvParser = const CsvScheduleImportParser();
   final _xlsxParser = const XlsxScheduleImportParser();
   final _ocrParser = const OcrScheduleImportParser();
+  final _rosterLegendParser = const RosterLegendImportParser();
+  final _supervisorRosterParser = const SupervisorRosterParser();
   final _fileBridge = const ScheduleImportFileBridge();
   List<_ImportRow> _rows = const [];
   List<ScheduleImportNotice> _notices = const [];
@@ -110,13 +141,62 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   List<String> _tableHeaders = const [];
   Map<String, String> _columnSelections = const {};
   RosterGridDetection? _rosterDetection;
+  RosterLegendDetection? _rosterLegendDetection;
+  List<WorkCodeLegend> _rosterLegendProposals = const [];
+  List<WorkCodeLegend> _rosterLegendConflicts = const [];
+  Set<String> _selectedRosterLegendIds = const {};
+  List<SupervisorProfile> _supervisorProposals = const [];
+  Set<String> _selectedSupervisorIds = const {};
+  final Map<String, SupervisorProfile> _manualRosterSupervisorProfiles = {};
+  String? _selectedRosterSupervisorName;
+  SupervisorType? _selectedRosterSupervisorType;
   int _selectedRosterTable = 0;
   int? _selectedRosterRow;
   DateTime? _rosterFirstDate;
   Map<int, DateTime> _rosterDateOverrides = const {};
   bool _rosterDatesConfirmed = false;
   bool _appendIncoming = false;
+  bool _coworkerRosterDetected = false;
+  RosterCoworkerScope _rosterCoworkerScope = RosterCoworkerScope.sameRosterCode;
+  String? _rosterTimeZoneId;
+  int _rosterTimeZoneRevision = 0;
   List<String> _unresolvedRosterCells = const [];
+
+  Future<void> _reviewRosterLegend(WorkCodeLegend definition) async {
+    final corrected = await showDialog<WorkCodeLegend>(
+      context: context,
+      builder: (_) => WorkCodeLegendEditorDialog(
+        suggestion: definition,
+        persistOnSave: false,
+      ),
+    );
+    if (!mounted || corrected == null) return;
+    setState(() {
+      _rosterLegendProposals = [
+        for (final proposal in _rosterLegendProposals)
+          if (proposal.id == definition.id) corrected else proposal,
+      ];
+      _selectedRosterLegendIds = {..._selectedRosterLegendIds, corrected.id};
+      _rows = [
+        for (final row in _rows)
+          if (row.effectiveSourceName == _sourceName &&
+              row.proposal.item.kind == ScheduleKind.work &&
+              row.proposal.item.code?.trim().toUpperCase() ==
+                  corrected.code.trim().toUpperCase())
+            row.copyWith(
+              proposal: ScheduleImportProposal(
+                item: row.proposal.item.copyWith(
+                  title: _rosterEventTitle(corrected),
+                  codeMeaning: corrected.assignmentDetails,
+                ),
+                sourceText: row.proposal.sourceText,
+              ),
+            )
+          else
+            row,
+      ];
+    });
+  }
 
   static const _tableFields = <String, String>{
     'date': 'Event date *',
@@ -155,12 +235,25 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         _recognizedText = null;
         _sourceType = null;
         _rosterDetection = null;
+        _rosterLegendDetection = null;
+        _rosterLegendProposals = const [];
+        _rosterLegendConflicts = const [];
+        _selectedRosterLegendIds = const {};
+        _supervisorProposals = const [];
+        _selectedSupervisorIds = const {};
+        _manualRosterSupervisorProfiles.clear();
+        _selectedRosterSupervisorName = null;
+        _selectedRosterSupervisorType = null;
         _selectedRosterTable = 0;
         _selectedRosterRow = null;
         _rosterFirstDate = null;
+        _rosterTimeZoneId = null;
+        _rosterTimeZoneRevision++;
         _rosterDateOverrides = const {};
         _rosterDatesConfirmed = false;
         _unresolvedRosterCells = const [];
+        _coworkerRosterDetected = false;
+        _rosterCoworkerScope = RosterCoworkerScope.sameRosterCode;
       }
     });
     try {
@@ -191,6 +284,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         final detection = const RosterGridImportParser().detect(
           selected.ocrTokens,
         );
+        final legendDetection = _rosterLegendParser.detect(selected.ocrTokens);
+        final supervisorProposals = _mergeSupervisorProposals(
+          await _newSupervisorProfiles(extractedText),
+          append: append,
+        );
         if (detection.candidates.isNotEmpty) {
           if (!mounted) return;
           setState(() {
@@ -198,6 +296,14 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             _sourceType = append ? ScheduleImportSourceType.batch : sourceType;
             _recognizedText = extractedText;
             _rosterDetection = detection;
+            _rosterLegendDetection = legendDetection;
+            _rosterLegendProposals = const [];
+            _rosterLegendConflicts = const [];
+            _selectedRosterLegendIds = const {};
+            _supervisorProposals = supervisorProposals;
+            _selectedSupervisorIds = {
+              for (final profile in supervisorProposals) profile.id,
+            };
             _selectedRosterTable = 0;
             _selectedRosterRow = null;
             _rosterFirstDate = _inferredRosterFirstDate(
@@ -239,7 +345,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             _sourceName = sourceName;
             _sourceType = append ? ScheduleImportSourceType.batch : sourceType;
             _recognizedText = extractedText;
-            if (preview.proposals.isEmpty) {
+            _supervisorProposals = supervisorProposals;
+            _selectedSupervisorIds = {
+              for (final profile in supervisorProposals) profile.id,
+            };
+            if (preview.proposals.isEmpty && supervisorProposals.isEmpty) {
               _error = 'No clear schedule rows were found. Review the recognized text and correct uncertain entries manually.';
             }
           });
@@ -259,7 +369,27 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       } else if (fileName.endsWith('.csv')) {
         sourceType = ScheduleImportSourceType.csv;
         final text = utf8.decode(selected.bytes!, allowMalformed: false);
+        final matrix = _csvParser.detectRosterGrid(text);
+        if (matrix.candidates.isNotEmpty) {
+          _stageRosterGrid(
+            matrix,
+            sourceName: sourceName,
+            sourceType: sourceType,
+            append: append,
+          );
+          return;
+        }
         final headers = _csvParser.inspectHeaders(text);
+        if (_isCoworkerRosterHeaders(headers)) {
+          final preview = _csvParser.parseCoworkerRoster(text);
+          await _stageCoworkerRoster(
+            preview,
+            sourceName: sourceName,
+            sourceType: sourceType,
+            append: append,
+          );
+          return;
+        }
         if (_needsColumnMapping(headers)) {
           if (!mounted) return;
           setState(() {
@@ -274,7 +404,27 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         preview = await _csvParser.parse(text, sourceName: sourceName);
       } else if (fileName.endsWith('.xlsx')) {
         sourceType = ScheduleImportSourceType.xlsx;
+        final matrix = _xlsxParser.detectRosterGrid(selected.bytes!);
+        if (matrix.candidates.isNotEmpty) {
+          _stageRosterGrid(
+            matrix,
+            sourceName: sourceName,
+            sourceType: sourceType,
+            append: append,
+          );
+          return;
+        }
         final headers = _xlsxParser.inspectHeaders(selected.bytes!);
+        if (_isCoworkerRosterHeaders(headers)) {
+          final preview = _xlsxParser.parseCoworkerRoster(selected.bytes!);
+          await _stageCoworkerRoster(
+            preview,
+            sourceName: sourceName,
+            sourceType: sourceType,
+            append: append,
+          );
+          return;
+        }
         if (_needsColumnMapping(headers)) {
           if (!mounted) return;
           setState(() {
@@ -292,7 +442,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         );
       } else {
         throw const FormatException(
-          'Choose an ICS, CSV, Excel, PDF, or supported image file.',
+          'Choose an ICS, CSV, Excel (.xlsx), PDF, or supported image file.',
         );
       }
       final existingItems = await ref
@@ -344,6 +494,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       'code',
       'code_meaning',
       'coworkers',
+      'coworker_codes',
       'reporting_instruction',
       'location',
       'notes',
@@ -359,12 +510,295 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         normalized.any((header) => !canonical.contains(header));
   }
 
+  bool _isCoworkerRosterHeaders(List<String> headers) {
+    final normalized = headers
+        .map((header) => header.trim().toLowerCase().replaceAll(' ', '_'))
+        .toSet();
+    const dateFields = {'date', 'shift_date', 'work_date'};
+    const codeFields = {'code', 'shift_code', 'roster_code'};
+    const coworkerFields = {'coworkers', 'coworker', 'colleagues'};
+    return normalized.any(dateFields.contains) &&
+        normalized.any(codeFields.contains) &&
+        normalized.any(coworkerFields.contains) &&
+        !normalized.contains('title') &&
+        !normalized.contains('category') &&
+        !normalized.contains('start') &&
+        !normalized.contains('end');
+  }
+
+  Future<List<SupervisorProfile>> _newSupervisorProfiles(String text) async {
+    final entries = _supervisorRosterParser.parse(text);
+    if (entries.isEmpty) return const [];
+    final existing = await ref.read(supervisorRepositoryProvider).getItems();
+    final existingNames = {
+      for (final profile in existing) _normalizeStaffName(profile.name),
+    };
+    return [
+      for (final entry in entries)
+        if (existingNames.add(_normalizeStaffName(entry.name)))
+          SupervisorProfile(
+            id: 'roster-supervisor-${sha256.convert(utf8.encode(_normalizeStaffName(entry.name))).toString().substring(0, 24)}',
+            name: entry.name,
+            type: entry.type,
+          ),
+    ];
+  }
+
+  List<SupervisorProfile> _mergeSupervisorProposals(
+    List<SupervisorProfile> incoming, {
+    required bool append,
+  }) {
+    if (!append) return incoming;
+    final merged = [..._supervisorProposals];
+    final names = {
+      for (final profile in merged) _normalizeStaffName(profile.name),
+    };
+    for (final profile in incoming) {
+      if (names.add(_normalizeStaffName(profile.name))) merged.add(profile);
+    }
+    return List.unmodifiable(merged);
+  }
+
+  String _normalizeStaffName(String name) =>
+      name.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
+
+  List<String> _availableRosterStaffNames() {
+    final detection = _rosterDetection;
+    if (detection == null ||
+        _selectedRosterTable < 0 ||
+        _selectedRosterTable >= detection.candidates.length) {
+      return const [];
+    }
+    final knownNames = {
+      for (final profile in _supervisorProposals)
+        _normalizeStaffName(profile.name),
+      ..._manualRosterSupervisorProfiles.keys,
+    };
+    final namesByKey = <String, String>{};
+    for (final row in detection.candidates[_selectedRosterTable].rows) {
+      final name = row.label.trim().replaceAll(RegExp(r'\s+'), ' ');
+      final key = _normalizeStaffName(name);
+      if (name.isNotEmpty && !knownNames.contains(key)) {
+        namesByKey.putIfAbsent(key, () => name);
+      }
+    }
+    return List.unmodifiable(namesByKey.values);
+  }
+
+  Future<void> _chooseRosterStaffRow(RosterGridCandidate table) async {
+    var query = '';
+    final selectedRow = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final normalizedQuery = query.trim().toLowerCase();
+          final matchingRows = [
+            for (var index = 0; index < table.rows.length; index++)
+              if (normalizedQuery.isEmpty ||
+                  table.rows[index].label.toLowerCase().contains(
+                    normalizedQuery,
+                  ))
+                index,
+          ];
+          final maxDialogHeight = MediaQuery.sizeOf(context).height * .62;
+          return AlertDialog(
+            title: const Text('Which person are you?'),
+            content: SizedBox(
+              width: 480,
+              height: maxDialogHeight,
+              child: Column(
+                children: [
+                  TextField(
+                    key: const ValueKey('roster-staff-row-search'),
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Search roster names',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (value) => setDialogState(() => query = value),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: matchingRows.isEmpty
+                        ? const Center(child: Text('No matching roster names'))
+                        : ListView.builder(
+                            itemCount: matchingRows.length,
+                            itemBuilder: (context, resultIndex) {
+                              final rowIndex = matchingRows[resultIndex];
+                              return ListTile(
+                                key: ValueKey('roster-staff-option-$rowIndex'),
+                                title: Text(
+                                  table.rows[rowIndex].label,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text('Roster row ${rowIndex + 1}'),
+                                onTap: () =>
+                                    Navigator.of(dialogContext).pop(rowIndex),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Cancel'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (selectedRow == null || !mounted) return;
+    setState(() {
+      _selectedRosterRow = selectedRow;
+      if (!_appendIncoming) _rows = const [];
+      _unresolvedRosterCells = const [];
+    });
+  }
+
+  List<SupervisorProfile> _selectedManualRosterSupervisors() =>
+      List.unmodifiable(_manualRosterSupervisorProfiles.values);
+
+  Future<void> _addRosterSupervisor() async {
+    final name = _selectedRosterSupervisorName?.trim();
+    final type = _selectedRosterSupervisorType;
+    if (name == null || name.isEmpty || type == null) return;
+    final normalizedName = _normalizeStaffName(name);
+    final existingProfiles = await ref
+        .read(supervisorRepositoryProvider)
+        .getItems();
+    if (existingProfiles.any(
+      (profile) => _normalizeStaffName(profile.name) == normalizedName,
+    )) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$name is already in Shift Legend.')),
+        );
+      }
+      return;
+    }
+    final id =
+        'roster-supervisor-${sha256.convert(utf8.encode(normalizedName)).toString().substring(0, 24)}';
+    setState(() {
+      _manualRosterSupervisorProfiles[normalizedName] = SupervisorProfile(
+        id: id,
+        name: name,
+        type: type,
+      );
+      _selectedRosterSupervisorName = null;
+      _selectedRosterSupervisorType = null;
+    });
+  }
+
+  void _removeRosterSupervisor(String normalizedName) {
+    setState(() => _manualRosterSupervisorProfiles.remove(normalizedName));
+  }
+
+  void _stageRosterGrid(
+    RosterGridDetection detection, {
+    required String sourceName,
+    required ScheduleImportSourceType sourceType,
+    required bool append,
+  }) {
+    if (!mounted) return;
+    setState(() {
+      _sourceName = sourceName;
+      _sourceType = append ? ScheduleImportSourceType.batch : sourceType;
+      _recognizedText = null;
+      _rosterDetection = detection;
+      _selectedRosterTable = 0;
+      _selectedRosterRow = null;
+      _rosterFirstDate = _inferredRosterFirstDate(detection.candidates.first);
+      _rosterDateOverrides = const {};
+      _rosterDatesConfirmed = false;
+      _unresolvedRosterCells = const [];
+      _coworkerRosterDetected = false;
+    });
+  }
+
+  Future<void> _stageCoworkerRoster(
+    CoworkerRosterPreview preview, {
+    required String sourceName,
+    required ScheduleImportSourceType sourceType,
+    required bool append,
+  }) async {
+    final savedItems = await ref.read(scheduleRepositoryProvider).getItems();
+    final occurrenceRows = await ref
+        .read(workOccurrenceCoworkerRepositoryProvider)
+        .getAll();
+    final occurrenceCoworkersByKey = {
+      for (final row in occurrenceRows)
+        '${row.shiftItemId}|${row.occurrenceDate}': row,
+    };
+    final byId = {for (final item in savedItems) item.id: item};
+    final candidates = savedItems.where(_canMatchOcrProposal).toList();
+    final matchedIds = <String>{};
+    final incoming = <_ImportRow>[];
+    final notices = [
+      for (final notice in preview.notices) ScheduleImportNotice(notice),
+    ];
+    for (final assignment in preview.assignments) {
+      final sourceText =
+          'Coworker roster · ${assignment.date} · ${assignment.code}';
+      final matches = candidates
+          .where((item) => _matchesRosterIdentity(item, assignment))
+          .toList(growable: false);
+      if (matches.isEmpty) {
+        notices.add(
+          ScheduleImportNotice(
+            'No saved shift matches ${assignment.code} on ${assignment.date}; coworkers were not added.',
+          ),
+        );
+        continue;
+      }
+      for (final savedShift in matches) {
+        final proposal = ScheduleImportProposal(
+          item: savedShift.copyWith(coworkers: assignment.coworkers),
+          sourceText: sourceText,
+        );
+        final row = _ocrReviewRow(
+          proposal,
+          byId: byId,
+          unusedExistingOcrItems: candidates,
+          matchedOcrIds: matchedIds,
+          rosterProposal: true,
+          occurrenceCoworkersByKey: occurrenceCoworkersByKey,
+          sourceName: sourceName,
+        );
+        if (row.existing != null && row.coworkerOnly) {
+          incoming.add(
+            assignment.sameRosterCodeVerified
+                ? row
+                : row.copyWith(included: false),
+          );
+        }
+      }
+    }
+    _mergeBatchRows(incoming, notices);
+    if (!mounted) return;
+    setState(() {
+      _sourceName = sourceName;
+      _sourceType = append ? ScheduleImportSourceType.batch : sourceType;
+      _coworkerRosterDetected = true;
+      _error = incoming.isEmpty && notices.isEmpty
+          ? 'No coworker rows matched saved shifts. Your schedule was not changed.'
+          : null;
+    });
+  }
+
   void _mergeBatchRows(
     List<_ImportRow> incoming,
     List<ScheduleImportNotice> notices,
   ) {
     final append = _appendIncoming;
-    final combinedRows = append ? [..._rows, ...incoming] : incoming;
+    final combinedRows = _mergeCoworkerOnlyRows(
+      append ? [..._rows, ...incoming] : incoming,
+    );
     final duplicates = _duplicateBatchGroups(combinedRows);
     final duplicateIndexes = duplicates.values
         .expand((indexes) => indexes)
@@ -379,25 +813,58 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       _notices = [
         if (append) ..._notices,
         ...notices,
-        if (append && _batchSourceCount(_rows) > 1)
-          const ScheduleImportNotice(
-            'The files are staged together. Selected changes are saved in one reviewed import.',
-          ),
         if (duplicates.isNotEmpty)
           const ScheduleImportNotice(
-            'Some shifts appear in more than one file. They are unchecked until you choose the correct version.',
+            'Some shifts use the same date and code in more than one file, even when the times differ. They are unchecked until you choose the correct version.',
           ),
       ];
       _appendIncoming = false;
     });
   }
 
+  List<_ImportRow> _mergeCoworkerOnlyRows(List<_ImportRow> rows) {
+    final merged = <_ImportRow>[];
+    final indexesByOccurrence = <String, int>{};
+    for (final row in rows) {
+      if (!row.coworkerOnly) {
+        merged.add(row);
+        continue;
+      }
+      final key =
+          '${row.proposal.item.id}|${row.rosterOccurrenceDate ?? row.proposal.item.startDate}';
+      final priorIndex = indexesByOccurrence[key];
+      if (priorIndex == null) {
+        indexesByOccurrence[key] = merged.length;
+        merged.add(row);
+        continue;
+      }
+      final prior = merged[priorIndex];
+      final names = [...prior.proposal.item.coworkers];
+      for (final name in row.proposal.item.coworkers) {
+        if (!names.any(
+          (existing) =>
+              existing.trim().toLowerCase() == name.trim().toLowerCase(),
+        )) {
+          names.add(name);
+        }
+      }
+      merged[priorIndex] = prior.copyWith(
+        proposal: ScheduleImportProposal(
+          item: prior.proposal.item.copyWith(coworkers: names),
+          sourceText:
+              '${prior.proposal.sourceText}\n${row.proposal.sourceText}',
+        ),
+      );
+    }
+    return merged;
+  }
+
   String _batchSourceName(String sourceName, {required bool append}) {
     if (!append) return sourceName;
     final existing = {
-      for (final row in _rows)
-        if (row.proposal.item.importProvenance case final provenance?)
-          provenance.sourceName,
+      for (final name
+          in _rows.map((row) => row.effectiveSourceName).whereType<String>())
+        name,
     };
     if (!existing.contains(sourceName)) return sourceName;
     final extensionIndex = sourceName.lastIndexOf('.');
@@ -504,23 +971,58 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     List<WorkCodeLegend> legends,
   ) {
     final item = proposal.item;
-    if (item.kind != ScheduleKind.work ||
-        item.employerName == null ||
-        item.code == null ||
-        (item.codeMeaning?.trim().isNotEmpty ?? false)) {
+    if (item.kind != ScheduleKind.work || item.code == null) {
       return proposal;
     }
-    for (final legend in legends) {
-      if (legend.employer.trim().toLowerCase() ==
-              item.employerName!.trim().toLowerCase() &&
-          legend.code.trim().toLowerCase() == item.code!.trim().toLowerCase()) {
-        return ScheduleImportProposal(
-          item: item.copyWith(codeMeaning: legend.assignmentDetails),
-          sourceText: proposal.sourceText,
-        );
-      }
+    final normalizedCode = item.code!.trim().toLowerCase();
+    final normalizedEmployer = item.employerName?.trim().toLowerCase() ?? '';
+    final matchingLegends = legends.where((legend) {
+      final legendEmployer = legend.employer.trim().toLowerCase();
+      return legend.code.trim().toLowerCase() == normalizedCode &&
+          legend.appliesOn(item.startDate) &&
+          (legendEmployer.isEmpty ||
+              normalizedEmployer.isEmpty ||
+              legendEmployer == normalizedEmployer);
+    }).toList();
+    final matchedLegend = matchingLegends.length == 1
+        ? matchingLegends.single
+        : null;
+    final existingMeaning = item.codeMeaning?.trim() ?? '';
+    final legendMeaning = matchedLegend?.assignmentDetails.trim() ?? '';
+    final meaning = existingMeaning.isNotEmpty
+        ? existingMeaning
+        : legendMeaning;
+    final titleIsOnlyCode = item.title.trim().toLowerCase() == normalizedCode;
+    final codePrefix = RegExp(
+      '^\\s*${RegExp.escape(item.code!.trim())}(?:\\s*[-–—:·|]\\s*|\\s+)(.+)\$',
+      caseSensitive: false,
+    ).firstMatch(item.title);
+    final titleWithoutCode = codePrefix?.group(1)?.trim();
+    final titleHasCodePrefix = titleWithoutCode?.isNotEmpty == true;
+    if (!titleIsOnlyCode && !titleHasCodePrefix && meaning == existingMeaning) {
+      return proposal;
     }
-    return proposal;
+
+    final titleDefinition = WorkCodeLegend(
+      id: matchedLegend?.id ?? 'imported-code-title',
+      employer: matchedLegend?.employer ?? item.employerName ?? '',
+      code: item.code!,
+      assignmentDetails: meaning,
+      flightIds: matchedLegend?.flightIds ?? const [],
+    );
+    final title = titleIsOnlyCode
+        ? meaning.isEmpty
+              ? 'Work shift'
+              : _rosterEventTitle(titleDefinition)
+        : titleHasCodePrefix
+        ? titleWithoutCode!
+        : item.title;
+    return ScheduleImportProposal(
+      item: item.copyWith(title: title, codeMeaning: meaning),
+      sourceText: proposal.sourceText,
+      studyShiftSeriesId: proposal.studyShiftSeriesId,
+      studyShiftExpandedThrough: proposal.studyShiftExpandedThrough,
+    );
   }
 
   List<_ImportRow> _matchExistingRows(
@@ -542,9 +1044,16 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     Set<String> matchedIds,
   ) {
     final proposed = proposal.item;
+    final exactIdMatch = byId[proposed.id];
+    final semanticMatch = exactIdMatch == null
+        ? _takeMatchingSavedShift(proposed, existingItems, matchedIds)
+        : const _OcrMatchResult();
     final existing =
-        byId[proposed.id] ??
-        _takeMatchingSavedDayMarker(proposed, existingItems, matchedIds);
+        exactIdMatch ??
+        semanticMatch.item ??
+        (semanticMatch.ambiguous
+            ? null
+            : _takeMatchingSavedDayMarker(proposed, existingItems, matchedIds));
     if (existing != null) matchedIds.add(existing.id);
     final matchedProposal = existing == null || existing.id == proposed.id
         ? proposal
@@ -555,8 +1064,51 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     return _ImportRow(
       proposal: matchedProposal,
       existing: existing,
-      included: existing == null,
+      included: existing == null && !semanticMatch.ambiguous,
+      ambiguousMatch: semanticMatch.ambiguous,
     );
+  }
+
+  _OcrMatchResult _takeMatchingSavedShift(
+    ScheduleItem proposed,
+    List<ScheduleItem> candidates,
+    Set<String> matchedIds,
+  ) {
+    if (!_isTimedCodedShift(proposed)) return const _OcrMatchResult();
+    final matches = candidates
+        .where((candidate) => _sameImportedShift(candidate, proposed))
+        .toList(growable: false);
+    if (matches.length != 1 || matchedIds.contains(matches.single.id)) {
+      return _OcrMatchResult(ambiguous: matches.isNotEmpty);
+    }
+    return _OcrMatchResult(item: matches.single);
+  }
+
+  bool _isTimedCodedShift(ScheduleItem item) =>
+      item.kind == ScheduleKind.work &&
+      item.workCategory == WorkCategory.shift &&
+      !item.hasNoTime &&
+      (item.code?.trim().isNotEmpty ?? false);
+
+  bool _sameImportedShift(ScheduleItem saved, ScheduleItem proposed) {
+    String normalizeCode(String? value) =>
+        value?.replaceAll(RegExp(r'\s+'), '').toUpperCase() ?? '';
+    String normalizeEmployer(String? value) =>
+        value?.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase() ?? '';
+
+    final savedEmployer = normalizeEmployer(saved.employerName);
+    final proposedEmployer = normalizeEmployer(proposed.employerName);
+    return _isTimedCodedShift(saved) &&
+        _occursOn(saved, proposed.startDate) &&
+        normalizeCode(saved.code) == normalizeCode(proposed.code) &&
+        (savedEmployer.isEmpty ||
+            proposedEmployer.isEmpty ||
+            savedEmployer == proposedEmployer) &&
+        saved.intervals.length == proposed.intervals.length &&
+        List.generate(
+          saved.intervals.length,
+          (index) => saved.intervals[index] == proposed.intervals[index],
+        ).every((matches) => matches);
   }
 
   ScheduleItem? _takeMatchingSavedDayMarker(
@@ -704,8 +1256,13 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     final localizations = MaterialLocalizations.of(context);
     final table = detection.candidates[_selectedRosterTable];
     if (selectedRow < 0 || selectedRow >= table.rows.length) return;
-    final ocrFormat = _sourceName?.toLowerCase().endsWith('.pdf') == true
+    final lowerSourceName = _sourceName?.toLowerCase() ?? '';
+    final importFormat = lowerSourceName.endsWith('.pdf')
         ? 'pdf-ocr'
+        : lowerSourceName.endsWith('.csv')
+        ? 'csv-roster-table'
+        : lowerSourceName.endsWith('.xlsx')
+        ? 'xlsx-roster-table'
         : 'image-ocr';
     try {
       final selection = const RosterGridSelectionResolver().resolve(
@@ -717,9 +1274,91 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       );
       final dates = selection.cells.map((cell) => cell.date).toList();
       final deviceZone = await ref.read(deviceTimeZoneIdProvider.future);
+      final rosterZone = _rosterTimeZoneId?.trim().isNotEmpty == true
+          ? _rosterTimeZoneId!.trim()
+          : deviceZone;
+      final zoneCheck = CivilTimeResolver().resolve(
+        CivilDate(firstDate.year, firstDate.month, firstDate.day),
+        12 * 60,
+        rosterZone,
+      );
+      if (zoneCheck.status == CivilTimeStatus.invalidTimeZone) {
+        throw const FormatException(
+          'Enter a recognized IANA time zone, such as America/Barbados.',
+        );
+      }
       final legends = await ref
           .read(workCodeLegendRepositoryProvider)
           .getItems();
+      final proposedDefinitions = <WorkCodeLegend>[];
+      final definitionConflicts = <WorkCodeLegend>[];
+      if (_rosterDatesConfirmed && dates.isNotEmpty) {
+        final orderedDates = [...dates]..sort((a, b) => a.compareTo(b));
+        final first = orderedDates.first;
+        final last = orderedDates.last;
+        final parsedByCode = <String, List<WorkCodeLegend>>{};
+        for (final parsed
+            in _rosterLegendDetection?.definitions ??
+                const <WorkCodeLegend>[]) {
+          parsedByCode
+              .putIfAbsent(parsed.code.trim().toUpperCase(), () => [])
+              .add(parsed);
+        }
+        for (final codeEntries in parsedByCode.values) {
+          if (codeEntries.length > 1) {
+            // Multiple incompatible definitions for one code cannot share
+            // an effective period. Leave them for manual review.
+            definitionConflicts.addAll(codeEntries);
+            continue;
+          }
+          final parsed = codeEntries.single;
+          final imported = parsed.copyWith(
+            effectiveStartDate: CivilDate(first.year, first.month, first.day),
+            effectiveEndDate: CivilDate(last.year, last.month, last.day),
+          );
+          final sameCode = legends.where(
+            (saved) =>
+                saved.code.trim().toUpperCase() ==
+                imported.code.trim().toUpperCase(),
+          );
+          final overlaps = sameCode
+              .where((saved) => saved.overlapsEffectivePeriod(imported))
+              .toList();
+          if (overlaps.isNotEmpty) {
+            final identical = overlaps.any(
+              (saved) =>
+                  _sameLegendWindows(saved.timeWindows, imported.timeWindows) &&
+                  saved.assignmentDetails.trim().toLowerCase() ==
+                      imported.assignmentDetails.trim().toLowerCase() &&
+                  _sameLegendFlights(saved.flightIds, imported.flightIds),
+            );
+            if (!identical) definitionConflicts.add(imported);
+            continue;
+          }
+          final idSeed = [
+            _sourceName ?? '',
+            imported.code,
+            imported.effectiveStartDate,
+            imported.effectiveEndDate,
+            imported.timeWindows,
+            imported.assignmentDetails,
+            imported.flightIds,
+          ].join('|');
+          proposedDefinitions.add(
+            WorkCodeLegend(
+              id: 'roster-legend-${sha256.convert(utf8.encode(idSeed))}',
+              employer: imported.employer,
+              code: imported.code,
+              assignmentDetails: imported.assignmentDetails,
+              flightIds: imported.flightIds,
+              timeWindows: imported.timeWindows,
+              effectiveStartDate: imported.effectiveStartDate,
+              effectiveEndDate: imported.effectiveEndDate,
+            ),
+          );
+        }
+      }
+      final legendsForDrafts = [...legends, ...proposedDefinitions];
       final existingItems = await ref
           .read(scheduleRepositoryProvider)
           .getItems();
@@ -774,7 +1413,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             codeMeaning: 'Day off',
             workCategory: WorkCategory.dayOff,
             importProvenance: ScheduleImportProvenance(
-              format: ocrFormat,
+              format: importFormat,
               uid: 'roster-cell-$key',
               sourceName: _sourceName ?? 'schedule.pdf',
               sourceText: sourceText,
@@ -803,8 +1442,15 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         }
         final matches = cell.needsReview
             ? const <WorkCodeLegend>[]
-            : legends.where((legend) {
-                return legend.code.trim().toUpperCase() == normalizedCell;
+            : legendsForDrafts.where((legend) {
+                return legend.code.trim().toUpperCase() == normalizedCell &&
+                    legend.appliesOn(
+                      CivilDate(
+                        dates[columnIndex].year,
+                        dates[columnIndex].month,
+                        dates[columnIndex].day,
+                      ),
+                    );
               }).toList();
         final legend =
             matches.length == 1 && matches.single.timeWindows.isNotEmpty
@@ -832,7 +1478,13 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           selectedRow: selectedRow,
           columnIndex: columnIndex,
           code: normalizedCell,
-          legends: legends,
+          date: CivilDate(
+            dates[columnIndex].year,
+            dates[columnIndex].month,
+            dates[columnIndex].day,
+          ),
+          legends: legendsForDrafts,
+          coworkerScope: _rosterCoworkerScope,
         );
         final key = sha256
             .convert(
@@ -841,9 +1493,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
               ),
             )
             .toString();
-        final title = legend.assignmentDetails.trim().isEmpty
-            ? '${legend.employer.isEmpty ? '' : '${legend.employer} · '}${legend.code}'
-            : '${legend.employer.isEmpty ? '' : '${legend.employer} · '}${legend.assignmentDetails}';
+        final title = _rosterEventTitle(legend);
         final item = ScheduleItem(
           id: 'roster-ocr-$key',
           kind: ScheduleKind.work,
@@ -854,14 +1504,14 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             dates[columnIndex].day,
           ),
           intervals: intervals,
-          timeZoneId: deviceZone,
+          timeZoneId: rosterZone,
           code: legend.code,
           codeMeaning: legend.assignmentDetails,
           coworkers: coworkers,
           employerName: legend.employer,
           workCategory: WorkCategory.shift,
           importProvenance: ScheduleImportProvenance(
-            format: ocrFormat,
+            format: importFormat,
             uid: 'roster-cell-$key',
             sourceName: _sourceName ?? 'schedule.pdf',
             sourceText: sourceText,
@@ -910,17 +1560,19 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         if (_appendIncoming) _sourceType = ScheduleImportSourceType.batch;
         _appendIncoming = false;
         _unresolvedRosterCells = unresolved;
+        _rosterLegendProposals = proposedDefinitions;
+        _rosterLegendConflicts = definitionConflicts;
+        _selectedRosterLegendIds = proposedDefinitions
+            .where(_rosterLegendParser.isSafeToPreselect)
+            .map((entry) => entry.id)
+            .toSet();
         _notices = [
           ScheduleImportNotice(
             'Drafts use only the selected staff row and confirmed date columns. Unmatched or ambiguous cells are kept for manual review and never converted into shifts.',
           ),
-          if (_batchSourceCount(_rows) > 1)
-            ScheduleImportNotice(
-              'The files are staged together. Selected changes are saved in one reviewed import.',
-            ),
           if (duplicates.isNotEmpty)
             ScheduleImportNotice(
-              'Matching date, code and time entries from multiple roster files start unchecked. Review the row details and select only the correct version.',
+              'Matching date and code entries from multiple roster files start unchecked, even if the times differ. Review the row details and select only the correct version.',
             ),
         ];
         _error = proposals.isEmpty && unresolved.isEmpty
@@ -943,6 +1595,34 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     'DO',
   }.contains(raw.trim().toUpperCase());
 
+  String _formatLegendWindow(BuildContext context, WorkCodeTimeWindow window) {
+    final start = TimeOfDay(
+      hour: window.startMinute ~/ 60,
+      minute: window.startMinute % 60,
+    ).format(context);
+    final end = TimeOfDay(
+      hour: window.endMinute ~/ 60,
+      minute: window.endMinute % 60,
+    ).format(context);
+    return '$start–$end${window.endDayOffset > 0 ? ' (+1 day)' : ''}';
+  }
+
+  bool _sameLegendWindows(
+    List<WorkCodeTimeWindow> left,
+    List<WorkCodeTimeWindow> right,
+  ) =>
+      left.length == right.length &&
+      List.generate(
+        left.length,
+        (index) => index,
+      ).every((index) => left[index] == right[index]);
+
+  bool _sameLegendFlights(List<String> left, List<String> right) =>
+      left.length == right.length &&
+      List.generate(left.length, (index) => index).every(
+        (index) => left[index].toUpperCase() == right[index].toUpperCase(),
+      );
+
   bool _isImportedWorkRow(_ImportRow row) {
     final item = row.proposal.item;
     final sourceName = row.effectiveSourceName?.trim() ?? '';
@@ -959,20 +1639,19 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     if (_batchSourceCount(rows) < 2) return const {};
     for (var index = 0; index < rows.length; index++) {
       final row = rows[index];
-      if (!_isImportedWorkRow(row)) continue;
+      if (!_isImportedWorkRow(row) || row.coworkerOnly) continue;
       final item = row.proposal.item;
       final codeKey = item.workCategory == WorkCategory.dayOff
           ? 'day-off'
           : item.code?.trim().toUpperCase() ?? '';
       if (codeKey.isEmpty) continue;
-      final intervalKey = item.intervals
-          .map(
-            (interval) =>
-                '${interval.startDayOffset}:${interval.startMinute}-'
-                '${interval.endDayOffset}:${interval.endMinute}',
-          )
-          .join(',');
-      final key = '${item.startDate}|$codeKey|$intervalKey';
+      final employerKey = item.employerName?.trim().toUpperCase() ?? '';
+      // Revised rosters can change a shift's hours while retaining its date
+      // and code. Treat that as a version conflict too, and let the owner
+      // choose which row to keep instead of silently importing both shifts.
+      // Keep different employers and work categories independent.
+      final key =
+          '${item.startDate}|$employerKey|${item.workCategory}|$codeKey';
       grouped.putIfAbsent(key, () => []).add(index);
     }
     return {
@@ -993,6 +1672,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     required Set<String> matchedOcrIds,
     bool rosterProposal = false,
     Map<String, WorkOccurrenceCoworkers> occurrenceCoworkersByKey = const {},
+    String? sourceName,
   }) {
     final exactIdMatch = byId[proposal.item.id];
     final match = exactIdMatch == null
@@ -1048,7 +1728,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       ambiguousMatch: match.ambiguous,
       coworkerOnly: coworkerOnly,
       rosterOccurrenceDate: rosterOccurrenceDate,
-      sourceName: proposal.item.importProvenance?.sourceName,
+      sourceName: sourceName ?? proposal.item.importProvenance?.sourceName,
     );
   }
 
@@ -1118,27 +1798,38 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   }
 
   bool _sameRosterShift(ScheduleItem saved, ScheduleItem proposed) {
-    String normalize(String? value) =>
-        value?.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase() ?? '';
+    return _matchesRosterIdentity(
+      saved,
+      CoworkerRosterAssignment(
+        date: proposed.startDate,
+        code: proposed.code ?? '',
+        employer: proposed.employerName,
+        coworkers: proposed.coworkers,
+        sourceRows: const [],
+      ),
+    );
+  }
 
-    final savedEmployer = normalize(saved.employerName);
-    final proposedEmployer = normalize(proposed.employerName);
+  bool _matchesRosterIdentity(
+    ScheduleItem saved,
+    CoworkerRosterAssignment assignment,
+  ) {
+    String normalizeEmployer(String? value) =>
+        value?.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase() ?? '';
+    String normalizeCode(String? value) =>
+        value?.replaceAll(RegExp(r'\s+'), '').toUpperCase() ?? '';
+
+    final savedEmployer = normalizeEmployer(saved.employerName);
+    final proposedEmployer = normalizeEmployer(assignment.employer);
     return saved.kind == ScheduleKind.work &&
-        proposed.kind == ScheduleKind.work &&
         saved.workCategory == WorkCategory.shift &&
-        proposed.workCategory == WorkCategory.shift &&
-        _occursOn(saved, proposed.startDate) &&
-        normalize(saved.code).isNotEmpty &&
-        normalize(saved.code) == normalize(proposed.code) &&
+        !saved.hasNoTime &&
+        _occursOn(saved, assignment.date) &&
+        normalizeCode(saved.code).isNotEmpty &&
+        normalizeCode(saved.code) == normalizeCode(assignment.code) &&
         (savedEmployer.isEmpty ||
             proposedEmployer.isEmpty ||
-            savedEmployer == proposedEmployer) &&
-        saved.timeZoneId == proposed.timeZoneId &&
-        saved.intervals.length == proposed.intervals.length &&
-        List.generate(
-          saved.intervals.length,
-          (index) => saved.intervals[index] == proposed.intervals[index],
-        ).every((matches) => matches);
+            savedEmployer == proposedEmployer);
   }
 
   ScheduleItem _withItemId(ScheduleItem item, String id) => ScheduleItem(
@@ -1205,7 +1896,18 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     final selected = _rows
         .where((row) => row.included && !row.ambiguousMatch)
         .toList();
-    if (selected.isEmpty) {
+    final selectedCodeDefinitions = _rosterLegendProposals
+        .where((entry) => _selectedRosterLegendIds.contains(entry.id))
+        .toList(growable: false);
+    final selectedSupervisors = [
+      ..._supervisorProposals.where(
+        (profile) => _selectedSupervisorIds.contains(profile.id),
+      ),
+      ..._selectedManualRosterSupervisors(),
+    ];
+    if (selected.isEmpty &&
+        selectedCodeDefinitions.isEmpty &&
+        selectedSupervisors.isEmpty) {
       setState(() => _error = 'Select at least one change to apply.');
       return;
     }
@@ -1287,6 +1989,17 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           .toList(growable: false);
       final coworkerEntriesUpdated =
           coworkerUpdates.length + occurrenceCoworkerUpdates.length;
+      final savedSupervisorNames = {
+        for (final profile
+            in await ref.read(supervisorRepositoryProvider).getItems())
+          _normalizeStaffName(profile.name),
+      };
+      final supervisorsToSave = selectedSupervisors
+          .where(
+            (profile) =>
+                savedSupervisorNames.add(_normalizeStaffName(profile.name)),
+          )
+          .toList(growable: false);
       final result = await ref
           .read(scheduleRepositoryProvider)
           .applyRosterImport(
@@ -1296,11 +2009,17 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             ],
             coworkerUpdates: coworkerUpdates,
             occurrenceCoworkerUpdates: occurrenceCoworkerUpdates,
+            codeDefinitions: selectedCodeDefinitions,
+            supervisorProfiles: supervisorsToSave,
             replaceExisting: _replaceMatches,
             historyDraft: ScheduleImportHistoryDraft(
               sourceType: sourceType,
               parserVersion: sourceType.parserVersion,
-              proposedCount: _rows.length,
+              proposedCount:
+                  _rows.length +
+                  _rosterLegendProposals.length +
+                  _supervisorProposals.length +
+                  _manualRosterSupervisorProfiles.length,
               rejectedCount: rejectedCount,
               skippedCount: skippedDuplicateCount,
               warningsCount: _notices.length,
@@ -1309,12 +2028,13 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           );
       ref.invalidate(scheduleItemsProvider);
       ref.invalidate(workOccurrenceCoworkersProvider);
+      ref.invalidate(supervisorProfilesProvider);
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Added ${result.inserted}, replaced ${result.replaced}, skipped ${result.skipped}.${coworkerEntriesUpdated == 0 ? '' : ' Updated coworkers for $coworkerEntriesUpdated ${coworkerEntriesUpdated == 1 ? 'saved shift entry' : 'saved shift entries'}.'}',
+              'Added ${result.inserted}, replaced ${result.replaced}, skipped ${result.skipped}.${selectedCodeDefinitions.isEmpty ? '' : ' Added ${selectedCodeDefinitions.length} shift-code definitions.'}${result.supervisorsAdded == 0 ? '' : ' Added ${result.supervisorsAdded} supervisor ${result.supervisorsAdded == 1 ? 'profile' : 'profiles'}.'}${coworkerEntriesUpdated == 0 ? '' : ' Updated coworkers for $coworkerEntriesUpdated ${coworkerEntriesUpdated == 1 ? 'saved shift entry' : 'saved shift entries'}.'}',
             ),
           ),
         );
@@ -1327,9 +2047,16 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   }
 
   String _detectedImportType() {
+    if (_sourceType == ScheduleImportSourceType.batch) {
+      return 'Multiple timetable files';
+    }
+    if (_rows.isEmpty && _supervisorProposals.isNotEmpty) {
+      return 'Supervisor roster';
+    }
     if (_rosterDetection?.candidates.isNotEmpty == true) {
       return 'Employee roster';
     }
+    if (_coworkerRosterDetected) return 'Employee roster';
     return switch (_sourceType) {
       ScheduleImportSourceType.ics => 'ICS calendar',
       ScheduleImportSourceType.csv => 'CSV schedule or roster',
@@ -1344,23 +2071,31 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
 
   String _importDestination() {
     final destinations = <String>{};
+    if (_rosterLegendProposals.any(
+      (entry) => _selectedRosterLegendIds.contains(entry.id),
+    )) {
+      destinations.add('Shift Legend · Codes');
+    }
+    if (_supervisorProposals.any(
+      (profile) => _selectedSupervisorIds.contains(profile.id),
+    )) {
+      destinations.add('Shift Legend · Supervisors');
+    }
     for (final row in _rows) {
       if (row.coworkerOnly) {
         destinations.add('Shift Legend · Coworkers');
         continue;
       }
       final item = row.proposal.item;
-      destinations.add(
-        switch (item.kind) {
-          ScheduleKind.work => 'My Work Schedule',
-          ScheduleKind.classSession => 'Classes',
-          ScheduleKind.deadline =>
-            item.deadlineType == DeadlineType.examination
-                ? 'Exams'
-                : 'Assignments',
-          ScheduleKind.personal => 'Calendar',
-        },
-      );
+      destinations.add(switch (item.kind) {
+        ScheduleKind.work => 'My Work Schedule',
+        ScheduleKind.classSession => 'Classes',
+        ScheduleKind.deadline =>
+          item.deadlineType == DeadlineType.examination
+              ? 'Exams'
+              : 'Assignments',
+        ScheduleKind.personal => 'Calendar',
+      });
     }
     return destinations.join(' · ');
   }
@@ -1370,6 +2105,15 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
     final newEntries = _rows
         .where((row) => row.existing == null && !row.ambiguousMatch)
         .length;
+    final selectedSupervisors =
+        _supervisorProposals
+            .where((profile) => _selectedSupervisorIds.contains(profile.id))
+            .length +
+        _manualRosterSupervisorProfiles.length;
+    if (selectedSupervisors > 0 && newEntries == 0 && coworkerUpdates == 0) {
+      return 'Add reviewed supervisor profiles';
+    }
+    if (selectedSupervisors > 0) return 'Add schedule and supervisor details';
     if (coworkerUpdates > 0 && newEntries > 0) {
       return 'Add new entries and update matched coworkers';
     }
@@ -1382,18 +2126,37 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
 
   @override
   Widget build(BuildContext context) {
+    final availableRosterStaffNames = _availableRosterStaffNames();
+    final manualSupervisorProfiles = _selectedManualRosterSupervisors();
     final duplicateCount = _rows
         .where((row) => row.included && row.existing != null)
         .length;
     final selectedCount = _rows
         .where((row) => row.included && !row.ambiguousMatch)
         .length;
+    final selectedCodeCount = _rosterLegendProposals
+        .where((entry) => _selectedRosterLegendIds.contains(entry.id))
+        .length;
+    final selectedSupervisorCount =
+        _supervisorProposals
+            .where((profile) => _selectedSupervisorIds.contains(profile.id))
+            .length +
+        manualSupervisorProfiles.length;
+    final hasAmbiguousOcrTime = _rosterLegendProposals.any(
+      (entry) => !_rosterLegendParser.isSafeToPreselect(entry),
+    );
+    final selectedChangeCount =
+        selectedCount + selectedCodeCount + selectedSupervisorCount;
     final rosterBatchCount = _batchSourceCount(_rows);
     final hasCoworkerUpdates = _rows.any((row) => row.coworkerOnly);
     final reviewHeading = _pendingTableName != null
         ? 'Match your roster columns'
         : _rosterDetection != null
         ? 'Review detected roster'
+        : _coworkerRosterDetected
+        ? 'Review coworker matches'
+        : _rows.isEmpty && _supervisorProposals.isNotEmpty
+        ? 'Review supervisor profiles'
         : _rows.isEmpty
         ? 'Choose a file to get started'
         : 'Review before adding';
@@ -1414,6 +2177,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
       ),
       body: SafeArea(
         child: ListView(
+          key: const ValueKey('smart-import-list'),
           padding: const EdgeInsets.fromLTRB(
             StudyShiftSpacing.pageMargin,
             12,
@@ -1433,7 +2197,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Choose one supported file. StudyShift reads rows, columns, dates, times, codes, and names where available. Nothing is saved until you review and confirm.',
+              'Choose a supported file. Add other timetable files to the same review when needed. StudyShift reads rows, columns, dates, times, codes, and names where available. Nothing is saved until you review and confirm.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             Card(
@@ -1445,15 +2209,22 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Required fields: date, title and category. Timed events also need start, end and a time_zone value to preserve the event clock time correctly. Use YYYY-MM-DD dates, 24-hour HH:mm times, and an IANA time zone such as America/Barbados. Optional fields: end_date, source_id, employer, department, job_role, code, code_meaning, coworkers, reporting_instruction, location, notes, supervisor_name, supervisor_phone, contact_name and contact_phone. Put coworker names in coworkers separated by semicolons. These are the StudyShift field names available in the column-matching step. Use end_date for overnight events; for a split shift, use one row per shift interval and the same source_id so the intervals stay together. Excel imports read visible worksheets; formulas, hidden rows and hidden worksheets are refused. Categories: shift, overtime, training, class, examination, assignment, rest_day, leave, day_off or personal. Review every proposed event before saving.',
+                      'Required fields: date, title and category. Timed events also need start, end and a time_zone value to preserve the event clock correctly. Use YYYY-MM-DD dates, 24-hour HH:mm times, and an IANA zone such as America/Barbados. Optional fields: end_date, source_id, employer, department, job_role, code, code_meaning, coworkers, coworker_codes, reporting_instruction, location, notes, supervisor_name, supervisor_phone, contact_name and contact_phone. Separate coworker names with semicolons; for work rows, coworker_codes must list one roster code per name in the same order. Names with a different code are excluded, and names without verifiable codes are not attached. Use end_date for overnight events; for a split shift, use one row per interval and the same source_id. Excel imports read visible worksheets; formulas, hidden rows and hidden worksheets are refused. Categories: shift, overtime, training, class, examination, assignment, rest_day, leave, day_off or personal. Review every proposed event before saving.',
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'For a coworker-only roster table, add a coworker_codes column with one code per name in the same semicolon-separated order. Names with a different code are excluded. Without individual codes, the update stays unchecked until you verify it.',
                     ),
                   ),
                   const SizedBox(height: 12),
                   SelectableText(
-                    'source_id,date,end_date,title,category,start,end,time_zone,employer,department,job_role,code,code_meaning,coworkers,reporting_instruction,location,notes,supervisor_name,supervisor_phone,contact_name,contact_phone\n'
-                     'SYNTH-001,2026-11-07,2026-11-08,Sample overnight shift,shift,21:00,05:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,S1,Confirmed sample meaning,Synthetic coworker,Sample reporting text,Sample location,,,,,\n'
-                     'SYNTH-002,2026-11-08,2026-11-08,Sample split shift,shift,06:00,09:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,A1,Sample duties,Synthetic coworker,Sample reporting text,Sample location,,Synthetic supervisor,+1 246 555 0100,Synthetic contact,+1 246 555 0101\n'
-                     'SYNTH-002,2026-11-08,2026-11-08,Sample split shift,shift,12:00,16:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,A1,Sample duties,Synthetic coworker,Sample reporting text,Sample location,,Synthetic supervisor,+1 246 555 0100,Synthetic contact,+1 246 555 0101',
+                    'source_id,date,end_date,title,category,start,end,time_zone,employer,department,job_role,code,code_meaning,coworkers,coworker_codes,reporting_instruction,location,notes,supervisor_name,supervisor_phone,contact_name,contact_phone\n'
+                    'SYNTH-001,2026-11-07,2026-11-08,Sample overnight shift,shift,21:00,05:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,S1,Confirmed sample meaning,Synthetic coworker,S1,Sample reporting text,Sample location,,,,,\n'
+                    'SYNTH-002,2026-11-08,2026-11-08,Sample split shift,shift,06:00,09:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,A1,Sample duties,Synthetic coworker,A1,Sample reporting text,Sample location,,Synthetic supervisor,+1 246 555 0100,Synthetic contact,+1 246 555 0101\n'
+                    'SYNTH-002,2026-11-08,2026-11-08,Sample split shift,shift,12:00,16:00,America/Barbados,Synthetic employer,Synthetic department,Synthetic role,A1,Sample duties,Synthetic coworker,A1,Sample reporting text,Sample location,,Synthetic supervisor,+1 246 555 0100,Synthetic contact,+1 246 555 0101',
                     style: Theme.of(context).textTheme.bodySmall
                         ?.copyWith(fontFamily: 'monospace'),
                   ),
@@ -1462,6 +2233,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
+              key: const ValueKey('smart-import-choose-file'),
               onPressed: _loading || _saving ? null : _selectFile,
               icon: _loading
                   ? const SizedBox.square(
@@ -1474,7 +2246,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                'Supported files: ICS, PDF, images, CSV and Excel. Dates or roster layouts that cannot be identified confidently are flagged for review instead of guessed.',
+                'Supported files: ICS, PDF, images, CSV and Excel (.xlsx). Dates or roster layouts that cannot be identified confidently are flagged for review instead of guessed.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
@@ -1489,7 +2261,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 message: 'Source: $_sourceName',
               ),
             ],
-            if (_rows.isNotEmpty) ...[
+            if (_rows.isNotEmpty || _supervisorProposals.isNotEmpty) ...[
               const SizedBox(height: 8),
               Card(
                 child: Padding(
@@ -1524,6 +2296,234 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 when detection.candidates.isNotEmpty) ...[
               const SizedBox(height: 12),
               _buildRosterGridSetup(detection),
+            ],
+            if (_rosterLegendProposals.isNotEmpty ||
+                _rosterLegendConflicts.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(StudyShiftSpacing.x3),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Shift code definitions · ${_rosterLegendProposals.length}',
+                        style: Theme.of(context).textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Review these roster references. They are saved only when you apply the reviewed import.',
+                      ),
+                      if (hasAmbiguousOcrTime) ...[
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Some code definitions have ambiguous OCR time text and start unchecked. Verify them against the document before selecting.',
+                        ),
+                      ],
+                      for (final definition in _rosterLegendProposals)
+                        CheckboxListTile(
+                          key: ValueKey('roster-legend-${definition.id}'),
+                          contentPadding: EdgeInsets.zero,
+                          value: _selectedRosterLegendIds.contains(
+                            definition.id,
+                          ),
+                          onChanged: _saving || _loading
+                              ? null
+                              : (selected) => setState(() {
+                                  final ids = {..._selectedRosterLegendIds};
+                                  if (selected == true) {
+                                    ids.add(definition.id);
+                                  } else {
+                                    ids.remove(definition.id);
+                                  }
+                                  _selectedRosterLegendIds = ids;
+                                }),
+                          title: Text(
+                            '${definition.code} · ${definition.timeWindows.map((window) => _formatLegendWindow(context, window)).join(' / ')}',
+                          ),
+                          subtitle: Text(
+                            [
+                              if (definition.assignmentDetails.isNotEmpty)
+                                definition.assignmentDetails,
+                              if (definition.flightIds.isNotEmpty)
+                                'Possible flights: ${definition.flightIds.join(', ')}',
+                              'Applies ${definition.effectiveStartDate} – ${definition.effectiveEndDate}',
+                            ].join('\n'),
+                          ),
+                          secondary: IconButton(
+                            tooltip: 'Review or correct ${definition.code}',
+                            onPressed: _saving || _loading
+                                ? null
+                                : () => _reviewRosterLegend(definition),
+                            icon: const Icon(Icons.edit_outlined),
+                          ),
+                        ),
+                      if (_rosterLegendConflicts.isNotEmpty) ...[
+                        const Divider(),
+                        Text(
+                          '${_rosterLegendConflicts.length} code definition${_rosterLegendConflicts.length == 1 ? '' : 's'} not added because a saved code overlaps the roster dates. Existing legend data was preserved.',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+            if (_rosterDetection != null) ...[
+              const SizedBox(height: 12),
+              Card(
+                child: ExpansionTile(
+                  key: const ValueKey('roster-supervisor-role-review'),
+                  leading: const Icon(Icons.badge_outlined),
+                  title: const Text('Assign supervisor roles from this roster'),
+                  subtitle: Text(
+                    '${availableRosterStaffNames.length} staff names available · no roles inferred',
+                  ),
+                  childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  children: [
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'This roster does not identify every supervisor. Choose a name and role only when you can confirm it; profiles are saved after Apply.',
+                      ),
+                    ),
+                    if (availableRosterStaffNames.isEmpty &&
+                        manualSupervisorProfiles.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'No unassigned staff names are available.',
+                          ),
+                        ),
+                      ),
+                    if (availableRosterStaffNames.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        key: const ValueKey('roster-supervisor-staff'),
+                        initialValue: _selectedRosterSupervisorName,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Staff name',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: [
+                          for (final name in availableRosterStaffNames)
+                            DropdownMenuItem(value: name, child: Text(name)),
+                        ],
+                        onChanged: (value) => setState(() {
+                          _selectedRosterSupervisorName = value;
+                          _selectedRosterSupervisorType = null;
+                        }),
+                      ),
+                      const SizedBox(height: 8),
+                      DropdownButtonFormField<SupervisorType>(
+                        key: const ValueKey('roster-supervisor-role'),
+                        initialValue: _selectedRosterSupervisorType,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Confirmed supervisor role',
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: SupervisorType.permanent,
+                            child: Text('Permanent supervisor'),
+                          ),
+                          DropdownMenuItem(
+                            value: SupervisorType.acting,
+                            child: Text('Acting supervisor'),
+                          ),
+                        ],
+                        onChanged: (value) => setState(
+                          () => _selectedRosterSupervisorType = value,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          key: const ValueKey('add-roster-supervisor'),
+                          onPressed:
+                              _selectedRosterSupervisorName == null ||
+                                  _selectedRosterSupervisorType == null
+                              ? null
+                              : _addRosterSupervisor,
+                          icon: const Icon(Icons.person_add_alt_1_outlined),
+                          label: const Text('Add supervisor profile'),
+                        ),
+                      ),
+                    ],
+                    for (final profile in manualSupervisorProfiles)
+                      ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(profile.name),
+                        subtitle: Text(
+                          profile.type == SupervisorType.permanent
+                              ? 'Permanent supervisor · manually confirmed'
+                              : 'Acting supervisor · manually confirmed',
+                        ),
+                        trailing: IconButton(
+                          tooltip: 'Remove ${profile.name}',
+                          onPressed: _saving || _loading
+                              ? null
+                              : () => _removeRosterSupervisor(
+                                  _normalizeStaffName(profile.name),
+                                ),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+            if (_supervisorProposals.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(StudyShiftSpacing.x3),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Supervisor profiles · ${_supervisorProposals.length}',
+                        style: Theme.of(context).textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Only names under explicit supervisor headings are suggested. Review before adding them to Shift Legend.',
+                      ),
+                      for (final profile in _supervisorProposals)
+                        CheckboxListTile(
+                          key: ValueKey('supervisor-profile-${profile.id}'),
+                          contentPadding: EdgeInsets.zero,
+                          value: _selectedSupervisorIds.contains(profile.id),
+                          onChanged: _saving || _loading
+                              ? null
+                              : (selected) => setState(() {
+                                  final ids = {..._selectedSupervisorIds};
+                                  if (selected == true) {
+                                    ids.add(profile.id);
+                                  } else {
+                                    ids.remove(profile.id);
+                                  }
+                                  _selectedSupervisorIds = ids;
+                                }),
+                          title: Text(profile.name),
+                          subtitle: Text(
+                            profile.type == SupervisorType.permanent
+                                ? 'Permanent supervisor'
+                                : 'Acting supervisor',
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
             ],
             if (_recognizedText != null) ...[
               const SizedBox(height: 8),
@@ -1655,7 +2655,10 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
           ],
         ),
       ),
-      bottomNavigationBar: _rows.isEmpty
+      bottomNavigationBar:
+          _rows.isEmpty &&
+              selectedCodeCount == 0 &&
+              selectedSupervisorCount == 0
           ? null
           : SafeArea(
               top: false,
@@ -1679,8 +2682,10 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                         ? hasCoworkerUpdates
                               ? 'Applying changes…'
                               : 'Adding events…'
-                        : hasCoworkerUpdates
-                        ? 'Apply $selectedCount selected'
+                        : hasCoworkerUpdates ||
+                              selectedCodeCount > 0 ||
+                              selectedSupervisorCount > 0
+                        ? 'Apply $selectedChangeCount selected'
                         : 'Add $selectedCount selected',
                   ),
                 ),
@@ -1759,6 +2764,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
   }
 
   Widget _buildRosterGridSetup(RosterGridDetection detection) {
+    final deviceZone = ref.watch(deviceTimeZoneIdProvider).asData?.value;
     final selectedTable = detection.candidates[_selectedRosterTable];
     final dateLabel = _rosterFirstDate == null
         ? 'Choose first date'
@@ -1778,6 +2784,16 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
         dateMappingError = error.message;
       }
     }
+    final columnCorrectionDates = mappedDates.isNotEmpty
+        ? mappedDates
+        : dateMappingError != null && _rosterFirstDate != null
+        ? List.generate(
+            selectedTable.columns.length,
+            (index) =>
+                _rosterDateOverrides[index] ??
+                _rosterFirstDate!.add(Duration(days: index)),
+          )
+        : const <DateTime>[];
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(StudyShiftSpacing.x3),
@@ -1832,6 +2848,7 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
             ],
             const SizedBox(height: 12),
             OutlinedButton.icon(
+              key: const ValueKey('roster-first-date'),
               onPressed: _loading || _saving ? null : _chooseRosterFirstDate,
               icon: const Icon(Icons.calendar_month_outlined),
               label: Text('First roster date · $dateLabel'),
@@ -1842,10 +2859,13 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 dateMappingError,
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
-            ] else if (mappedDates.isNotEmpty) ...[
+            ],
+            if (columnCorrectionDates.isNotEmpty) ...[
               const SizedBox(height: 8),
               Text(
-                'Detected dates · tap any date to correct it, then confirm the full sequence',
+                dateMappingError == null
+                    ? 'Detected dates · tap any date to correct it, then confirm the full sequence'
+                    : 'Date sequence needs correction · choose the correct date for each affected column',
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 4),
@@ -1853,7 +2873,11 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                 spacing: 4,
                 runSpacing: 0,
                 children: [
-                  for (var index = 0; index < mappedDates.length; index++)
+                  for (
+                    var index = 0;
+                    index < columnCorrectionDates.length;
+                    index++
+                  )
                     ActionChip(
                       key: ValueKey('roster-date-column-$index'),
                       visualDensity: VisualDensity.compact,
@@ -1864,60 +2888,120 @@ class _ScheduleImportPageState extends ConsumerState<ScheduleImportPage> {
                         size: 16,
                       ),
                       label: Text(
-                        localizations.formatMediumDate(mappedDates[index]),
+                        dateMappingError == null
+                            ? localizations.formatMediumDate(
+                                columnCorrectionDates[index],
+                              )
+                            : _rosterDateOverrides.containsKey(index)
+                            ? 'Column ${index + 1} · ${localizations.formatMediumDate(columnCorrectionDates[index])}'
+                            : 'Column ${index + 1} · day ${selectedTable.columns[index].dayNumber}',
                       ),
                       onPressed: _loading || _saving
                           ? null
                           : () => _chooseRosterColumnDate(
                               index,
-                              mappedDates[index],
+                              columnCorrectionDates[index],
                             ),
                     ),
                 ],
               ),
-              const SizedBox(height: 8),
-              FilledButton.tonalIcon(
-                key: const ValueKey('confirm-roster-dates'),
-                onPressed: _loading || _saving || _rosterDatesConfirmed
-                    ? null
-                    : () => setState(() => _rosterDatesConfirmed = true),
-                icon: Icon(
-                  _rosterDatesConfirmed
-                      ? Icons.check_circle_outline
-                      : Icons.fact_check_outlined,
+              if (dateMappingError == null) ...[
+                const SizedBox(height: 8),
+                FilledButton.tonalIcon(
+                  key: const ValueKey('confirm-roster-dates'),
+                  onPressed: _loading || _saving || _rosterDatesConfirmed
+                      ? null
+                      : () => setState(() => _rosterDatesConfirmed = true),
+                  icon: Icon(
+                    _rosterDatesConfirmed
+                        ? Icons.check_circle_outline
+                        : Icons.fact_check_outlined,
+                  ),
+                  label: Text(
+                    _rosterDatesConfirmed
+                        ? 'Dates confirmed'
+                        : 'Confirm roster dates',
+                  ),
                 ),
-                label: Text(
-                  _rosterDatesConfirmed
-                      ? 'Dates confirmed'
-                      : 'Confirm roster dates',
+              ],
+            ],
+            if (deviceZone != null) ...[
+              const SizedBox(height: 12),
+              KeyedSubtree(
+                key: ValueKey('roster-time-zone-$_rosterTimeZoneRevision'),
+                child: TextFormField(
+                  key: const ValueKey('roster-time-zone'),
+                  initialValue: _rosterTimeZoneId ?? deviceZone,
+                  keyboardType: TextInputType.text,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: InputDecoration(
+                    labelText: 'Roster time zone',
+                    hintText: 'America/Barbados',
+                    helperText:
+                        'Default: $deviceZone. Confirm the zone used by the roster.',
+                    border: const OutlineInputBorder(),
+                  ),
+                  onChanged: (value) => _rosterTimeZoneId = value,
                 ),
               ),
             ],
             const SizedBox(height: 12),
-            DropdownButtonFormField<int>(
-              key: ValueKey('roster-staff-row-$_selectedRosterTable'),
-              initialValue: _selectedRosterRow,
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                key: ValueKey('roster-staff-row-$_selectedRosterTable'),
+                onPressed: _loading || _saving
+                    ? null
+                    : () => _chooseRosterStaffRow(selectedTable),
+                icon: const Icon(Icons.person_search_outlined),
+                label: SizedBox(
+                  width: double.infinity,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _selectedRosterRow == null
+                            ? 'Select your name in the roster'
+                            : selectedTable.rows[_selectedRosterRow!].label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        _selectedRosterRow == null
+                            ? 'Search and choose one staff row'
+                            : 'Tap to change your row',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<RosterCoworkerScope>(
+              key: const ValueKey('roster-coworker-scope'),
+              initialValue: _rosterCoworkerScope,
               isExpanded: true,
               decoration: const InputDecoration(
-                labelText: 'Your staff row',
+                labelText: 'Coworkers to include',
                 border: OutlineInputBorder(),
-                helperText: 'Names are read from the selected document and stay in this review.',
-                helperMaxLines: 2,
+                helperText: 'Choose how coworkers are matched to your shift.',
               ),
-              items: [
-                for (var index = 0; index < selectedTable.rows.length; index++)
-                  DropdownMenuItem(
-                    value: index,
-                    child: Text(
-                      selectedTable.rows[index].label,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
+              items: const [
+                DropdownMenuItem(
+                  value: RosterCoworkerScope.sameRosterCode,
+                  child: Text('Same roster code'),
+                ),
+                DropdownMenuItem(
+                  value: RosterCoworkerScope.overlappingShiftTimes,
+                  child: Text('Overlapping shift times'),
+                ),
               ],
               onChanged: (value) => setState(() {
-                _selectedRosterRow = value;
-                if (!_appendIncoming) _rows = const [];
-                _unresolvedRosterCells = const [];
+                _rosterCoworkerScope =
+                    value ?? RosterCoworkerScope.sameRosterCode;
               }),
             ),
             const SizedBox(height: 10),
@@ -2015,6 +3099,17 @@ class _ProposalCard extends StatelessWidget {
     final changedFields = existing == null
         ? const <String>[]
         : _importedScheduleChanges(existing, item);
+    final coworkersToAdd = row.coworkerOnly && existing != null
+        ? item.coworkers
+              .where(
+                (name) => !existing.coworkers.any(
+                  (saved) =>
+                      saved.trim().toLowerCase() == name.trim().toLowerCase(),
+                ),
+              )
+              .toSet()
+              .toList(growable: false)
+        : const <String>[];
     return Card(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(8, 8, 12, 12),
@@ -2077,8 +3172,31 @@ class _ProposalCard extends StatelessWidget {
             if (row.coworkerOnly && existing != null)
               Padding(
                 padding: const EdgeInsets.only(left: 44, bottom: 4),
-                child: Text(
-                  'Coworkers to add: ${item.coworkers.where((name) => !existing.coworkers.any((saved) => saved.trim().toLowerCase() == name.trim().toLowerCase())).join(', ')}. Saved shift details stay unchanged.',
+                child: ExpansionTile(
+                  key: ValueKey('import-coworkers-${item.id}'),
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: const EdgeInsets.only(
+                    left: 8,
+                    right: 8,
+                    bottom: 8,
+                  ),
+                  title: Text(
+                    '${coworkersToAdd.length} ${coworkersToAdd.length == 1 ? 'coworker' : 'coworkers'} to add',
+                  ),
+                  subtitle: const Text('Saved shift details stay unchanged.'),
+                  children: [
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        children: [
+                          for (final name in coworkersToAdd)
+                            Chip(label: Text(name)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               )
             else if (existing != null)
@@ -2221,9 +3339,8 @@ class _ImportSummaryLine extends StatelessWidget {
           width: 104,
           child: Text(
             label,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(fontWeight: FontWeight.w600),
           ),
         ),
         Expanded(child: Text(value)),

@@ -5,6 +5,7 @@ import 'package:timezone/data/latest.dart' as tzdata;
 
 import '../domain/civil_time_resolver.dart';
 import '../domain/schedule.dart';
+import 'roster_grid_import.dart';
 import 'schedule_import_models.dart';
 
 /// Imports the documented Shift & Study CSV v1 format. Unknown fields and
@@ -16,6 +17,33 @@ class CsvScheduleImportParser {
   static const maxRows = 500;
   static final _sha256 = Sha256();
   static bool _timeZonesInitialized = false;
+
+  /// Detects date-across-columns rosters using the same offline table parser
+  /// as scanned roster documents. Empty detection means normal row parsing
+  /// should continue.
+  RosterGridDetection detectRosterGrid(String source) {
+    if (utf8.encode(source).length > maxBytes) {
+      throw const FormatException('This CSV file is too large.');
+    }
+    if (source.trim().isEmpty) {
+      throw const FormatException('The selected CSV file is empty.');
+    }
+    final records = _parseRecords(source);
+    if (records.length > maxRows + 1) {
+      throw const FormatException(
+        'This CSV file has too many rows to review at once.',
+      );
+    }
+    final rows = records.map((record) => record.fields).toList();
+    final columns = rows.fold<int>(
+      0,
+      (maximum, row) => row.length > maximum ? row.length : maximum,
+    );
+    if (columns < 4 || columns > 32) {
+      return const RosterGridDetection([]);
+    }
+    return const RosterGridImportParser().detectMatrix(rows);
+  }
 
   /// Reads a coworker-only roster CSV. Unlike [parse], this input never
   /// proposes new schedule events; rows are grouped for matching to saved
@@ -40,9 +68,16 @@ class CsvScheduleImportParser {
     const dateAliases = {'date', 'shift_date', 'work_date'};
     const codeAliases = {'code', 'shift_code', 'roster_code'};
     const coworkerAliases = {'coworkers', 'coworker', 'colleagues'};
+    const coworkerCodeAliases = {
+      'coworker_code',
+      'coworker_codes',
+      'colleague_code',
+      'colleague_codes',
+    };
     final dateIndex = headers.indexWhere(dateAliases.contains);
     final codeIndex = headers.indexWhere(codeAliases.contains);
     final coworkerIndex = headers.indexWhere(coworkerAliases.contains);
+    final coworkerCodesIndex = headers.indexWhere(coworkerCodeAliases.contains);
     final employerIndex = headers.indexOf('employer');
     if (headers.toSet().length != headers.length ||
         headers.any((header) => header.isEmpty)) {
@@ -77,9 +112,20 @@ class CsvScheduleImportParser {
         final employer = employerIndex < 0
             ? null
             : _optional(record.fields[employerIndex]);
-        final names = _coworkerNames(record.fields[coworkerIndex]);
+        final names = _coworkerValues(record.fields[coworkerIndex]);
         if (names.isEmpty) {
           throw const FormatException('No coworker names were supplied.');
+        }
+        final rawCoworkerCodes = coworkerCodesIndex < 0
+            ? ''
+            : record.fields[coworkerCodesIndex].trim();
+        final coworkerCodes = rawCoworkerCodes.isEmpty
+            ? null
+            : _coworkerValues(rawCoworkerCodes);
+        if (coworkerCodes != null && coworkerCodes.length != names.length) {
+          throw const FormatException(
+            'A coworker-code row needs the same number of names and codes.',
+          );
         }
         final key =
             '${date.toString()}|${_normalizeCode(code)}|${employer?.toLowerCase() ?? ''}';
@@ -91,15 +137,42 @@ class CsvScheduleImportParser {
             employer: employer,
           ),
         );
-        builder.add(names, record.line);
+        final sameCodeNames = coworkerCodes == null
+            ? names
+            : [
+                for (var index = 0; index < names.length; index++)
+                  if (_normalizeCode(coworkerCodes[index]) ==
+                      _normalizeCode(code))
+                    names[index],
+              ];
+        final excludedCount = names.length - sameCodeNames.length;
+        builder.add(
+          sameCodeNames,
+          record.line,
+          sameRosterCodeVerified: coworkerCodes != null,
+        );
+        if (excludedCount > 0) {
+          final excludedMessage = excludedCount == 1
+              ? '1 coworker with a different roster code was excluded.'
+              : '$excludedCount coworkers with different roster codes were excluded.';
+          notices.add('Row ${record.line}: $excludedMessage');
+        }
       } on FormatException catch (error) {
         notices.add('Row ${record.line}: ${error.message}');
       }
     }
+    final assignments = grouped.values
+        .map((row) => row.build())
+        .toList(growable: false);
+    for (final assignment in assignments) {
+      if (!assignment.sameRosterCodeVerified) {
+        notices.add(
+          '${assignment.date} · ${assignment.code}: coworker codes are missing, so this name list must be checked manually and will start unchecked.',
+        );
+      }
+    }
     return CoworkerRosterPreview(
-      assignments: grouped.values
-          .map((row) => row.build())
-          .toList(growable: false),
+      assignments: assignments,
       notices: List.unmodifiable(notices),
     );
   }
@@ -144,6 +217,7 @@ class CsvScheduleImportParser {
       'code',
       'code_meaning',
       'coworkers',
+      'coworker_codes',
       'employer',
       'department',
       'job_role',
@@ -221,8 +295,14 @@ class CsvScheduleImportParser {
       }
       try {
         final rowFingerprint = await _rowFingerprint(values);
+        final coworkerReview = _reviewEventCoworkers(values);
+        if (coworkerReview.notice != null) {
+          notices.add(
+            ScheduleImportNotice(coworkerReview.notice!, uid: rowLabel),
+          );
+        }
         final item = await _item(
-          values,
+          coworkerReview.values,
           sourceName: sourceName,
           sourceText: record.source,
           importedAt: timestamp,
@@ -382,6 +462,50 @@ class CsvScheduleImportParser {
       (item.workCategory == WorkCategory.shift ||
           item.workCategory == WorkCategory.training ||
           item.workCategory == WorkCategory.overtime);
+
+  static ({Map<String, String> values, String? notice})
+  _reviewEventCoworkers(Map<String, String> values) {
+    final category = values['category']?.trim().toLowerCase();
+    if (category != 'shift' && category != 'overtime' && category != 'training') {
+      return (values: values, notice: null);
+    }
+
+    final names = _coworkerValues(values['coworkers']);
+    if (names.isEmpty) return (values: values, notice: null);
+
+    final codes = _coworkerValues(values['coworker_codes']);
+    final shiftCode = values['code']?.trim() ?? '';
+    final reviewedValues = Map<String, String>.of(values)
+      ..['coworkers'] = '';
+    if (shiftCode.isEmpty || codes.isEmpty || codes.length != names.length) {
+      return (
+        values: reviewedValues,
+        notice: codes.isEmpty
+            ? 'Coworker roster codes are missing, so the names were not attached to this shift.'
+            : 'Coworker names and codes could not be paired, so no names were attached to this shift.',
+      );
+    }
+
+    final sameCodeNames = <String>[];
+    var excludedCount = 0;
+    for (var index = 0; index < names.length; index++) {
+      if (_normalizeCode(codes[index]) == _normalizeCode(shiftCode)) {
+        if (!sameCodeNames.any(
+          (existing) => existing.toLowerCase() == names[index].toLowerCase(),
+        )) {
+          sameCodeNames.add(names[index]);
+        }
+      } else {
+        excludedCount++;
+      }
+    }
+    reviewedValues['coworkers'] = sameCodeNames.join(';');
+    if (excludedCount == 0) return (values: reviewedValues, notice: null);
+    final excludedLabel = excludedCount == 1
+        ? '1 coworker with a different roster code was excluded.'
+        : '$excludedCount coworkers with different roster codes were excluded.';
+    return (values: reviewedValues, notice: excludedLabel);
+  }
 
   String _eventGroupSignature(Map<String, String> values) {
     final fields =
@@ -836,6 +960,14 @@ class CsvScheduleImportParser {
               return names;
             });
 
+  static List<String> _coworkerValues(String? value) => value == null
+      ? const []
+      : value
+            .split(';')
+            .map((entry) => entry.trim())
+            .where((entry) => entry.isNotEmpty)
+            .toList(growable: false);
+
   static String _normalizeCode(String code) =>
       code.trim().replaceAll(RegExp(r'\s+'), '').toUpperCase();
 
@@ -1007,6 +1139,7 @@ class CoworkerRosterAssignment {
     required this.coworkers,
     required this.sourceRows,
     this.employer,
+    this.sameRosterCodeVerified = false,
   });
 
   final CivilDate date;
@@ -1014,6 +1147,7 @@ class CoworkerRosterAssignment {
   final String? employer;
   final List<String> coworkers;
   final List<int> sourceRows;
+  final bool sameRosterCodeVerified;
 }
 
 class _CoworkerRosterBuilder {
@@ -1029,9 +1163,15 @@ class _CoworkerRosterBuilder {
   final List<String> coworkers = [];
   final Set<String> _normalized = {};
   final List<int> sourceRows = [];
+  bool sameRosterCodeVerified = true;
 
-  void add(List<String> names, int sourceRow) {
+  void add(
+    List<String> names,
+    int sourceRow, {
+    required bool sameRosterCodeVerified,
+  }) {
     sourceRows.add(sourceRow);
+    this.sameRosterCodeVerified &= sameRosterCodeVerified;
     for (final name in names) {
       if (_normalized.add(name.toLowerCase())) coworkers.add(name);
     }
@@ -1043,5 +1183,6 @@ class _CoworkerRosterBuilder {
     employer: employer,
     coworkers: List.unmodifiable(coworkers),
     sourceRows: List.unmodifiable(sourceRows),
+    sameRosterCodeVerified: sameRosterCodeVerified,
   );
 }

@@ -5,8 +5,12 @@ import 'package:drift/drift.dart';
 import '../domain/academic_term.dart';
 import '../domain/schedule.dart';
 import '../domain/work_occurrence_coworkers.dart';
+import '../domain/work_code_legend.dart';
+import '../domain/supervisor_profile.dart';
 import 'schedule_database.dart';
 import 'schedule_import_history_repository.dart';
+import 'work_code_legend_repository.dart';
+import 'supervisor_repository.dart';
 
 class ScheduleRepository {
   const ScheduleRepository(this.database);
@@ -368,6 +372,8 @@ class ScheduleRepository {
     required List<ScheduleItem> eventItems,
     required List<ScheduleItem> coworkerUpdates,
     List<WorkOccurrenceCoworkers> occurrenceCoworkerUpdates = const [],
+    List<WorkCodeLegend> codeDefinitions = const [],
+    List<SupervisorProfile> supervisorProfiles = const [],
     required bool replaceExisting,
     ScheduleImportHistoryDraft? historyDraft,
   }) async {
@@ -397,14 +403,80 @@ class ScheduleRepository {
         'The roster import contains a duplicate or conflicting shift occurrence update.',
       );
     }
+    final definitionIds = codeDefinitions.map((entry) => entry.id).toSet();
+    if (definitionIds.length != codeDefinitions.length ||
+        definitionIds.any((id) => id.trim().isEmpty)) {
+      throw const FormatException(
+        'The roster import contains duplicate or invalid shift-code definitions.',
+      );
+    }
+    if (supervisorProfiles.any(
+      (profile) => profile.id.trim().isEmpty || profile.name.trim().isEmpty,
+    )) {
+      throw const FormatException(
+        'The roster import contains an incomplete supervisor profile.',
+      );
+    }
 
     var inserted = 0;
     var replaced = 0;
     var skipped = 0;
+    var supervisorsAdded = 0;
     await database.transaction(() async {
       final savedItems = await getItems();
       final byId = {for (final item in savedItems) item.id: item};
       final coworkerTargets = <ScheduleItem>[];
+      final legendRepository = WorkCodeLegendRepository(database);
+      final supervisorRepository = SupervisorRepository(database);
+      final existingSupervisors = await supervisorRepository.getItems();
+      final knownSupervisorNames = {
+        for (final profile in existingSupervisors)
+          profile.name.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase(),
+      };
+      final savedDefinitions = await legendRepository.getItems();
+      for (var index = 0; index < codeDefinitions.length; index++) {
+        final definition = codeDefinitions[index];
+        final windows = definition.timeWindows;
+        if (definition.code.trim().isEmpty ||
+            windows.isEmpty ||
+            windows.length > 2 ||
+            windows.any((window) => !window.isValid) ||
+            definition.effectiveStartDate == null ||
+            definition.effectiveEndDate == null ||
+            definition.effectiveStartDate!.compareTo(
+                  definition.effectiveEndDate!,
+                ) >
+                0) {
+          throw const FormatException(
+            'The roster import contains an incomplete shift-code definition.',
+          );
+        }
+        for (var other = index + 1; other < codeDefinitions.length; other++) {
+          final peer = codeDefinitions[other];
+          if (definition.employer.trim().toLowerCase() ==
+                  peer.employer.trim().toLowerCase() &&
+              definition.code.trim().toUpperCase() ==
+                  peer.code.trim().toUpperCase() &&
+              definition.overlapsEffectivePeriod(peer)) {
+            throw const FormatException(
+              'The roster import contains overlapping shift-code definitions.',
+            );
+          }
+        }
+        if (savedDefinitions.any(
+          (saved) =>
+              saved.id == definition.id ||
+              (saved.employer.trim().toLowerCase() ==
+                      definition.employer.trim().toLowerCase() &&
+                  saved.code.trim().toUpperCase() ==
+                      definition.code.trim().toUpperCase() &&
+                  saved.overlapsEffectivePeriod(definition)),
+        )) {
+          throw const FormatException(
+            'A shift-code definition changed or conflicts with saved data. Review the roster again before applying.',
+          );
+        }
+      }
       for (final reviewed in coworkerUpdates) {
         final current = byId[reviewed.id];
         if (current == null || !_sameCoworkerTarget(current, reviewed)) {
@@ -416,6 +488,18 @@ class ScheduleRepository {
       }
 
       final existingIds = byId.keys.toSet();
+      for (final definition in codeDefinitions) {
+        await legendRepository.save(definition);
+      }
+      for (final profile in supervisorProfiles) {
+        final normalizedName = profile.name
+            .trim()
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .toLowerCase();
+        if (!knownSupervisorNames.add(normalizedName)) continue;
+        await supervisorRepository.save(profile);
+        supervisorsAdded++;
+      }
       for (final item in eventItems) {
         if (existingIds.contains(item.id)) {
           if (!replaceExisting) {
@@ -466,7 +550,9 @@ class ScheduleRepository {
               inserted +
               replaced +
               coworkerTargets.length +
-              occurrenceCoworkerUpdates.length,
+              occurrenceCoworkerUpdates.length +
+              codeDefinitions.length +
+              supervisorsAdded,
           additionalSkippedCount: skipped,
         );
       }
@@ -475,6 +561,7 @@ class ScheduleRepository {
       inserted: inserted,
       replaced: replaced,
       skipped: skipped,
+      supervisorsAdded: supervisorsAdded,
     );
   }
 
@@ -628,11 +715,13 @@ class ScheduleImportResult {
     required this.inserted,
     required this.replaced,
     required this.skipped,
+    this.supervisorsAdded = 0,
   });
 
   final int inserted;
   final int replaced;
   final int skipped;
+  final int supervisorsAdded;
 }
 
 DeadlineType _deadlineType(int? index) {

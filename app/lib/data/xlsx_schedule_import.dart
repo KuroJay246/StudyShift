@@ -6,6 +6,7 @@ import 'package:spreadsheet_decoder/spreadsheet_decoder.dart';
 import 'package:xml/xml.dart';
 
 import 'csv_schedule_import.dart';
+import 'roster_grid_import.dart';
 import 'schedule_import_models.dart';
 
 /// Reads small, reviewed Shift & Study XLSX tables. Workbook content is
@@ -23,6 +24,112 @@ class XlsxScheduleImportParser {
   static const maxSheets = 8;
   static const maxRowsPerSheet = 500;
   static const maxColumns = 32;
+
+  /// Finds a matrix-style roster without creating schedule events. It applies
+  /// the workbook safety checks before decoding any worksheet cells.
+  RosterGridDetection detectRosterGrid(Uint8List bytes) {
+    if (bytes.isEmpty || bytes.length > maxBytes) {
+      throw const FormatException('This Excel file is empty or too large.');
+    }
+    final archive = _inspectZip(bytes);
+    final workbookFile = archive.findFile('xl/workbook.xml');
+    if (workbookFile == null) {
+      throw const FormatException('Choose a valid .xlsx workbook.');
+    }
+    final workbookXml = _parseXml(
+      Uint8List.fromList(workbookFile.content as List<int>),
+    );
+    final sheets = workbookXml.findAllElements('sheet').toList();
+    if (sheets.isEmpty || sheets.length > maxSheets) {
+      throw const FormatException('This workbook needs 1 to 8 worksheets.');
+    }
+    if (sheets.any(
+      (sheet) =>
+          sheet.getAttribute('state') != null &&
+          sheet.getAttribute('state') != 'visible',
+    )) {
+      throw const FormatException('Unhide all worksheets before importing.');
+    }
+    var totalRows = 0;
+    for (final entry in archive.files.where(
+      (file) =>
+          file.isFile &&
+          file.name.startsWith('xl/worksheets/') &&
+          file.name.endsWith('.xml'),
+    )) {
+      final document = _parseXml(
+        Uint8List.fromList(entry.content as List<int>),
+      );
+      if (document.findAllElements('f').isNotEmpty) {
+        throw const FormatException(
+          'Remove formulas from the workbook before importing.',
+        );
+      }
+      if (document
+              .findAllElements('row')
+              .any(
+                (row) =>
+                    row.getAttribute('hidden') == '1' ||
+                    row.getAttribute('hidden') == 'true',
+              ) ||
+          document
+              .findAllElements('col')
+              .any(
+                (column) =>
+                    column.getAttribute('hidden') == '1' ||
+                    column.getAttribute('hidden') == 'true',
+              )) {
+        throw const FormatException(
+          'Unhide all rows and columns before importing.',
+        );
+      }
+      final rowNodes = document.findAllElements('row').toList();
+      totalRows += rowNodes.length;
+      if (rowNodes.length > maxRowsPerSheet ||
+          totalRows > CsvScheduleImportParser.maxRows) {
+        throw const FormatException(
+          'This workbook has too many rows to review at once.',
+        );
+      }
+      for (final row in rowNodes) {
+        final rowNumber = int.tryParse(row.getAttribute('r') ?? '');
+        if (rowNumber == null || rowNumber > maxRowsPerSheet + 1) {
+          throw const FormatException(
+            'A worksheet has an unsupported sparse row layout.',
+          );
+        }
+      }
+      for (final cell in document.findAllElements('c')) {
+        final reference = cell.getAttribute('r') ?? '';
+        final match = RegExp(r'^([A-Z]+)([1-9][0-9]*)$').firstMatch(reference);
+        if (match == null ||
+            _columnNumber(match.group(1)!) > maxColumns ||
+            int.parse(match.group(2)!) > maxRowsPerSheet + 1) {
+          throw const FormatException(
+            'A worksheet cell is outside the supported review area.',
+          );
+        }
+      }
+    }
+    final decoder = XlsxDecoder(archive);
+    for (final sheet in sheets) {
+      final table = decoder.tables[sheet.getAttribute('name') ?? ''];
+      if (table == null || table.rows.isEmpty) continue;
+      if (table.rows.length > maxRowsPerSheet + 1 ||
+          table.maxCols > maxColumns) {
+        throw const FormatException(
+          'A worksheet is larger than its supported review area.',
+        );
+      }
+      final rows = table.rows
+          .map((row) => row.map(_cellText).toList(growable: false))
+          .toList(growable: false);
+      if (table.maxCols < 4) continue;
+      final detection = const RosterGridImportParser().detectMatrix(rows);
+      if (detection.candidates.isNotEmpty) return detection;
+    }
+    return const RosterGridDetection([]);
+  }
 
   Future<ScheduleImportPreview> parse(
     Uint8List bytes, {
@@ -286,7 +393,9 @@ class XlsxScheduleImportParser {
     }
 
     final decoder = XlsxDecoder(archive);
-    final normalizedRows = <String>['date,code,coworkers,employer'];
+    final normalizedRows = <String>[
+      'date,code,coworkers,coworker_codes,employer',
+    ];
     final notices = <String>[];
     var recognizedSheetCount = 0;
     for (final sheet in sheets) {
@@ -313,6 +422,14 @@ class XlsxScheduleImportParser {
       );
       final coworkersIndex = headers.indexWhere(
         const {'coworkers', 'coworker', 'colleagues'}.contains,
+      );
+      final coworkerCodesIndex = headers.indexWhere(
+        const {
+          'coworker_code',
+          'coworker_codes',
+          'colleague_code',
+          'colleague_codes',
+        }.contains,
       );
       final employerIndex = headers.indexOf('employer');
       if (headers.toSet().length != headers.length ||
@@ -346,6 +463,7 @@ class XlsxScheduleImportParser {
             row[dateIndex],
             row[codeIndex],
             row[coworkersIndex],
+            coworkerCodesIndex < 0 ? '' : row[coworkerCodesIndex],
             employerIndex < 0 ? '' : row[employerIndex],
           ]),
         );
@@ -430,6 +548,7 @@ class XlsxScheduleImportParser {
       'code',
       'code_meaning',
       'coworkers',
+      'coworker_codes',
       'employer',
       'department',
       'job_role',

@@ -223,6 +223,7 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
       'week' => _Destination.week,
       'work' => _Destination.work,
       'study' => _Destination.school,
+      'more' => _Destination.more,
       _ => _Destination.today,
     };
     final initialIndex = _items.indexWhere(
@@ -323,13 +324,7 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
   String get _title =>
       _items.firstWhere((item) => item.destination == _selected).label;
 
-  Widget _page(
-    _Destination destination, {
-    VoidCallback? onDestinationDragStart,
-    ValueChanged<double>? onDestinationDragUpdate,
-    VoidCallback? onDestinationDragEnd,
-    VoidCallback? onDestinationDragCancel,
-  }) => switch (destination) {
+  Widget _page(_Destination destination) => switch (destination) {
     _Destination.today => TodayPage(
       selectedDay: _selectedDay,
       clock: _now,
@@ -338,10 +333,6 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
     _Destination.week => WeekPage(
       focusDate: _selectedDay,
       onFocusDateChanged: (date) => setState(() => _selectedDay = date),
-      onDestinationDragStart: onDestinationDragStart,
-      onDestinationDragUpdate: onDestinationDragUpdate,
-      onDestinationDragEnd: onDestinationDragEnd,
-      onDestinationDragCancel: onDestinationDragCancel,
     ),
     _Destination.work => const WorkPage(),
     _Destination.school => const StudyPage(),
@@ -821,31 +812,7 @@ class _ScheduleShellState extends ConsumerState<ScheduleShell>
                       for (final item in items)
                         _RetainedDestinationPage(
                           key: ValueKey(item.destination),
-                          child: _page(
-                            item.destination,
-                            onDestinationDragStart:
-                                item.destination == _Destination.week
-                                ? _startDestinationDrag
-                                : null,
-                            onDestinationDragUpdate:
-                                item.destination == _Destination.week
-                                ? (distance) => _updateDestinationDragTo(
-                                    distance,
-                                    constraints.maxWidth,
-                                  )
-                                : null,
-                            onDestinationDragEnd:
-                                item.destination == _Destination.week
-                                ? () => _finishDestinationDrag(
-                                    DragEndDetails(),
-                                    items,
-                                  )
-                                : null,
-                            onDestinationDragCancel:
-                                item.destination == _Destination.week
-                                ? () => _settleToIndex(selectedIndex, items)
-                                : null,
-                          ),
+                          child: _page(item.destination),
                         ),
                     ],
                   );

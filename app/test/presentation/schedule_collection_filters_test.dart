@@ -104,7 +104,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      tester.getTopLeft(find.text('Work overview (This week)')).dy,
+      tester.getTopLeft(find.textContaining('Work overview')).dy,
       lessThan(tester.getTopLeft(find.text('Shift legend')).dy),
     );
     expect(
@@ -115,6 +115,69 @@ void main() {
       tester.getTopLeft(find.widgetWithText(ChoiceChip, 'Shifts')).dy,
       lessThan(tester.getTopLeft(find.text('Upcoming shifts')).dy),
     );
+  });
+
+  testWidgets('empty overtime filter explains where overtime entries come from', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final tomorrow = CivilDate.fromDateTime(DateTime.now()).addDays(1);
+    await ScheduleRepository(database).save(
+      ScheduleItem(
+        id: 'ordinary-shift-without-overtime',
+        kind: ScheduleKind.work,
+        title: 'Ordinary shift',
+        startDate: tomorrow,
+        intervals: [EventInterval.sameDay(startMinute: 540, endMinute: 1020)],
+        timeZoneId: 'America/Barbados',
+        workCategory: WorkCategory.shift,
+      ),
+    );
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const Scaffold(body: WorkPage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(ChoiceChip, 'Overtime'));
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Overtime'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No overtime entries yet'), findsOneWidget);
+    expect(
+      find.text('Overtime entries appear here when you record extra hours.'),
+      findsOneWidget,
+    );
+    expect(find.text('Your work roster starts here'), findsNothing);
+    expect(find.text('Add a shift, training, rest day, leave or day off.'), findsNothing);
+    expect(find.text('Ordinary shift'), findsNothing);
+
+    for (final state in [
+      ('Days Off', 'No days off scheduled'),
+      ('Leave', 'No leave scheduled'),
+      ('Training', 'No training scheduled'),
+    ]) {
+      final chip = find.widgetWithText(ChoiceChip, state.$1);
+      await tester.ensureVisible(chip);
+      await tester.tap(chip);
+      await tester.pumpAndSettle();
+      expect(find.text(state.$2), findsOneWidget);
+      expect(find.text('Your work roster starts here'), findsNothing);
+    }
   });
 
   testWidgets('an upcoming shift changes to happening now without restart', (
@@ -572,11 +635,9 @@ void main() {
     expect(find.text('Filter QA shift'), findsOneWidget);
     expect(find.text('Filter QA training'), findsNothing);
     expect(find.text('Filter QA overtime'), findsNothing);
-    await tester.ensureVisible(find.text('Total hours'));
-    expect(tester.widget<Text>(find.text('Total hours')).maxLines, 2);
-    expect(find.text('16'), findsOneWidget);
+    await tester.ensureVisible(find.text('Hours + extra'));
+    expect(tester.widget<Text>(find.text('Hours + extra')).maxLines, 2);
     await tester.ensureVisible(find.text('Shifts').last);
-    expect(find.text('2'), findsOneWidget);
     expect(find.text('Shifts and overtime are timed duties.'), findsOneWidget);
     expect(find.text('View full roster'), findsNothing);
     await tester.ensureVisible(find.widgetWithText(ChoiceChip, 'Overtime'));

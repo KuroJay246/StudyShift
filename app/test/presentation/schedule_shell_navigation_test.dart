@@ -122,6 +122,55 @@ void main() {
     expect(find.byTooltip('Set up reminders'), findsNothing);
   });
 
+  testWidgets('a More destination launch opens More', (tester) async {
+    tester.view.physicalSize = const Size(412, 915);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+        deviceTimeZoneProvider.overrideWith((ref) => _TestTimeZone()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: ScheduleShell(
+            mode: ScheduleMode.workAndSchool,
+            initialDestination: 'more',
+            clock: () => DateTime(2026, 11, 23, 10),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .getSemantics(
+            find.descendant(
+              of: find.byType(NavigationBar),
+              matching: find.text('More'),
+            ),
+          )
+          .flagsCollection
+          .isSelected,
+      Tristate.isTrue,
+    );
+    expect(find.text('Find an event'), findsOneWidget);
+    expect(find.byTooltip('Set up reminders'), findsNothing);
+  });
+
   testWidgets('selecting a date in Week updates the visible day agenda', (
     tester,
   ) async {
@@ -287,6 +336,23 @@ void main() {
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         1,
       );
+      await tester.dragFrom(const Offset(206, 500), const Offset(120, 0));
+      await tester.pumpAndSettle();
+      // Week-body swipes belong to the calendar. Use its header swipe handle
+      // when the intent is to change the main destination.
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        1,
+      );
+      await tester.drag(
+        find.byKey(const Key('schedule-primary-swipe-handle')),
+        const Offset(120, 0),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        0,
+      );
 
       await tester.drag(
         find.byKey(const Key('schedule-primary-swipe-handle')),
@@ -295,22 +361,28 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-        2,
+        1,
       );
 
       await swipeCurrentPageLeft();
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        2,
+      );
+      await swipeCurrentPageLeft();
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         3,
       );
-      await tester.dragFrom(const Offset(206, 500), const Offset(-120, 0));
-      await tester.pumpAndSettle();
+      await swipeCurrentPageLeft();
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         4,
       );
-
-      await tester.dragFrom(const Offset(206, 500), const Offset(120, 0));
+      await tester.drag(
+        find.byKey(const Key('schedule-primary-swipe-handle')),
+        const Offset(120, 0),
+      );
       await tester.pumpAndSettle();
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
@@ -423,18 +495,30 @@ void main() {
           container: container,
           child: MaterialApp(
             theme: AppTheme.light(),
-            home: MediaQuery(
-              data: const MediaQueryData(disableAnimations: false),
-              child: ScheduleShell(
-                mode: ScheduleMode.workAndSchool,
-                initialDestination: 'week',
-                clock: () => DateTime(2026, 11, 16, 9),
-              ),
+            home: ScheduleShell(
+              mode: ScheduleMode.workAndSchool,
+              initialDestination: 'week',
+              clock: () => DateTime(2026, 11, 16, 9),
             ),
           ),
         ),
       );
       await tester.pumpAndSettle();
+
+      Future<void> swipeAppBar(Offset delta) async {
+        final gesture = await tester.startGesture(
+          tester.getCenter(
+            find.byKey(const Key('schedule-primary-swipe-handle')),
+          ),
+        );
+        await gesture.moveBy(
+          delta,
+          timeStamp: const Duration(milliseconds: 100),
+        );
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+      }
 
       final workPage = find.byType(WorkPage, skipOffstage: false);
       final initialWorkX = tester.getTopLeft(workPage).dx;
@@ -464,35 +548,11 @@ void main() {
       );
       expect(tester.getTopLeft(weekPage).dx, closeTo(startX, 0.1));
 
-      final gesture = await tester.startGesture(const Offset(206, 380));
-      await tester.pump();
-      await gesture.moveBy(
-        const Offset(-120, 0),
-        timeStamp: const Duration(milliseconds: 40),
-      );
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(
-        tester.getTopLeft(weekPage).dx,
-        lessThan(startX),
-        reason: 'Calendar should track a horizontal drag before release.',
-      );
-      expect(
-        tester.getTopLeft(workPage).dx,
-        lessThan(initialWorkX),
-        reason: 'The adjacent Work page should follow the Calendar drag.',
-      );
-      expect(
-        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
-        1,
-        reason: 'The selected destination changes after the swipe is released.',
-      );
-      await gesture.up();
-      await tester.pumpAndSettle();
+      await swipeAppBar(const Offset(-120, 0));
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         2,
-        reason: 'A left swipe over the schedule should open Work.',
+        reason: 'A left swipe on the app-bar handle should open Work.',
       );
       expect(tester.getTopLeft(weekPage).dx, lessThan(startX));
 
@@ -503,12 +563,20 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.dragFrom(const Offset(206, 380), const Offset(120, 0));
-      await tester.pump(const Duration(milliseconds: 500));
+      await tester.dragFrom(const Offset(206, 380), const Offset(-120, 0));
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
+        1,
+        reason: 'A calendar-body swipe must not change destinations.',
+      );
+      expect(tester.getTopLeft(weekPage).dx, closeTo(0, 0.1));
+      expect(tester.getTopLeft(workPage).dx, greaterThan(0));
+      await swipeAppBar(const Offset(120, 0));
       expect(
         tester.widget<NavigationBar>(find.byType(NavigationBar)).selectedIndex,
         0,
-        reason: 'A right swipe over the schedule should return to Today.',
+        reason: 'A right swipe on the app-bar handle should return to Today.',
       );
 
       await tester.tap(

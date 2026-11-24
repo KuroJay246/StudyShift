@@ -16,9 +16,81 @@ import 'package:shift_study/presentation/screens/coworker_roster_import_page.dar
 void main() {
   const channel = MethodChannel('app.shiftstudy/import');
   const csv =
-      'date,code,coworkers\n'
-      '2026-11-24,A1,"Synthetic Lee;Synthetic Sam"\n'
-      '2026-11-26,ZZ,Synthetic Unmatched\n';
+      'date,code,coworkers,coworker_codes\n'
+      '2026-11-24,A1,"Synthetic Lee;Synthetic Sam","A1;A1"\n'
+      '2026-11-26,ZZ,Synthetic Unmatched,ZZ\n';
+
+  testWidgets('unverified coworker names cannot be applied automatically', (
+    tester,
+  ) async {
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(database.close);
+    await ScheduleRepository(database).save(
+      ScheduleItem(
+        id: 'synthetic-a1-unverified',
+        kind: ScheduleKind.work,
+        title: 'Synthetic shift',
+        startDate: const CivilDate(2026, 11, 24),
+        intervals: const [
+          EventInterval(
+            startDayOffset: 0,
+            startMinute: 9 * 60,
+            endDayOffset: 0,
+            endMinute: 17 * 60,
+          ),
+        ],
+        timeZoneId: 'America/Barbados',
+        code: 'A1',
+      ),
+    );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          channel,
+          (call) async => {
+            'name': 'synthetic-unverified.csv',
+            'bytes': Uint8List.fromList(
+              utf8.encode('date,code,coworkers\n2026-11-24,A1,Synthetic Staff'),
+            ),
+          },
+        );
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [scheduleDatabaseProvider.overrideWithValue(database)],
+        child: const MaterialApp(home: CoworkerRosterImportPage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose coworker roster file'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('coworker codes are missing'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Verify coworker codes first'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('Verify coworker codes first'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.ancestor(
+              of: find.text('Verify coworker codes first'),
+              matching: find.byType(FilledButton),
+            ),
+          )
+          .onPressed,
+      isNull,
+    );
+    expect(
+      (await ScheduleRepository(database).getItems()).single.coworkers,
+      isEmpty,
+    );
+  });
 
   testWidgets('updates only matched shift coworkers after confirmation', (
     tester,
@@ -253,8 +325,8 @@ List<int> _xlsxCoworkers() {
   );
   add('xl/worksheets/sheet1.xml', '''<?xml version="1.0" encoding="UTF-8"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>
-<row r="1"><c r="A1" t="inlineStr"><is><t>date</t></is></c><c r="B1" t="inlineStr"><is><t>roster_code</t></is></c><c r="C1" t="inlineStr"><is><t>coworkers</t></is></c></row>
-<row r="2"><c r="A2" t="inlineStr"><is><t>2026-11-24</t></is></c><c r="B2" t="inlineStr"><is><t>A1</t></is></c><c r="C2" t="inlineStr"><is><t>Synthetic Lee;Synthetic Sam</t></is></c></row>
+<row r="1"><c r="A1" t="inlineStr"><is><t>date</t></is></c><c r="B1" t="inlineStr"><is><t>roster_code</t></is></c><c r="C1" t="inlineStr"><is><t>coworkers</t></is></c><c r="D1" t="inlineStr"><is><t>coworker_codes</t></is></c></row>
+<row r="2"><c r="A2" t="inlineStr"><is><t>2026-11-24</t></is></c><c r="B2" t="inlineStr"><is><t>A1</t></is></c><c r="C2" t="inlineStr"><is><t>Synthetic Lee;Synthetic Sam</t></is></c><c r="D2" t="inlineStr"><is><t>A1;A1</t></is></c></row>
 </sheetData></worksheet>''');
   return ZipEncoder().encode(archive)!;
 }

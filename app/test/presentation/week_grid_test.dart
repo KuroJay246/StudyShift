@@ -43,6 +43,44 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('selected-day timeline shows all-day work events', (
+    tester,
+  ) async {
+    const day = CivilDate(2026, 11, 24);
+    final dayOff = ScheduleItem(
+      id: 'qa-week-day-off',
+      kind: ScheduleKind.work,
+      title: 'QA day off',
+      startDate: day,
+      intervals: const [],
+      timeZoneId: 'America/Barbados',
+      workCategory: WorkCategory.dayOff,
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          body: WeekGrid(
+            weekStart: const CivilDate(2026, 11, 23),
+            focusDate: day,
+            occurrences: [EventOccurrence(item: dayOff, date: day)],
+            conflictedIds: const {},
+            use24Hour: false,
+            onSelect: (_) {},
+            onFocusDateChanged: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Tuesday, November 24, 2026 · 1 event'), findsOneWidget);
+    expect(find.text('All day'), findsOneWidget);
+    expect(find.text('QA day off'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('week timeline hour labels include AM and PM', (tester) async {
     const weekStart = CivilDate(2026, 11, 2);
     await tester.pumpWidget(

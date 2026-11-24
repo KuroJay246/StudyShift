@@ -1,5 +1,16 @@
 import 'schedule_database.dart';
 
+const _overtimeThresholdPrefix = 'overtime_threshold_minutes:';
+const _overtimeEmployerLabelPrefix = 'overtime_threshold_employer:';
+
+String _normalizeEmployer(String employer) =>
+    employer.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+String _overtimeThresholdKey(String employer) =>
+    '$_overtimeThresholdPrefix${Uri.encodeComponent(_normalizeEmployer(employer))}';
+String _overtimeEmployerLabelKey(String employer) =>
+    '$_overtimeEmployerLabelPrefix${Uri.encodeComponent(_normalizeEmployer(employer))}';
+
 enum ScheduleMode { workOnly, schoolOnly, workAndSchool, personalPlanner }
 
 enum ThemePreference { system, light, dark }
@@ -41,6 +52,8 @@ class AppPreferences {
     this.weatherShowWindSpeed,
     this.weatherShowSunriseSunset,
     this.weatherShowLastUpdated,
+    this.overtimeThresholdsByEmployer = const {},
+    this.overtimeEmployerLabels = const {},
   });
 
   final ScheduleMode? scheduleMode;
@@ -63,6 +76,32 @@ class AppPreferences {
   final bool? weatherShowWindSpeed;
   final bool? weatherShowSunriseSunset;
   final bool? weatherShowLastUpdated;
+  final Map<String, int> overtimeThresholdsByEmployer;
+  final Map<String, String> overtimeEmployerLabels;
+
+  int? overtimeThresholdForEmployer(String? employer) {
+    if (employer == null || employer.trim().isEmpty) return null;
+    return overtimeThresholdsByEmployer[_normalizeEmployer(employer)];
+  }
+
+  String? overtimeEmployerFor({String? employer, required String title}) {
+    final explicitEmployer = employer?.trim() ?? '';
+    if (explicitEmployer.isNotEmpty) return explicitEmployer;
+
+    final normalizedTitle = _normalizeEmployer(title);
+    final configuredEmployers = overtimeThresholdsByEmployer.keys.toList()
+      ..sort((left, right) => right.length.compareTo(left.length));
+    for (final configuredEmployer in configuredEmployers) {
+      if (normalizedTitle == configuredEmployer ||
+          normalizedTitle.startsWith('$configuredEmployer ')) {
+        return overtimeEmployerLabel(configuredEmployer);
+      }
+    }
+    return null;
+  }
+
+  String overtimeEmployerLabel(String normalizedEmployer) =>
+      overtimeEmployerLabels[normalizedEmployer] ?? normalizedEmployer;
 
   bool get showWeatherLocationAndCondition =>
       weatherShowLocationAndCondition ?? true;
@@ -107,6 +146,27 @@ class AppPreferences {
       values['weather_metric_sunrise_sunset'],
     ),
     weatherShowLastUpdated: _boolValue(values['weather_metric_last_updated']),
+    overtimeThresholdsByEmployer: {
+      for (final entry in values.entries)
+        if (entry.key.startsWith(_overtimeThresholdPrefix) &&
+            int.tryParse(entry.value) != null &&
+            int.parse(entry.value) > 0 &&
+            int.parse(entry.value) <= 24 * 60)
+          Uri.decodeComponent(
+            entry.key.substring(_overtimeThresholdPrefix.length),
+          ): int.parse(
+            entry.value,
+          ),
+    },
+    overtimeEmployerLabels: {
+      for (final entry in values.entries)
+        if (entry.key.startsWith(_overtimeEmployerLabelPrefix) &&
+            entry.value.trim().isNotEmpty)
+          Uri.decodeComponent(
+            entry.key.substring(_overtimeEmployerLabelPrefix.length),
+          ): entry.value
+              .trim(),
+    },
   );
 
   static bool? _boolValue(String? value) => switch (value) {
@@ -188,6 +248,36 @@ class PreferencesRepository {
 
   Future<void> setWeatherSnapshot(String json) =>
       database.setPreference('weather_snapshot', json);
+
+  Future<void> setOvertimeThreshold(String employer, int minutes) {
+    final normalizedEmployer = _normalizeEmployer(employer);
+    if (normalizedEmployer.isEmpty || minutes <= 0 || minutes > 24 * 60) {
+      throw ArgumentError('Choose an employer and a threshold up to 24 hours.');
+    }
+    return database.transaction(() async {
+      await database.setPreference(
+        _overtimeThresholdKey(normalizedEmployer),
+        minutes.toString(),
+      );
+      await database.setPreference(
+        _overtimeEmployerLabelKey(normalizedEmployer),
+        employer.trim(),
+      );
+    });
+  }
+
+  Future<void> clearOvertimeThreshold(String employer) {
+    final normalizedEmployer = _normalizeEmployer(employer);
+    if (normalizedEmployer.isEmpty) return Future<void>.value();
+    return database.transaction(() async {
+      await database.deletePreference(
+        _overtimeThresholdKey(normalizedEmployer),
+      );
+      await database.deletePreference(
+        _overtimeEmployerLabelKey(normalizedEmployer),
+      );
+    });
+  }
 
   Future<void> clearWeatherSnapshot() =>
       database.deletePreference('weather_snapshot');

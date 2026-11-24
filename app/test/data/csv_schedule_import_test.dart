@@ -5,6 +5,24 @@ import 'package:shift_study/domain/schedule.dart';
 void main() {
   const parser = CsvScheduleImportParser();
 
+  test('detects date-across-columns roster tables without event fields', () {
+    final detection = parser.detectRosterGrid(
+      'Employee,Nov 23 2026,Nov 24 2026,Nov 25 2026\n'
+      'Synthetic owner,AV,OFF,VC\n'
+      'Synthetic coworker,AV,A1,OFF\n',
+    );
+
+    expect(detection.candidates, hasLength(1));
+    final grid = detection.candidates.single;
+    expect(grid.columns.map((column) => column.dayNumber), [23, 24, 25]);
+    expect(grid.columns.every((column) => column.month == 11), isTrue);
+    expect(grid.columns.every((column) => column.year == 2026), isTrue);
+    expect(grid.rows.map((row) => row.label), [
+      'Synthetic owner',
+      'Synthetic coworker',
+    ]);
+  });
+
   test('groups coworker roster rows by date and code without duplicates', () {
     final preview = parser.parseCoworkerRoster(
       'date,code,coworkers\n'
@@ -20,14 +38,45 @@ void main() {
       'Synthetic Lee',
     ]);
     expect(preview.assignments.single.sourceRows, [2, 3]);
+    expect(preview.assignments.single.sameRosterCodeVerified, isFalse);
+    expect(preview.assignments.single.coworkers, [
+      'Synthetic Sam',
+      'Synthetic Lee',
+    ]);
+    expect(preview.notices, hasLength(1));
+  });
+
+  test(
+    'filters a coworker list by each person’s roster code when supplied',
+    () {
+      final preview = parser.parseCoworkerRoster(
+        'date,code,coworkers,coworker_codes\n'
+        '2026-11-24,A1,"Synthetic Sam;Synthetic Lee","A1;B1"\n',
+      );
+
+      expect(preview.assignments, hasLength(1));
+      expect(preview.assignments.single.coworkers, ['Synthetic Sam']);
+      expect(preview.assignments.single.sameRosterCodeVerified, isTrue);
+      expect(preview.notices.single, contains('1 coworker'));
+    },
+  );
+
+  test('rejects an ambiguous name-to-code coworker pairing', () {
+    final preview = parser.parseCoworkerRoster(
+      'date,code,coworkers,coworker_codes\n'
+      '2026-11-24,A1,"Synthetic Sam;Synthetic Lee",A1\n',
+    );
+
+    expect(preview.assignments, isEmpty);
+    expect(preview.notices.single, contains('same number of names and codes'));
   });
 
   test(
     'reads quoted CSV fields and keeps overnight work on the next day',
     () async {
       final preview = await parser.parse(
-        'date,title,category,start,end,time_zone,employer,department,job_role,code,code_meaning,coworkers,location,notes,reporting_instruction,supervisor_name,supervisor_phone,contact_name,contact_phone\r\n'
-        '2026-11-07,"Ramp, east",shift,21:00,05:00,America/Barbados,Synthetic Air,Synthetic ramp operations,Ramp agent,R1,"Synthetic ramp duty","Synthetic teammate A; Synthetic teammate B",Airport,"Use stand ""B""","Synthetic report at gate 2",Synthetic supervisor,+1 246 555 0100,Synthetic ops desk,+1 246 555 0101\r\n',
+        'date,title,category,start,end,time_zone,employer,department,job_role,code,code_meaning,coworkers,coworker_codes,location,notes,reporting_instruction,supervisor_name,supervisor_phone,contact_name,contact_phone\r\n'
+        '2026-11-07,"Ramp, east",shift,21:00,05:00,America/Barbados,Synthetic Air,Synthetic ramp operations,Ramp agent,R1,"Synthetic ramp duty","Synthetic teammate A; Synthetic teammate B",R1;R1,Airport,"Use stand ""B""","Synthetic report at gate 2",Synthetic supervisor,+1 246 555 0100,Synthetic ops desk,+1 246 555 0101\r\n',
         sourceName: 'roster.csv',
         importedAt: DateTime.utc(2026, 11, 6),
       );
@@ -101,6 +150,32 @@ void main() {
     expect(item.workCategory, WorkCategory.overtime);
     expect(item.intervals.single.startMinute, 18 * 60);
     expect(item.intervals.single.endMinute, 21 * 60 + 30);
+  });
+
+  test('event rows keep only coworkers whose paired code matches the shift', () async {
+    final preview = await parser.parse(
+      'date,title,category,start,end,time_zone,code,coworkers,coworker_codes\n'
+      '2026-11-25,Afternoon shift,shift,12:00,20:00,America/Barbados,AV,"Synthetic Same Code;Synthetic Other Code","AV;PM"\n',
+      sourceName: 'mixed-roster.csv',
+    );
+
+    expect(preview.proposals, hasLength(1));
+    expect(preview.proposals.single.item.coworkers, ['Synthetic Same Code']);
+    expect(preview.notices, hasLength(1));
+    expect(preview.notices.single.message, contains('1 coworker'));
+  });
+
+  test('event rows do not attach coworkers when their codes are unverified', () async {
+    final preview = await parser.parse(
+      'date,title,category,start,end,time_zone,code,coworkers\n'
+      '2026-11-25,Afternoon shift,shift,12:00,20:00,America/Barbados,AV,Synthetic Coworker\n',
+      sourceName: 'unverified-coworkers.csv',
+    );
+
+    expect(preview.proposals, hasLength(1));
+    expect(preview.proposals.single.item.coworkers, isEmpty);
+    expect(preview.notices, hasLength(1));
+    expect(preview.notices.single.message, contains('not attached'));
   });
 
   test('reports bad rows and clock-change ambiguity for review', () async {

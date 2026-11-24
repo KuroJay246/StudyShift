@@ -54,6 +54,46 @@ void main() {
     expect(find.text('Choose backup file'), findsOneWidget);
   });
 
+  testWidgets('backup passphrase dialog fits above an open keyboard', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
+    final container = ProviderContainer(
+      overrides: [
+        scheduleDatabaseProvider.overrideWith((ref) {
+          ref.onDispose(database.close);
+          return database;
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const BackupRestorePage(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Create backup'));
+    await tester.tap(find.text('Create backup'));
+    await tester.pumpAndSettle();
+    tester.view.viewInsets = const FakeViewPadding(bottom: 280);
+    addTearDown(() => tester.view.viewInsets = const FakeViewPadding());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Protect your backup'), findsOneWidget);
+    expect(find.text('Create encrypted file'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('invalid backup never changes saved events', (tester) async {
     final database = ScheduleDatabase.forTesting(NativeDatabase.memory());
     final container = ProviderContainer(
