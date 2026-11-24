@@ -26,13 +26,14 @@ class WorkOvertimeRepository {
         'Choose a scheduled shift occurrence before completing it.',
       );
     }
-    final adjustment = WorkOvertimeAdjustment(
-      shiftItemId: shift.id,
-      occurrenceDate: date,
-      minutes: overtimeMinutes ?? 0,
-      isCompleted: true,
-    );
     await database.transaction(() async {
+      final current = await getForOccurrence(shift.id, date);
+      final adjustment = WorkOvertimeAdjustment(
+        shiftItemId: shift.id,
+        occurrenceDate: date,
+        minutes: overtimeMinutes ?? current?.minutes ?? 0,
+        isCompleted: true,
+      );
       await ScheduleRepository(database).save(
         shift.copyWith(isCompleted: shift.recurrence == null),
       );

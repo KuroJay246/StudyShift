@@ -191,62 +191,14 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
     WidgetRef ref,
     ScheduleItem sourceItem,
     CivilDate occurrenceDate,
-    int currentOvertimeMinutes,
   ) async {
     final canRecordShiftOvertime =
         sourceItem.workCategory == WorkCategory.shift;
-    final overtime = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          canRecordShiftOvertime ? 'Shift wrap-up' : 'Finish this duty?',
-        ),
-        content: Text(
-          canRecordShiftOvertime
-              ? 'Did you work extra hours on this shift? Your scheduled times will stay unchanged.'
-              : 'Mark this duty as completed?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          if (canRecordShiftOvertime) ...[
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('No overtime'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Add overtime hours'),
-            ),
-          ] else
-            FilledButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Finish duty'),
-            ),
-        ],
-      ),
-    );
-    if (!context.mounted || overtime == null) return;
-    int? overtimeMinutes;
-    if (overtime) {
-      overtimeMinutes = await showDialog<int>(
-        context: context,
-        builder: (context) =>
-            _OvertimeHoursDialog(initialMinutes: currentOvertimeMinutes),
-      );
-      if (!context.mounted || overtimeMinutes == null) return;
-    }
     try {
       if (canRecordShiftOvertime) {
         await ref
             .read(workOvertimeRepositoryProvider)
-            .completeOccurrence(
-              sourceItem,
-              occurrenceDate,
-              overtimeMinutes: overtimeMinutes,
-            );
+            .completeOccurrence(sourceItem, occurrenceDate);
       } else {
         await ref
             .read(scheduleRepositoryProvider)
@@ -257,13 +209,7 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
       if (!context.mounted) return;
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            overtime
-                ? 'Shift completed with overtime hours saved'
-                : 'Shift completed',
-          ),
-        ),
+        const SnackBar(content: Text('Shift completed')),
       );
     } catch (error) {
       if (context.mounted) {
@@ -435,19 +381,19 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
     final sameEmployerShiftIds = sameEmployerShifts
         .map((entry) => entry.item.id)
         .toSet();
+    final hasLoggedDailyExtra = overtimeAdjustments.any(
+      (adjustment) =>
+          adjustment.occurrenceDate == detailDate &&
+          sameEmployerShiftIds.contains(adjustment.shiftItemId) &&
+          adjustment.minutes > 0,
+    );
     final dailyHoursSummary = overtimeThreshold == null
         ? null
         : WorkHoursSummary.fromMinutes(
             scheduledMinutes: sameEmployerShifts.fold<int>(0, (total, entry) {
-              final hasLoggedExtra = overtimeAdjustments.any(
-                (adjustment) =>
-                    adjustment.occurrenceDate == detailDate &&
-                    adjustment.shiftItemId == entry.item.id &&
-                    adjustment.minutes > 0,
-              );
               return total +
                   WorkHoursSummary.sumIntervalMinutes(
-                    hasLoggedExtra
+                    hasLoggedDailyExtra
                         ? entry.item.intervals
                         : entry.item.actualIntervals ?? entry.item.intervals,
                   );
@@ -669,7 +615,6 @@ class _ScheduleDetailsSheet extends ConsumerWidget {
                                 ref,
                                 detailItem,
                                 detailDate,
-                                overtimeMinutes,
                               )
                             : null,
                         icon: Icon(
